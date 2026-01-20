@@ -6,12 +6,12 @@ using BepInEx.Configuration;
 using BepInEx.Logging;
 using HarmonyLib;
 
-namespace Template
+namespace valheimCLI
 {
     [BepInPlugin(ModGUID, ModName, ModVersion)]
-    public class TemplatePlugin : BaseUnityPlugin
+    public class valheimCLIPlugin : BaseUnityPlugin
     {
-        private const string ModName = "Template";
+        private const string ModName = "valheimCLI";
         private const string ModVersion = "1.0.0";
         private const string Author = "modAuthorName";
         private const string ModGUID = Author + "." + ModName;
