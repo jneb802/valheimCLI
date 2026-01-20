@@ -33,3 +33,4 @@ logoutput.log
 *.temp
 
 # CLAUDE.md  # Uncomment to ignore Claude Code context file
+.claude/
