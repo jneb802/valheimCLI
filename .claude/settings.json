@@ -1,0 +1,10 @@
+{
+  "hooks": {
+    "postToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "command": "cd /Users/benjmarston/Develop/valheimCLI && dotnet build -v q && cp bin/Debug/valheimCLI.dll \"$HOME/Library/Application Support/Steam/steamapps/common/Valheim/BepInEx/plugins/\" 2>/dev/null && echo '✓ Mod built and deployed' || echo '✗ Build failed'"
+      }
+    ]
+  }
+}

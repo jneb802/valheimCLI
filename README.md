@@ -1,28 +1,39 @@
-# Valheim macOS Mod Template
+# Valheim CLI
 
-A minimal template for creating Valheim mods with BepInEx on macOS.
+Run Valheim console commands from your terminal.
 
-## Prerequisites
-
-- macOS with Valheim installed via Steam
-- .NET SDK 8.0+ (`brew install dotnet`)
-- [BepInEx for macOS](https://github.com/BepInEx/BepInEx/releases) installed in Valheim
-- Publicized assemblies in `Managed/publicized_assemblies/`
-
-## Quick Start
+## Setup
 
 ```bash
-cd Template
-./rename-mod.sh YourModName YourAuthorName
+# Build
 dotnet build
+cd CLI && dotnet build
+
+# Install mod
+cp bin/Debug/valheimCLI.dll ~/Library/Application\ Support/Steam/steamapps/common/Valheim/BepInEx/plugins/
 ```
 
-The built DLL will be in `bin/Debug/`. Copy it to `Valheim/BepInEx/plugins/`.
+## Usage
 
-## Configuration
+```bash
+# Interactive
+./CLI/bin/Debug/net9.0/valheim-cli
+valheim> help
+valheim> tod 0.5
+valheim> spawn Boar 5
 
-Edit `Environment.props` if your Steam library is in a non-standard location. By default it uses `$HOME/Library/Application Support/Steam/steamapps/common/Valheim`.
+# Single command
+./CLI/bin/Debug/net9.0/valheim-cli tod 0.5
+```
 
-## License
+## Config
 
-MIT
+`BepInEx/config/valheimCLI.valheimCLI.cfg`:
+- `Server.Port` - default 5555
+- `Server.Enabled` - toggle on/off
+
+## Requirements
+
+- .NET SDK 8.0+
+- BepInEx installed in Valheim
+- Publicized assemblies in `Managed/publicized_assemblies/`

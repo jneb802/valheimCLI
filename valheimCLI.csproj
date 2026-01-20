@@ -28,4 +28,9 @@
     <DefineConstants>TRACE</DefineConstants>
   </PropertyGroup>
 
+  <ItemGroup>
+    <Compile Remove="CLI\**" />
+    <None Remove="CLI\**" />
+  </ItemGroup>
+
 </Project>

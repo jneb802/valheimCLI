@@ -32,4 +32,4 @@ logoutput.log
 *.tmp
 *.temp
 
-CLAUDE.md
+# CLAUDE.md  # Uncomment to ignore Claude Code context file
