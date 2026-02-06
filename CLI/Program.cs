@@ -1,18 +1,18 @@
-using System.Net.Sockets;
-using System.Text;
+using valheim_cli.Testing;
 
 namespace valheim_cli;
 
-// UTF8 without BOM to avoid encoding issues
-static class Enc
-{
-    public static readonly Encoding UTF8NoBOM = new UTF8Encoding(false);
-}
-
 class Program
 {
-    private static int _port = 5555;
-    private static string _host = "127.0.0.1";
+    private static int _port = ConnectionDefaults.Port;
+    private static string _host = ConnectionDefaults.Host;
+    private static bool _verbose = false;
+    private static string? _testFile = null;
+    private static bool _launch = false;
+    private static bool _stopAfter = false;
+    private static bool _status = false;
+    private static string? _gamePath = null;
+    private static Dictionary<string, string> _variables = new();
 
     static int Main(string[] args)
     {
@@ -22,30 +22,169 @@ class Program
             return 0;
         }
 
-        // Parse port from args
-        for (int i = 0; i < args.Length - 1; i++)
+        // Parse arguments
+        for (int i = 0; i < args.Length; i++)
         {
-            if (args[i] == "-p" || args[i] == "--port")
+            if ((args[i] == "-p" || args[i] == "--port") && i + 1 < args.Length)
             {
-                if (int.TryParse(args[i + 1], out var port))
+                if (int.TryParse(args[i + 1], out int port))
                 {
                     _port = port;
                 }
+                i++; // Skip next arg
+            }
+            else if ((args[i] == "-t" || args[i] == "--test") && i + 1 < args.Length)
+            {
+                _testFile = args[i + 1];
+                i++; // Skip next arg
+            }
+            else if (args[i] == "-v" || args[i] == "--verbose")
+            {
+                _verbose = true;
+            }
+            else if (args[i] == "--launch" || args[i] == "-l")
+            {
+                _launch = true;
+            }
+            else if (args[i] == "--stop-after")
+            {
+                _stopAfter = true;
+            }
+            else if (args[i] == "--status")
+            {
+                _status = true;
+            }
+            else if (args[i] == "--game-path" && i + 1 < args.Length)
+            {
+                _gamePath = args[i + 1];
+                i++; // Skip next arg
+            }
+            else if (args[i] == "--var" && i + 1 < args.Length)
+            {
+                string varArg = args[i + 1];
+                int eqIndex = varArg.IndexOf('=');
+                if (eqIndex > 0)
+                {
+                    string key = varArg.Substring(0, eqIndex);
+                    string value = varArg.Substring(eqIndex + 1);
+                    _variables[key] = value;
+                }
+                i++; // Skip next arg
             }
         }
 
-        // Check if command was provided as argument
-        var commandArgs = args.Where(a => !a.StartsWith("-") && a != args.FirstOrDefault(x => x == "-p" || x == "--port")?.Let(x => args[Array.IndexOf(args, x) + 1])).ToList();
+        // Status mode - check game status
+        if (_status)
+        {
+            return ShowStatus();
+        }
+
+        // Test mode
+        if (_testFile != null)
+        {
+            return RunTestMode(_testFile).GetAwaiter().GetResult();
+        }
+
+        // Check if command was provided as argument (exclude flags and their values)
+        List<string> commandArgs = new();
+        for (int i = 0; i < args.Length; i++)
+        {
+            // Flags with values
+            if (args[i] == "-p" || args[i] == "--port" || args[i] == "-t" || args[i] == "--test" || args[i] == "--game-path" || args[i] == "--var")
+            {
+                i++; // Skip the value too
+                continue;
+            }
+            // Boolean flags
+            if (args[i] == "-v" || args[i] == "--verbose" || args[i] == "--launch" || args[i] == "-l" ||
+                args[i] == "--stop-after" || args[i] == "--status")
+            {
+                continue;
+            }
+            if (!args[i].StartsWith("-"))
+            {
+                commandArgs.Add(args[i]);
+            }
+        }
 
         if (commandArgs.Count > 0)
         {
             // Single command mode
-            var command = string.Join(" ", commandArgs);
+            string command = string.Join(" ", commandArgs);
             return ExecuteSingleCommand(command);
         }
 
         // Interactive mode
         return InteractiveMode();
+    }
+
+    static int ShowStatus()
+    {
+        GameLauncher launcher = new GameLauncher(_gamePath, _host, _port);
+        GameStatus status = launcher.GetStatus();
+
+        Console.WriteLine("Valheim CLI Status");
+        Console.WriteLine("==================");
+        Console.WriteLine($"Game Path:   {status.GamePath}");
+        Console.WriteLine($"Game:        {(status.IsRunning ? "Running" : "Not running")}");
+        Console.WriteLine($"Server:      {status.Host}:{status.Port}");
+        Console.WriteLine($"Connection:  {(status.IsConnected ? "Connected" : "Not connected")}");
+
+        return status.IsConnected ? 0 : 1;
+    }
+
+    static async Task<int> RunTestMode(string testFile)
+    {
+        // Support glob patterns
+        List<string> testFiles = new();
+
+        if (testFile.Contains('*'))
+        {
+            string directory = Path.GetDirectoryName(testFile) ?? ".";
+            string pattern = Path.GetFileName(testFile);
+            testFiles.AddRange(Directory.GetFiles(directory, pattern));
+        }
+        else if (File.Exists(testFile))
+        {
+            testFiles.Add(testFile);
+        }
+        else
+        {
+            Console.Error.WriteLine($"Test file not found: {testFile}");
+            return 1;
+        }
+
+        if (testFiles.Count == 0)
+        {
+            Console.Error.WriteLine($"No test files found matching: {testFile}");
+            return 1;
+        }
+
+        Console.WriteLine("Valheim CLI Test Runner");
+        Console.WriteLine("=======================");
+
+        // Create game launcher
+        GameLauncher launcher = new GameLauncher(_gamePath, _host, _port);
+
+        // Create runner with options (CLI flags will override YAML settings)
+        TestRunnerOptions options = new TestRunnerOptions
+        {
+            Verbose = _verbose,
+            Launch = _launch ? true : null,      // Only set if flag was provided
+            StopAfter = _stopAfter ? true : null, // Only set if flag was provided
+            Variables = _variables
+        };
+
+        TestRunner runner = new TestRunner(launcher, options, _host, _port);
+
+        int totalFailed = 0;
+        foreach (string file in testFiles)
+        {
+            TestPlanResult result = await runner.RunTestFileAsync(file);
+            totalFailed += result.Failed + result.Errors;
+        }
+
+        return totalFailed > 0 ? 1 : 0;
     }
 
     static void PrintHelp()
@@ -56,30 +195,59 @@ class Program
         Console.WriteLine("  valheim-cli [options] [command]");
         Console.WriteLine();
         Console.WriteLine("Options:");
-        Console.WriteLine("  -p, --port <port>  Port to connect to (default: 5555)");
-        Console.WriteLine("  --help             Show this help");
+        Console.WriteLine("  -p, --port <port>     Port to connect to (default: 5555)");
+        Console.WriteLine("  -t, --test <file>     Run a YAML test file");
+        Console.WriteLine("  -v, --verbose         Verbose output (for test mode)");
+        Console.WriteLine("  -l, --launch          Launch Valheim before running tests");
+        Console.WriteLine("  --stop-after          Stop game after tests (only if all pass)");
+        Console.WriteLine("  --status              Check game and connection status");
+        Console.WriteLine("  --game-path <path>    Path to Valheim installation");
+        Console.WriteLine("  --var <key=value>     Set a test variable (can be used multiple times)");
+        Console.WriteLine("  --help                Show this help");
         Console.WriteLine();
         Console.WriteLine("Examples:");
-        Console.WriteLine("  valheim-cli                    Interactive mode");
-        Console.WriteLine("  valheim-cli help               Run 'help' command");
-        Console.WriteLine("  valheim-cli spawn Boar 5       Run 'spawn Boar 5' command");
-        Console.WriteLine("  valheim-cli -p 5556 pos        Connect to port 5556, run 'pos'");
+        Console.WriteLine("  valheim-cli                              Interactive mode");
+        Console.WriteLine("  valheim-cli help                         Run 'help' command");
+        Console.WriteLine("  valheim-cli spawn Boar 5                 Run 'spawn Boar 5' command");
+        Console.WriteLine("  valheim-cli -p 5556 pos                  Connect to port 5556, run 'pos'");
+        Console.WriteLine("  valheim-cli --test tests/spawn.yaml      Run test file");
+        Console.WriteLine("  valheim-cli -t tests/*.yaml -v           Run all tests verbosely");
+        Console.WriteLine("  valheim-cli --status                     Check if game is running");
+        Console.WriteLine("  valheim-cli -t tests/spawn.yaml --launch Launch game, then run tests");
+        Console.WriteLine("  valheim-cli -t tests/road.yaml --var n=1 Pass variable to test");
+        Console.WriteLine("  valheim-cli -t tests/spawn.yaml --launch --stop-after");
+        Console.WriteLine("                                           Launch, test, stop if passed");
         Console.WriteLine();
         Console.WriteLine("Interactive commands:");
         Console.WriteLine("  exit, quit         Exit the CLI");
         Console.WriteLine("  commands           List all available Valheim commands");
         Console.WriteLine("  help               Show Valheim console help");
+        Console.WriteLine();
+        Console.WriteLine("Test File Format (YAML):");
+        Console.WriteLine("  See documentation for full test file schema including");
+        Console.WriteLine("  game: section (launch, launchTimeout, stopAfter),");
+        Console.WriteLine("  waitFor conditions, expect assertions, and variables.");
+        Console.WriteLine();
+        Console.WriteLine("Game Path Detection (priority order):");
+        Console.WriteLine("  1. --game-path argument");
+        Console.WriteLine("  2. VALHEIM_PATH environment variable");
+        Console.WriteLine("  3. Default: ~/Library/Application Support/Steam/steamapps/common/Valheim/");
     }
 
     static int ExecuteSingleCommand(string command)
     {
         try
         {
-            using var client = Connect();
-            if (client == null) return 1;
+            using ValheimClient client = new ValheimClient(_host, _port);
+            if (!client.Connect())
+            {
+                Console.Error.WriteLine($"Cannot connect to Valheim at {_host}:{_port}");
+                Console.Error.WriteLine("Make sure Valheim is running with the valheimCLI mod loaded.");
+                return 1;
+            }
 
-            var response = SendCommand(client, command);
-            foreach (var line in response)
+            List<string> response = client.SendCommand(command);
+            foreach (string line in response)
             {
                 Console.WriteLine(line);
             }
@@ -98,12 +266,12 @@ class Program
         Console.WriteLine("Type 'exit' to quit, 'commands' to list available commands");
         Console.WriteLine();
 
-        TcpClient? client = null;
+        ValheimClient? client = null;
 
         while (true)
         {
             Console.Write("valheim> ");
-            var input = Console.ReadLine();
+            string? input = Console.ReadLine();
 
             if (string.IsNullOrWhiteSpace(input))
                 continue;
@@ -119,7 +287,7 @@ class Program
 
             if (input.Equals("reconnect", StringComparison.OrdinalIgnoreCase))
             {
-                client?.Close();
+                client?.Dispose();
                 client = null;
                 Console.WriteLine("Reconnecting...");
                 continue;
@@ -128,36 +296,34 @@ class Program
             try
             {
                 // Connect if not connected
-                if (client == null || !client.Connected)
+                if (client == null || !client.IsConnected)
                 {
-                    client?.Close();
-                    client = Connect();
-                    if (client == null)
+                    client?.Dispose();
+                    client = new ValheimClient(_host, _port);
+                    if (!client.Connect())
                     {
                         Console.WriteLine("Failed to connect. Is Valheim running with the mod?");
+                        client.Dispose();
+                        client = null;
                         continue;
                     }
                 }
 
                 if (input.Equals("commands", StringComparison.OrdinalIgnoreCase))
                 {
-                    var commands = ListCommands(client);
+                    List<CommandInfo> commands = client.ListCommands();
                     Console.WriteLine($"\nAvailable commands ({commands.Count}):\n");
-                    foreach (var cmd in commands.OrderBy(c => c.Name))
+                    foreach (CommandInfo cmd in commands.OrderBy(c => c.Name))
                     {
-                        var cheatMarker = cmd.IsCheat ? " [CHEAT]" : "";
+                        string cheatMarker = cmd.IsCheat ? " [CHEAT]" : "";
                         Console.WriteLine($"  {cmd.Name,-20} {cmd.Description}{cheatMarker}");
                     }
                     Console.WriteLine();
                 }
                 else
                 {
-                    // Debug: show exactly what we're sending
-                    Console.WriteLine($"[DEBUG] Sending command: '{input}' (length: {input.Length})");
-                    Console.WriteLine($"[DEBUG] Bytes: {string.Join(" ", System.Text.Encoding.UTF8.GetBytes(input).Select(b => b.ToString("X2")))}");
-
-                    var response = SendCommand(client, input);
-                    foreach (var line in response)
+                    List<string> response = client.SendCommand(input);
+                    foreach (string line in response)
                     {
                         Console.WriteLine(line);
                     }
@@ -166,127 +332,13 @@ class Program
             catch (Exception ex)
             {
                 Console.WriteLine($"Error: {ex.Message}");
-                client?.Close();
+                client?.Dispose();
                 client = null;
             }
         }
 
-        client?.Close();
+        client?.Dispose();
         return 0;
     }
 
-    static TcpClient? Connect()
-    {
-        try
-        {
-            var client = new TcpClient();
-            client.Connect(_host, _port);
-
-            var stream = client.GetStream();
-            var reader = new StreamReader(stream, Enc.UTF8NoBOM);
-
-            // Wait for ready message
-            var ready = reader.ReadLine();
-            if (ready != "VALHEIM_CLI_READY")
-            {
-                Console.Error.WriteLine($"Unexpected handshake: {ready}");
-                client.Close();
-                return null;
-            }
-
-            return client;
-        }
-        catch (SocketException)
-        {
-            Console.Error.WriteLine($"Cannot connect to Valheim at {_host}:{_port}");
-            Console.Error.WriteLine("Make sure Valheim is running with the valheimCLI mod loaded.");
-            return null;
-        }
-    }
-
-    static List<string> SendCommand(TcpClient client, string command)
-    {
-        var stream = client.GetStream();
-        var writer = new StreamWriter(stream, Enc.UTF8NoBOM) { AutoFlush = true };
-        var reader = new StreamReader(stream, Enc.UTF8NoBOM);
-
-        writer.WriteLine($"CMD:{command}");
-
-        var result = new List<string>();
-        var header = reader.ReadLine();
-
-        if (header != null && header.StartsWith("OUTPUT:"))
-        {
-            if (int.TryParse(header.Substring(7), out var count))
-            {
-                for (int i = 0; i < count; i++)
-                {
-                    var line = reader.ReadLine();
-                    if (line != null)
-                        result.Add(line);
-                }
-            }
-
-            // Read END_OUTPUT marker
-            reader.ReadLine();
-        }
-
-        return result;
-    }
-
-    static List<CommandInfo> ListCommands(TcpClient client)
-    {
-        var stream = client.GetStream();
-        var writer = new StreamWriter(stream, Enc.UTF8NoBOM) { AutoFlush = true };
-        var reader = new StreamReader(stream, Enc.UTF8NoBOM);
-
-        writer.WriteLine("LIST_COMMANDS");
-
-        var result = new List<CommandInfo>();
-        var header = reader.ReadLine();
-
-        if (header != null && header.StartsWith("COMMANDS:"))
-        {
-            if (int.TryParse(header.Substring(9), out var count))
-            {
-                for (int i = 0; i < count; i++)
-                {
-                    var line = reader.ReadLine();
-                    if (line != null)
-                    {
-                        var parts = line.Split('|');
-                        if (parts.Length >= 2)
-                        {
-                            result.Add(new CommandInfo
-                            {
-                                Name = parts[0],
-                                Description = parts[1],
-                                IsCheat = parts.Length > 2 && parts[2] == "cheat"
-                            });
-                        }
-                    }
-                }
-            }
-
-            // Read END_COMMANDS marker
-            reader.ReadLine();
-        }
-
-        return result;
-    }
-
-    record CommandInfo
-    {
-        public string Name { get; init; } = "";
-        public string Description { get; init; } = "";
-        public bool IsCheat { get; init; }
-    }
-}
-
-static class Extensions
-{
-    public static TResult? Let<T, TResult>(this T? value, Func<T, TResult> func) where T : class
-    {
-        return value != null ? func(value) : default;
-    }
 }

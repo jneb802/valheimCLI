@@ -59,3 +59,7 @@ CLI (valheim-cli)  <--TCP:5555-->  Mod (valheimCLI.dll)  -->  Console.TryRunComm
 Config file: `BepInEx/config/valheimCLI.valheimCLI.cfg`
 - `Server.Enabled` - Enable/disable the TCP server
 - `Server.Port` - Port number (default: 5555)
+
+## Code Style
+
+- Never use `var` - always write explicit types

@@ -1,0 +1,89 @@
+# Road Generation Test
+# Tests world creation, road pin generation, and world restart
+#
+# Usage:
+#   valheim-cli --test tests/road-generation.yaml --launch --var n=1
+#   valheim-cli --test tests/road-generation.yaml --var n=2
+#   (increment n for each new test run)
+
+name: Road Generation Test
+description: Create world, generate road pins, exit and restart
+
+game:
+  launch: false           # Use --launch flag to control
+  launchTimeout: 120s
+  stopAfter: false
+
+settings:
+  timeout: 60s
+  stopOnFailure: false
+
+variables:
+  n: "1"                  # Override with --var n=2, n=3, etc.
+  world_name: "persist"   # Base name for worlds
+
+tests:
+  - name: Wait for Main Menu Ready
+    description: Wait for game to fully initialize and reach main menu
+    waitFor:
+      state: MainMenu
+      timeout: 120s
+      message: Waiting for game to initialize and reach main menu...
+
+  - name: Create New World
+    description: Create world persist${n}
+    commands:
+      - world_create ${world_name}${n}
+    wait: 2s
+
+  - name: Start World
+    description: Load into the newly created world
+    commands:
+      - world_start ${world_name}${n}
+    wait: 2s
+
+  - name: Wait for World Load
+    description: Wait for player to spawn in the new world
+    waitFor:
+      state: InWorld
+      timeout: 180s
+      message: Waiting for world to generate and player to spawn...
+
+  - name: Generate Road Pins
+    description: Place map pins at road start points
+    commands:
+      - road_pins
+    wait: 2s
+
+  - name: Exit World
+    description: Return to main menu
+    commands:
+      - world_exit
+    wait: 2s
+
+  - name: Wait for Main Menu
+    description: Wait until back at main menu
+    waitFor:
+      state: MainMenu
+      timeout: 30s
+      message: Waiting for main menu...
+
+  - name: Restart World
+    description: Load the same world again
+    commands:
+      - world_start ${world_name}${n}
+    wait: 2s
+
+  - name: Wait for World Reload
+    description: Wait for player to be back in world
+    waitFor:
+      state: InWorld
+      timeout: 180s
+      message: Waiting for world to load...
+
+  - name: Verify World Loaded
+    description: Check player position to confirm world is loaded
+    commands:
+      - pos
+    expect:
+      output: matches "\\d+.*\\d+.*\\d+"

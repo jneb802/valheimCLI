@@ -1,0 +1,77 @@
+# Example Test Plan: Creature Spawning
+# Run with: valheim-cli --test tests/example-spawn.yaml
+# Or with auto-launch: valheim-cli --test tests/example-spawn.yaml --launch
+
+name: Creature Spawning Tests
+description: Tests basic creature spawning functionality
+
+# Game launch settings (optional)
+# These can be overridden with CLI flags: --launch, --stop-after
+# game:
+#   launch: false          # Set true to auto-launch Valheim
+#   launchTimeout: 120s    # Wait up to 2 min for game ready
+#   stopAfter: false       # Keep game running after tests
+
+settings:
+  timeout: 30s
+  stopOnFailure: true
+  logLevel: verbose
+
+variables:
+  creature: Boar
+  count: "3"
+
+tests:
+  - name: Wait for World Load
+    description: Ensure player is in world before testing
+    waitFor:
+      state: InWorld
+      timeout: 120s
+      message: Please load into a world to begin testing
+
+  - name: Enable Dev Commands
+    commands:
+      - devcommands
+    wait: 500ms
+
+  - name: Enable God Mode
+    description: Prevent death during testing
+    commands:
+      - god
+    wait: 500ms
+
+  - name: Spawn Single Creature
+    commands:
+      - spawn ${creature} 1
+    expect:
+      output: contains "Spawned"
+    wait: 1s
+
+  - name: Spawn Multiple Creatures
+    commands:
+      - spawn ${creature} ${count}
+    expect:
+      output: contains "Spawned"
+    wait: 1s
+
+  - name: Spawn Neck
+    commands:
+      - spawn Neck 2
+    expect:
+      output: contains "Spawned"
+    wait: 1s
+
+  - name: Check Player Position
+    commands:
+      - pos
+    expect:
+      output: matches "\\d+.*\\d+.*\\d+"
+
+  - name: Cleanup Spawned Creatures
+    commands:
+      - killall
+    wait: 2s
+
+cleanup:
+  - killall
+  - god

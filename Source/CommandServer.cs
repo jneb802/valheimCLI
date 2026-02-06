@@ -23,10 +23,52 @@ namespace valheimCLI
         private readonly List<TcpClient> _clients = new();
         private readonly object _clientsLock = new();
 
+        // State tracking
+        private GameStateTracker? _stateTracker;
+        private readonly List<StreamWriter> _stateSubscribers = new();
+        private readonly object _subscribersLock = new();
+
         public CommandServer(ManualLogSource logger, int port = 5555)
         {
             _logger = logger;
             _port = port;
+        }
+
+        public void SetStateTracker(GameStateTracker tracker)
+        {
+            _stateTracker = tracker;
+            _stateTracker.OnStateChanged += OnGameStateChanged;
+        }
+
+        private void OnGameStateChanged(GameState previousState, GameState newState)
+        {
+            string stateMessage = $"STATE_CHANGED:{GameStateTracker.StateToString(newState)}";
+            BroadcastToSubscribers(stateMessage);
+        }
+
+        private void BroadcastToSubscribers(string message)
+        {
+            lock (_subscribersLock)
+            {
+                List<StreamWriter> deadSubscribers = new();
+
+                foreach (StreamWriter writer in _stateSubscribers)
+                {
+                    try
+                    {
+                        writer.WriteLine(message);
+                    }
+                    catch
+                    {
+                        deadSubscribers.Add(writer);
+                    }
+                }
+
+                foreach (StreamWriter dead in deadSubscribers)
+                {
+                    _stateSubscribers.Remove(dead);
+                }
+            }
         }
 
         public void Start()
@@ -108,11 +150,13 @@ namespace valheimCLI
 
         private void HandleClient(TcpClient client)
         {
+            StreamWriter? subscribedWriter = null;
+
             try
             {
-                using var stream = client.GetStream();
-                using var reader = new StreamReader(stream, new UTF8Encoding(false));
-                using var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
+                using NetworkStream stream = client.GetStream();
+                using StreamReader reader = new StreamReader(stream, new UTF8Encoding(false));
+                using StreamWriter writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
 
                 writer.WriteLine("VALHEIM_CLI_READY");
 
@@ -135,6 +179,42 @@ namespace valheimCLI
                         if (line == "PING")
                         {
                             writer.WriteLine("PONG");
+                            continue;
+                        }
+
+                        if (line == "STATE")
+                        {
+                            string currentState = _stateTracker != null
+                                ? GameStateTracker.StateToString(_stateTracker.CurrentState)
+                                : "Unknown";
+                            writer.WriteLine($"STATE:{currentState}");
+                            continue;
+                        }
+
+                        if (line == "SUBSCRIBE_STATE")
+                        {
+                            lock (_subscribersLock)
+                            {
+                                if (!_stateSubscribers.Contains(writer))
+                                {
+                                    _stateSubscribers.Add(writer);
+                                    subscribedWriter = writer;
+                                    _logger.LogInfo("Client subscribed to state changes");
+                                }
+                            }
+                            writer.WriteLine("SUBSCRIBED");
+                            continue;
+                        }
+
+                        if (line == "UNSUBSCRIBE_STATE")
+                        {
+                            lock (_subscribersLock)
+                            {
+                                _stateSubscribers.Remove(writer);
+                                subscribedWriter = null;
+                                _logger.LogInfo("Client unsubscribed from state changes");
+                            }
+                            writer.WriteLine("UNSUBSCRIBED");
                             continue;
                         }
 
@@ -191,6 +271,15 @@ namespace valheimCLI
             }
             finally
             {
+                // Remove from state subscribers if present
+                if (subscribedWriter != null)
+                {
+                    lock (_subscribersLock)
+                    {
+                        _stateSubscribers.Remove(subscribedWriter);
+                    }
+                }
+
                 lock (_clientsLock)
                 {
                     _clients.Remove(client);

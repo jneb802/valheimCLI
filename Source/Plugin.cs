@@ -23,6 +23,7 @@ namespace valheimCLI
         public static readonly ManualLogSource Log = BepInEx.Logging.Logger.CreateLogSource(ModName);
 
         private CommandServer? _commandServer;
+        private GameStateTracker? _stateTracker;
         private ConfigEntry<int>? _portConfig;
         private ConfigEntry<bool>? _enabledConfig;
 
@@ -37,9 +38,13 @@ namespace valheimCLI
             Assembly assembly = Assembly.GetExecutingAssembly();
             HarmonyInstance.PatchAll(assembly);
 
+            // Initialize state tracker
+            _stateTracker = new GameStateTracker(Log);
+
             if (_enabledConfig.Value)
             {
                 _commandServer = new CommandServer(Log, _portConfig.Value);
+                _commandServer.SetStateTracker(_stateTracker);
                 _commandServer.Start();
             }
 
@@ -49,6 +54,7 @@ namespace valheimCLI
 
         public void Update()
         {
+            _stateTracker?.Update();
             ProcessPendingCommands();
         }
 
