@@ -12,6 +12,8 @@ class Program
     private static bool _stopAfter = false;
     private static bool _status = false;
     private static string? _gamePath = null;
+    private static string? _connect = null;
+    private static string? _password = null;
     private static Dictionary<string, string> _variables = new();
 
     static int Main(string[] args)
@@ -59,6 +61,16 @@ class Program
                 _gamePath = args[i + 1];
                 i++; // Skip next arg
             }
+            else if (args[i] == "--connect" && i + 1 < args.Length)
+            {
+                _connect = args[i + 1];
+                i++;
+            }
+            else if (args[i] == "--password" && i + 1 < args.Length)
+            {
+                _password = args[i + 1];
+                i++;
+            }
             else if (args[i] == "--var" && i + 1 < args.Length)
             {
                 string varArg = args[i + 1];
@@ -90,7 +102,7 @@ class Program
         for (int i = 0; i < args.Length; i++)
         {
             // Flags with values
-            if (args[i] == "-p" || args[i] == "--port" || args[i] == "-t" || args[i] == "--test" || args[i] == "--game-path" || args[i] == "--var")
+            if (args[i] == "-p" || args[i] == "--port" || args[i] == "-t" || args[i] == "--test" || args[i] == "--game-path" || args[i] == "--var" || args[i] == "--connect" || args[i] == "--password")
             {
                 i++; // Skip the value too
                 continue;
@@ -114,13 +126,18 @@ class Program
             return ExecuteSingleCommand(command);
         }
 
+        if (_launch)
+        {
+            return RunLaunchMode().GetAwaiter().GetResult();
+        }
+
         // Interactive mode
         return InteractiveMode();
     }
 
     static int ShowStatus()
     {
-        GameLauncher launcher = new GameLauncher(_gamePath, _host, _port);
+        GameLauncher launcher = new GameLauncher(_gamePath, _host, _port, _connect, _password);
         GameStatus status = launcher.GetStatus();
 
         Console.WriteLine("Valheim CLI Status");
@@ -164,7 +181,7 @@ class Program
         Console.WriteLine("=======================");
 
         // Create game launcher
-        GameLauncher launcher = new GameLauncher(_gamePath, _host, _port);
+        GameLauncher launcher = new GameLauncher(_gamePath, _host, _port, _connect, _password);
 
         // Create runner with options (CLI flags will override YAML settings)
         TestRunnerOptions options = new TestRunnerOptions
@@ -187,6 +204,55 @@ class Program
         return totalFailed > 0 ? 1 : 0;
     }
 
+    static async Task<int> RunLaunchMode()
+    {
+        GameLauncher launcher = new GameLauncher(_gamePath, _host, _port, _connect, _password);
+
+        if (!launcher.IsGameRunning())
+        {
+            Console.WriteLine($"Launching Valheim from: {launcher.GamePath}");
+            if (!launcher.LaunchGame())
+            {
+                return 1;
+            }
+        }
+
+        Console.WriteLine("Waiting for Valheim CLI server...");
+        if (!await launcher.WaitForReadyAsync(TimeSpan.FromMinutes(3)))
+        {
+            Console.Error.WriteLine("Valheim CLI server did not become ready within 180 seconds.");
+            return 1;
+        }
+
+        if (launcher.HasServerConnect)
+        {
+            if (!launcher.QueueServerConnect(out List<string> output))
+            {
+                foreach (string line in output)
+                {
+                    Console.Error.WriteLine(line);
+                }
+                return 1;
+            }
+
+            foreach (string line in output)
+            {
+                Console.WriteLine(line);
+            }
+
+            using ValheimClient client = new ValheimClient(_host, _port);
+            if (client.Connect())
+            {
+                Console.WriteLine("Waiting for InWorld...");
+                bool inWorld = await client.WaitForStateAsync("InWorld", TimeSpan.FromMinutes(3));
+                Console.WriteLine(inWorld ? "Connected and in world." : "Server join was queued, but InWorld was not reached within 180 seconds.");
+                return inWorld ? 0 : 1;
+            }
+        }
+
+        return 0;
+    }
+
     static void PrintHelp()
     {
         Console.WriteLine("Valheim CLI - Remote console for Valheim");
@@ -202,6 +268,8 @@ class Program
         Console.WriteLine("  --stop-after          Stop game after tests (only if all pass)");
         Console.WriteLine("  --status              Check game and connection status");
         Console.WriteLine("  --game-path <path>    Path to Valheim installation");
+        Console.WriteLine("  --connect <addr>      Auto-connect to server on launch (e.g. 178.156.172.16:2457)");
+        Console.WriteLine("  --password <pass>     Server password for auto-connect");
         Console.WriteLine("  --var <key=value>     Set a test variable (can be used multiple times)");
         Console.WriteLine("  --help                Show this help");
         Console.WriteLine();
@@ -217,6 +285,8 @@ class Program
         Console.WriteLine("  valheim-cli -t tests/road.yaml --var n=1 Pass variable to test");
         Console.WriteLine("  valheim-cli -t tests/spawn.yaml --launch --stop-after");
         Console.WriteLine("                                           Launch, test, stop if passed");
+        Console.WriteLine("  valheim-cli --launch --connect 178.156.172.16:2457 --password mypass");
+        Console.WriteLine("                                           Launch and auto-join server");
         Console.WriteLine();
         Console.WriteLine("Interactive commands:");
         Console.WriteLine("  exit, quit         Exit the CLI");

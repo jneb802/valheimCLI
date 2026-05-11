@@ -7,16 +7,21 @@ public class GameLauncher
     private readonly string _gamePath;
     private readonly string _host;
     private readonly int _port;
+    private readonly string? _connect;
+    private readonly string? _password;
     private Process? _gameProcess;
 
-    public GameLauncher(string? gamePath = null, string host = ConnectionDefaults.Host, int port = ConnectionDefaults.Port)
+    public GameLauncher(string? gamePath = null, string host = ConnectionDefaults.Host, int port = ConnectionDefaults.Port, string? connect = null, string? password = null)
     {
         _gamePath = ResolveGamePath(gamePath);
         _host = host;
         _port = port;
+        _connect = connect;
+        _password = password;
     }
 
     public string GamePath => _gamePath;
+    public bool HasServerConnect => !string.IsNullOrWhiteSpace(_connect);
 
     /// <summary>
     /// Resolves game path with priority: explicit path > VALHEIM_PATH env > default
@@ -118,6 +123,36 @@ public class GameLauncher
             Console.Error.WriteLine($"Failed to launch game: {ex.Message}");
             return false;
         }
+    }
+
+    public bool QueueServerConnect(out List<string> output)
+    {
+        output = new List<string>();
+        if (!HasServerConnect)
+        {
+            return true;
+        }
+
+        using ValheimClient client = new ValheimClient(_host, _port);
+        if (!client.Connect())
+        {
+            output.Add($"ERROR: Cannot connect to Valheim CLI server at {_host}:{_port}");
+            return false;
+        }
+
+        output = client.SendCommand(BuildConnectCommand());
+        return output.Any(line => line.StartsWith("OK:", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private string BuildConnectCommand()
+    {
+        string command = $"cli_connect {_connect}";
+        if (!string.IsNullOrWhiteSpace(_password))
+        {
+            command += $" {_password}";
+        }
+
+        return command;
     }
 
     /// <summary>

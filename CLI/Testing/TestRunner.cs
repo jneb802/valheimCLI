@@ -161,7 +161,7 @@ public class TestRunner
         if (_launcher.TryConnect())
         {
             Log("Game already running and connected, skipping launch", ConsoleColor.Yellow);
-            return true;
+            return QueueServerConnectIfRequested();
         }
 
         // Check if game is running but not connected yet
@@ -172,7 +172,7 @@ public class TestRunner
             if (ready)
             {
                 Log("Server ready", ConsoleColor.Green);
-                return true;
+                return QueueServerConnectIfRequested();
             }
             Log("Server did not become ready within timeout", ConsoleColor.Red);
             return false;
@@ -192,10 +192,34 @@ public class TestRunner
         if (isReady)
         {
             Log("Game is ready", ConsoleColor.Green);
-            return true;
+            return QueueServerConnectIfRequested();
         }
 
         Log("Game did not become ready within timeout", ConsoleColor.Red);
+        return false;
+    }
+
+    private bool QueueServerConnectIfRequested()
+    {
+        if (!_launcher.HasServerConnect)
+        {
+            return true;
+        }
+
+        Log("Queueing server join...", ConsoleColor.Cyan);
+        if (_launcher.QueueServerConnect(out List<string> output))
+        {
+            foreach (string line in output)
+            {
+                Log($"  {line}", ConsoleColor.Gray);
+            }
+            return true;
+        }
+
+        foreach (string line in output)
+        {
+            Log($"  {line}", ConsoleColor.Red);
+        }
         return false;
     }
 

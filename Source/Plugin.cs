@@ -26,17 +26,32 @@ namespace valheimCLI
         private GameStateTracker? _stateTracker;
         private ConfigEntry<int>? _portConfig;
         private ConfigEntry<bool>? _enabledConfig;
+        private ConfigEntry<bool>? _autoStartQueuedJoinConfig;
 
         private readonly List<string> _capturedOutput = new();
         private bool _capturingOutput;
+        private bool _autoStartQueuedJoinAttempted;
+        private string? _pendingConnectAddress;
+        private string? _pendingConnectPassword;
+        private static bool _autoStartQueuedJoinRequested;
+        private static readonly FieldInfo? QueuedJoinServerField = typeof(FejdStartup).GetField("m_queuedJoinServer", BindingFlags.Instance | BindingFlags.NonPublic);
 
         public void Awake()
         {
+            Instance = this;
+
             _enabledConfig = Config.Bind("Server", "Enabled", true, "Enable the command server");
             _portConfig = Config.Bind("Server", "Port", 5555, "Port for the command server (localhost only)");
+            _autoStartQueuedJoinConfig = Config.Bind("ClientLaunch", "AutoStartQueuedJoin", true, "Automatically start the selected character when Valheim has a queued startup/server join.");
+            if (HasStartupJoinArgument())
+            {
+                RequestAutoStartQueuedJoin();
+            }
 
             Assembly assembly = Assembly.GetExecutingAssembly();
             HarmonyInstance.PatchAll(assembly);
+
+            CustomCommands.Register();
 
             // Initialize state tracker
             _stateTracker = new GameStateTracker(Log);
@@ -56,6 +71,8 @@ namespace valheimCLI
         {
             _stateTracker?.Update();
             ProcessPendingCommands();
+            TryQueuePendingServerConnect();
+            TryAutoStartQueuedJoin();
         }
 
         private void ProcessPendingCommands()
@@ -68,7 +85,10 @@ namespace valheimCLI
 
                 try
                 {
-                    ExecuteCommand(command);
+                    if (!TryExecuteBuiltInCommand(command))
+                    {
+                        ExecuteCommand(command);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -76,6 +96,25 @@ namespace valheimCLI
                     Log.LogError($"Command execution error: {ex}");
                 }
             }
+        }
+
+        private bool TryExecuteBuiltInCommand(string command)
+        {
+            string[] parts = command.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 0 || !parts[0].Equals("cli_connect", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            if (parts.Length < 2)
+            {
+                _commandServer?.SendOutput("Usage: cli_connect <host:port> [password]");
+                return true;
+            }
+
+            QueueServerConnect(parts[1], parts.Length >= 3 ? parts[2] : null);
+            _commandServer?.SendOutput($"OK: Queued server join for {parts[1]}");
+            return true;
         }
 
         private void ExecuteCommand(string command)
@@ -116,6 +155,60 @@ namespace valheimCLI
             }
         }
 
+        public static void QueueServerConnect(string address, string? password)
+        {
+            if (Instance == null)
+            {
+                _autoStartQueuedJoinRequested = true;
+                return;
+            }
+
+            Instance._pendingConnectAddress = address;
+            Instance._pendingConnectPassword = password;
+            RequestAutoStartQueuedJoin();
+            Instance.TryQueuePendingServerConnect();
+        }
+
+        private void TryQueuePendingServerConnect()
+        {
+            if (string.IsNullOrWhiteSpace(_pendingConnectAddress))
+            {
+                return;
+            }
+
+            if (FejdStartup.instance == null || ZSteamMatchmaking.instance == null)
+            {
+                return;
+            }
+
+            string address = _pendingConnectAddress!;
+            string? password = _pendingConnectPassword;
+
+            if (!string.IsNullOrWhiteSpace(password))
+            {
+                SetServerPassword(password!);
+            }
+
+            _pendingConnectAddress = null;
+            _pendingConnectPassword = null;
+            RequestAutoStartQueuedJoin();
+            ZSteamMatchmaking.instance.QueueServerJoin(address);
+            Log.LogInfo($"Queued server join for {address}");
+        }
+
+        private static void SetServerPassword(string password)
+        {
+            PropertyInfo? property = typeof(FejdStartup).GetProperty("ServerPassword", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
+            MethodInfo? setter = property?.GetSetMethod(true);
+            if (setter == null)
+            {
+                Log.LogWarning("Could not set FejdStartup.ServerPassword; server password was not applied.");
+                return;
+            }
+
+            setter.Invoke(null, new object[] { password });
+        }
+
         public void CaptureOutput(string text)
         {
             if (_capturingOutput)
@@ -125,6 +218,64 @@ namespace valheimCLI
         }
 
         public static valheimCLIPlugin? Instance { get; private set; }
+
+        public static void RequestAutoStartQueuedJoin()
+        {
+            _autoStartQueuedJoinRequested = true;
+            if (Instance != null)
+            {
+                Instance._autoStartQueuedJoinAttempted = false;
+            }
+        }
+
+        private static bool HasStartupJoinArgument()
+        {
+            string[] args = Environment.GetCommandLineArgs();
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (args[i] == "+connect" || args[i] == "+connect_lobby")
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private void TryAutoStartQueuedJoin()
+        {
+            if (_autoStartQueuedJoinConfig?.Value != true || !_autoStartQueuedJoinRequested || _autoStartQueuedJoinAttempted)
+            {
+                return;
+            }
+
+            FejdStartup fejd = FejdStartup.instance;
+            if (fejd == null || fejd.m_characterSelectScreen == null || !fejd.m_characterSelectScreen.activeInHierarchy)
+            {
+                return;
+            }
+
+            if (!HasQueuedJoin(fejd))
+            {
+                return;
+            }
+
+            _autoStartQueuedJoinAttempted = true;
+            Log.LogInfo("Queued server join detected; starting selected character.");
+            fejd.OnCharacterStart();
+        }
+
+        private static bool HasQueuedJoin(FejdStartup fejd)
+        {
+            if (QueuedJoinServerField == null)
+            {
+                Log.LogWarning("Could not inspect FejdStartup.m_queuedJoinServer; auto-start skipped.");
+                return false;
+            }
+
+            object? value = QueuedJoinServerField.GetValue(fejd);
+            return value is ServerJoinData queuedJoin && queuedJoin.IsValid;
+        }
 
         private void OnEnable()
         {
