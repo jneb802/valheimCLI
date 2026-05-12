@@ -146,7 +146,7 @@ public class GameLauncher
 
     private string BuildConnectCommand()
     {
-        string command = $"cli_connect {_connect}";
+        string command = $"cli_connect_direct {_connect}";
         if (!string.IsNullOrWhiteSpace(_password))
         {
             command += $" {_password}";

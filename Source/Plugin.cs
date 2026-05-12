@@ -101,7 +101,69 @@ namespace valheimCLI
         private bool TryExecuteBuiltInCommand(string command)
         {
             string[] parts = command.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length == 0 || !parts[0].Equals("cli_connect", StringComparison.OrdinalIgnoreCase))
+            if (parts.Length == 0)
+            {
+                return false;
+            }
+
+            if (parts[0].Equals("cli_create_character", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2)
+                {
+                    _commandServer?.SendOutput("Usage: cli_create_character <name> [--replace] [--local]");
+                    return true;
+                }
+
+                bool replace = false;
+                bool forceLocal = false;
+                for (int i = 2; i < parts.Length; i++)
+                {
+                    replace |= parts[i].Equals("--replace", StringComparison.OrdinalIgnoreCase);
+                    forceLocal |= parts[i].Equals("--local", StringComparison.OrdinalIgnoreCase);
+                }
+
+                forceLocal |= replace;
+                CustomCommands.CreateCharacter(parts[1], replace, forceLocal, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_connect_direct", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2)
+                {
+                    _commandServer?.SendOutput("Usage: cli_connect_direct <host[:port]> [password]");
+                    return true;
+                }
+
+                if (!CustomCommands.TryParseHostPort(parts[1], out string host, out int port))
+                {
+                    _commandServer?.SendOutput($"ERROR: Invalid server address '{parts[1]}'");
+                    return true;
+                }
+
+                if (FejdStartup.instance == null)
+                {
+                    QueueServerConnect(parts[1], parts.Length >= 3 ? parts[2] : null);
+                    _commandServer?.SendOutput($"OK: Queued dedicated server join for {parts[1]}");
+                    return true;
+                }
+
+                if (parts.Length >= 3)
+                {
+                    SetServerPassword(parts[2]);
+                }
+
+                CustomCommands.StartDedicatedServerJoin(host, port, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_connection_status", StringComparison.OrdinalIgnoreCase))
+            {
+                _commandServer?.SendOutput($"OK: connectionStatus={ZNet.GetConnectionStatus()}, server={ZNet.GetServerString()}");
+                return true;
+            }
+
+            if (!parts[0].Equals("cli_connect", StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }
@@ -176,13 +238,21 @@ namespace valheimCLI
                 return;
             }
 
-            if (FejdStartup.instance == null || ZSteamMatchmaking.instance == null)
+            if (FejdStartup.instance == null)
             {
                 return;
             }
 
             string address = _pendingConnectAddress!;
             string? password = _pendingConnectPassword;
+
+            if (!CustomCommands.TryParseHostPort(address, out string host, out int port))
+            {
+                _pendingConnectAddress = null;
+                _pendingConnectPassword = null;
+                Log.LogError($"Invalid queued dedicated server address '{address}'");
+                return;
+            }
 
             if (!string.IsNullOrWhiteSpace(password))
             {
@@ -191,9 +261,7 @@ namespace valheimCLI
 
             _pendingConnectAddress = null;
             _pendingConnectPassword = null;
-            RequestAutoStartQueuedJoin();
-            ZSteamMatchmaking.instance.QueueServerJoin(address);
-            Log.LogInfo($"Queued server join for {address}");
+            CustomCommands.StartDedicatedServerJoin(host, port, line => Log.LogInfo(line));
         }
 
         private static void SetServerPassword(string password)

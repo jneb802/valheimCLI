@@ -1,0 +1,49 @@
+name: Dedicated Server Connect
+description: Create a fresh local character, join a dedicated server, and verify the client reaches the world.
+
+game:
+  launch: true
+  launchTimeout: 360s
+  stopAfter: false
+
+settings:
+  timeout: 420s
+  stopOnFailure: true
+
+variables:
+  character: DedicatedConnect
+  server: "127.0.0.1:2456"
+  password: ""
+
+tests:
+  - name: Wait for Main Menu
+    waitFor:
+      state: MainMenu
+      timeout: 360s
+      message: Waiting for Valheim to reach the main menu...
+
+  - name: Create Fresh Local Character
+    commands:
+      - cli_create_character ${character} --replace --local
+    expect:
+      output: 'contains "OK: Created and selected character"'
+    wait: 1s
+
+  - name: Join Dedicated Server
+    commands:
+      - cli_connect_direct ${server} ${password}
+    expect:
+      output: 'contains "OK: Dedicated server join started"'
+    wait: 1s
+
+  - name: Wait for Server World
+    waitFor:
+      state: InWorld
+      timeout: 360s
+      message: Waiting for the client to enter the dedicated server world...
+
+  - name: Report Connection Status
+    commands:
+      - cli_connection_status
+    expect:
+      output: 'contains "connectionStatus=Connected"'
