@@ -127,6 +127,18 @@ namespace valheimCLI
                 return true;
             }
 
+            if (parts[0].Equals("cli_select_character", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2)
+                {
+                    _commandServer?.SendOutput("Usage: cli_select_character <name-or-filename>");
+                    return true;
+                }
+
+                CustomCommands.SelectCharacter(parts[1], line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
             if (parts[0].Equals("cli_connect_direct", StringComparison.OrdinalIgnoreCase))
             {
                 if (parts.Length < 2)
@@ -160,6 +172,12 @@ namespace valheimCLI
             if (parts[0].Equals("cli_connection_status", StringComparison.OrdinalIgnoreCase))
             {
                 _commandServer?.SendOutput($"OK: connectionStatus={ZNet.GetConnectionStatus()}, server={ZNet.GetServerString()}");
+                return true;
+            }
+
+            if (parts[0].Equals("cli_logout_save", StringComparison.OrdinalIgnoreCase))
+            {
+                CustomCommands.LogoutSave(line => _commandServer?.SendOutput(line));
                 return true;
             }
 

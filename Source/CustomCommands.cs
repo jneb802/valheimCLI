@@ -39,6 +39,17 @@ namespace valheimCLI
                 CreateCharacter(characterName, replace, forceLocal, args.Context.AddString);
             });
 
+            new Terminal.ConsoleCommand("cli_select_character", "Select an existing character: cli_select_character <name-or-filename>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2)
+                {
+                    args.Context.AddString("Usage: cli_select_character <name-or-filename>");
+                    return;
+                }
+
+                SelectCharacter(args[1].Trim(), args.Context.AddString);
+            });
+
             new Terminal.ConsoleCommand("cli_goto_location", "Teleport to a location by prefab name", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length < 2)
@@ -214,6 +225,11 @@ namespace valheimCLI
                 CheckIntroComplete(args.Context.AddString);
             });
 
+            new Terminal.ConsoleCommand("cli_logout_save", "Log out through Valheim's normal save path", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                LogoutSave(args.Context.AddString);
+            });
+
             valheimCLIPlugin.Log.LogInfo("Custom CLI commands registered");
         }
 
@@ -285,6 +301,49 @@ namespace valheimCLI
             addOutput($"OK: Created and selected character '{characterName}' ({profile.m_fileSource})");
         }
 
+        public static void SelectCharacter(string characterNameOrFilename, Action<string> addOutput)
+        {
+            if (characterNameOrFilename.Length < 3)
+            {
+                addOutput("ERROR: Character name must be at least 3 characters");
+                return;
+            }
+
+            FejdStartup fejd = FejdStartup.instance;
+            if (fejd == null)
+            {
+                addOutput("ERROR: Main menu is not available");
+                return;
+            }
+
+            SaveSystem.InvalidateCache();
+            List<PlayerProfile> profiles = SaveSystem.GetAllPlayerProfiles();
+            if (profiles.Count == 0)
+            {
+                addOutput("ERROR: No local character profile is available");
+                return;
+            }
+
+            string requested = characterNameOrFilename.Trim();
+            string requestedFilename = requested.ToLowerInvariant();
+            PlayerProfile? profile = profiles.FirstOrDefault(candidate =>
+                candidate.GetFilename().Equals(requestedFilename, StringComparison.OrdinalIgnoreCase) ||
+                candidate.GetName().Equals(requested, StringComparison.OrdinalIgnoreCase));
+
+            if (profile == null)
+            {
+                addOutput($"ERROR: Character '{characterNameOrFilename}' was not found");
+                return;
+            }
+
+            ProfilesField?.SetValue(fejd, profiles);
+            SetSelectedProfileMethod?.Invoke(fejd, new object[] { profile.GetFilename() });
+            PlatformPrefs.SetString("profile", profile.GetFilename());
+            Game.SetProfile(profile.GetFilename(), profile.m_fileSource);
+
+            addOutput($"OK: Selected character '{profile.GetName()}' ({profile.GetFilename()}, {profile.m_fileSource})");
+        }
+
         private static void CheckIntroComplete(Action<string> addOutput)
         {
             Game game = Game.instance;
@@ -347,6 +406,25 @@ namespace valheimCLI
             fejd.SetServerToJoin(joinData);
             fejd.JoinServer();
             addOutput($"OK: Dedicated server join started for {dedicated} using {profileDescription}");
+        }
+
+        public static void LogoutSave(Action<string> addOutput)
+        {
+            Game game = Game.instance;
+            if (game == null)
+            {
+                addOutput("ERROR: Game instance is not available");
+                return;
+            }
+
+            if (game.IsShuttingDown())
+            {
+                addOutput("OK: Logout is already in progress");
+                return;
+            }
+
+            addOutput("OK: Logging out with save");
+            game.Logout(save: true, changeToStartScene: true);
         }
 
         private static bool TrySelectCurrentProfile(FejdStartup fejd, out string profileDescription, out string error)

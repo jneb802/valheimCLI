@@ -1,0 +1,67 @@
+name: Valkyrie Season 6 Graceful Logout
+description: Create a fresh character, join the Praetoris Hetzner test server, verify the first-spawn intro clears, then log out through Valheim's normal save path.
+
+game:
+  launch: true
+  launchTimeout: 240s
+  stopAfter: false
+
+settings:
+  timeout: 420s
+  stopOnFailure: true
+
+variables:
+  character: ValkS6Logout
+  server: "178.156.172.16:2456"
+  password: warpalicious
+
+tests:
+  - name: Wait for Main Menu
+    waitFor:
+      state: MainMenu
+      timeout: 240s
+      message: Waiting for Valheim to reach the main menu...
+
+  - name: Create Fresh Local Character
+    commands:
+      - cli_create_character ${character} --replace --local
+    expect:
+      output: 'contains "OK: Created and selected character"'
+    wait: 1s
+
+  - name: Join Hetzner Test Server
+    commands:
+      - cli_connect_direct ${server} ${password}
+    expect:
+      output: 'contains "OK: Dedicated server join started"'
+    wait: 1s
+
+  - name: Wait for Server World
+    waitFor:
+      state: InWorld
+      timeout: 360s
+      message: Waiting for the new character to enter the server world...
+
+  - name: Wait for Valkyrie Intro Cleanup
+    wait: 45s
+
+  - name: Verify Intro State Cleared
+    commands:
+      - cli_check_intro_complete
+    repeat: 6
+    wait: 10s
+    expect:
+      output: 'contains "OK: Intro complete"'
+
+  - name: Log Out With Save
+    commands:
+      - cli_logout_save
+    expect:
+      output: 'contains "OK: Logging out with save"'
+    wait: 3s
+
+  - name: Wait for Main Menu After Logout
+    waitFor:
+      state: MainMenu
+      timeout: 120s
+      message: Waiting for normal logout to return to the main menu...
