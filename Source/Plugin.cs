@@ -181,6 +181,72 @@ namespace valheimCLI
                 return true;
             }
 
+            if (parts[0].Equals("cli_spawn_near", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2)
+                {
+                    _commandServer?.SendOutput("Usage: cli_spawn_near <prefab> [count] [level] [radius]");
+                    return true;
+                }
+
+                int count = 1;
+                if (parts.Length >= 3)
+                {
+                    int.TryParse(parts[2], out count);
+                }
+
+                int level = 1;
+                if (parts.Length >= 4)
+                {
+                    int.TryParse(parts[3], out level);
+                }
+
+                float radius = 3f;
+                if (parts.Length >= 5)
+                {
+                    float.TryParse(parts[4], out radius);
+                }
+
+                CustomCommands.SpawnNear(parts[1], count, level, radius, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_spawn_at", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 5)
+                {
+                    _commandServer?.SendOutput("Usage: cli_spawn_at <prefab> <x> <y> <z> [count] [level] [radius]");
+                    return true;
+                }
+
+                if (!float.TryParse(parts[2], out float x) || !float.TryParse(parts[3], out float y) || !float.TryParse(parts[4], out float z))
+                {
+                    _commandServer?.SendOutput("ERROR: Invalid coordinates");
+                    return true;
+                }
+
+                int count = 1;
+                if (parts.Length >= 6)
+                {
+                    int.TryParse(parts[5], out count);
+                }
+
+                int level = 1;
+                if (parts.Length >= 7)
+                {
+                    int.TryParse(parts[6], out level);
+                }
+
+                float radius = 3f;
+                if (parts.Length >= 8)
+                {
+                    float.TryParse(parts[7], out radius);
+                }
+
+                CustomCommands.SpawnAt(parts[1], x, y, z, count, level, radius, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
             if (!parts[0].Equals("cli_connect", StringComparison.OrdinalIgnoreCase))
             {
                 return false;

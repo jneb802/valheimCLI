@@ -99,8 +99,15 @@ class Program
 
         // Check if command was provided as argument (exclude flags and their values)
         List<string> commandArgs = new();
+        bool inCommand = false;
         for (int i = 0; i < args.Length; i++)
         {
+            if (inCommand)
+            {
+                commandArgs.Add(args[i]);
+                continue;
+            }
+
             // Flags with values
             if (args[i] == "-p" || args[i] == "--port" || args[i] == "-t" || args[i] == "--test" || args[i] == "--game-path" || args[i] == "--var" || args[i] == "--connect" || args[i] == "--password")
             {
@@ -115,6 +122,7 @@ class Program
             }
             if (!args[i].StartsWith("-"))
             {
+                inCommand = true;
                 commandArgs.Add(args[i]);
             }
         }

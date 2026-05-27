@@ -1,5 +1,7 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Reflection;
 using UnityEngine;
@@ -11,6 +13,7 @@ namespace valheimCLI
         private static readonly FieldInfo? PlayerInstanceField = typeof(FejdStartup).GetField("m_playerInstance", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo? ProfilesField = typeof(FejdStartup).GetField("m_profiles", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo? ProfileIndexField = typeof(FejdStartup).GetField("m_profileIndex", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo? WorldField = typeof(FejdStartup).GetField("m_world", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly MethodInfo? SetSelectedProfileMethod = typeof(FejdStartup).GetMethod("SetSelectedProfile", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo? GameFirstSpawnField = typeof(Game).GetField("m_firstSpawn", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo? GameInIntroField = typeof(Game).GetField("m_inIntro", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -148,6 +151,234 @@ namespace valheimCLI
                 }
             }, isCheat: true);
 
+            new Terminal.ConsoleCommand("cli_pick_nearest", "Pick the nearest pickable item by prefab/name: cli_pick_nearest <name> [radius]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2)
+                {
+                    args.Context.AddString("Usage: cli_pick_nearest <name> [radius]");
+                    return;
+                }
+
+                float radius = 80f;
+                if (args.Length >= 3)
+                {
+                    float.TryParse(args[2], out radius);
+                }
+
+                PickNearest(args[1], radius, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_spawn_near", "Spawn a prefab near the local player: cli_spawn_near <prefab> [count] [level] [radius]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2)
+                {
+                    args.Context.AddString("Usage: cli_spawn_near <prefab> [count] [level] [radius]");
+                    return;
+                }
+
+                int count = 1;
+                if (args.Length >= 3)
+                {
+                    int.TryParse(args[2], out count);
+                }
+
+                int level = 1;
+                if (args.Length >= 4)
+                {
+                    int.TryParse(args[3], out level);
+                }
+
+                float radius = 3f;
+                if (args.Length >= 5)
+                {
+                    float.TryParse(args[4], out radius);
+                }
+
+                SpawnNear(args[1], count, level, radius, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_spawn_at", "Spawn a prefab at world coordinates: cli_spawn_at <prefab> <x> <y> <z> [count] [level] [radius]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 5)
+                {
+                    args.Context.AddString("Usage: cli_spawn_at <prefab> <x> <y> <z> [count] [level] [radius]");
+                    return;
+                }
+
+                if (!float.TryParse(args[2], out float x) || !float.TryParse(args[3], out float y) || !float.TryParse(args[4], out float z))
+                {
+                    args.Context.AddString("ERROR: Invalid coordinates");
+                    return;
+                }
+
+                int count = 1;
+                if (args.Length >= 6)
+                {
+                    int.TryParse(args[5], out count);
+                }
+
+                int level = 1;
+                if (args.Length >= 7)
+                {
+                    int.TryParse(args[6], out level);
+                }
+
+                float radius = 3f;
+                if (args.Length >= 8)
+                {
+                    float.TryParse(args[7], out radius);
+                }
+
+                SpawnAt(args[1], x, y, z, count, level, radius, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_send_chat_rpc", "Send a routed chat RPC to the server: cli_send_chat_rpc <message>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2)
+                {
+                    args.Context.AddString("Usage: cli_send_chat_rpc <message>");
+                    return;
+                }
+
+                SendChatRpc(string.Join(" ", Enumerable.Range(1, args.Length - 1).Select(i => args[i])), args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_damage_nearest_character", "Damage the nearest non-player character by prefab/name: cli_damage_nearest_character <name> [damage] [radius]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2)
+                {
+                    args.Context.AddString("Usage: cli_damage_nearest_character <name> [damage] [radius]");
+                    return;
+                }
+
+                float damage = 15f;
+                if (args.Length >= 3)
+                {
+                    float.TryParse(args[2], out damage);
+                }
+
+                float radius = 80f;
+                if (args.Length >= 4)
+                {
+                    float.TryParse(args[3], out radius);
+                }
+
+                DamageNearestCharacter(args[1], damage, radius, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_rpc_damage_nearest_character", "Send RPC_Damage to the nearest non-player character: cli_rpc_damage_nearest_character <name> [damage] [radius]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2)
+                {
+                    args.Context.AddString("Usage: cli_rpc_damage_nearest_character <name> [damage] [radius]");
+                    return;
+                }
+
+                float damage = 15f;
+                if (args.Length >= 3)
+                {
+                    float.TryParse(args[2], out damage);
+                }
+
+                float radius = 80f;
+                if (args.Length >= 4)
+                {
+                    float.TryParse(args[3], out radius);
+                }
+
+                SendDamageRpcToNearestCharacter(args[1], damage, radius, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_rpc_damage_burst_nearest_character", "Send repeated RPC_Damage messages and report client send timing: cli_rpc_damage_burst_nearest_character <name> [damage] [radius] [count]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2)
+                {
+                    args.Context.AddString("Usage: cli_rpc_damage_burst_nearest_character <name> [damage] [radius] [count]");
+                    return;
+                }
+
+                float damage = 1f;
+                if (args.Length >= 3)
+                {
+                    float.TryParse(args[2], out damage);
+                }
+
+                float radius = 80f;
+                if (args.Length >= 4)
+                {
+                    float.TryParse(args[3], out radius);
+                }
+
+                int count = 20;
+                if (args.Length >= 5)
+                {
+                    int.TryParse(args[4], out count);
+                }
+
+                SendDamageRpcBurstToNearestCharacter(args[1], damage, radius, count, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_rpc_use_nearest", "Send a routed interaction RPC to the nearest object: cli_rpc_use_nearest <door|container|pickable> <name> [radius]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 3)
+                {
+                    args.Context.AddString("Usage: cli_rpc_use_nearest <door|container|pickable> <name> [radius]");
+                    return;
+                }
+
+                float radius = 30f;
+                if (args.Length >= 4)
+                {
+                    float.TryParse(args[3], out radius);
+                }
+
+                SendInteractionRpcToNearest(args[1], args[2], radius, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_set_guardian_power", "Set the current guardian power: cli_set_guardian_power <power>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2)
+                {
+                    args.Context.AddString("Usage: cli_set_guardian_power <power>");
+                    return;
+                }
+
+                SetGuardianPower(args[1], args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_set_deathlink_choice", "Set the Deathlink choice: cli_set_deathlink_choice <choice>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2)
+                {
+                    args.Context.AddString("Usage: cli_set_deathlink_choice <choice>");
+                    return;
+                }
+
+                SetDeathlinkChoice(args[1], args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_walk", "Walk forward for a duration: cli_walk <seconds> [run]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2 || !float.TryParse(args[1], out float seconds))
+                {
+                    args.Context.AddString("Usage: cli_walk <seconds> [run]");
+                    return;
+                }
+
+                bool run = args.Length >= 3 && args[2].Equals("run", StringComparison.OrdinalIgnoreCase);
+                Walk(seconds, run, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_player_state", "Print current player state", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                PrintPlayerState(args.Context.AddString);
+            });
+
+            new Terminal.ConsoleCommand("cli_check_bird_drop", "Check for the carried/drop/death repro signal after normal landing", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                CheckBirdDropSignal(args.Context.AddString);
+            });
+
             new Terminal.ConsoleCommand("cli_close_store", "Close the store/trader UI", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (StoreGui.IsVisible())
@@ -220,6 +451,17 @@ namespace valheimCLI
                 PrintConnectionStatus(args.Context.AddString);
             });
 
+            new Terminal.ConsoleCommand("cli_start_local_world", "Create/select and start a local world: cli_start_local_world <worldName>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2)
+                {
+                    args.Context.AddString("Usage: cli_start_local_world <worldName>");
+                    return;
+                }
+
+                StartLocalWorld(args[1], args.Context.AddString);
+            });
+
             new Terminal.ConsoleCommand("cli_check_intro_complete", "Check that the first-spawn Valkyrie intro state is cleared", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 CheckIntroComplete(args.Context.AddString);
@@ -272,8 +514,7 @@ namespace valheimCLI
                     return;
                 }
 
-                PlayerProfile.RemoveProfile(filename, FileHelpers.FileSource.Local);
-                PlayerProfile.RemoveProfile(filename, FileHelpers.FileSource.Cloud);
+                PlayerProfile.RemoveProfile(filename);
                 SaveSystem.InvalidateCache();
             }
 
@@ -344,6 +585,612 @@ namespace valheimCLI
             addOutput($"OK: Selected character '{profile.GetName()}' ({profile.GetFilename()}, {profile.m_fileSource})");
         }
 
+        public static void SpawnNear(string prefabName, int count, int level, float radius, Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            ZNetScene znetScene = ZNetScene.instance;
+            if (znetScene == null)
+            {
+                addOutput("ERROR: ZNetScene not available");
+                return;
+            }
+
+            string resolvedName = ResolvePrefabName(prefabName, znetScene);
+            GameObject prefab = znetScene.GetPrefab(resolvedName);
+            if (prefab == null)
+            {
+                addOutput($"ERROR: Prefab '{prefabName}' not found");
+                return;
+            }
+
+            count = Mathf.Clamp(count, 1, 20);
+            level = Mathf.Clamp(level, 1, 10);
+            radius = Mathf.Clamp(radius, 0.5f, 50f);
+
+            Vector3 basePosition = player.transform.position + player.transform.forward * radius + Vector3.up;
+            SpawnPrefabAt(prefab, resolvedName, basePosition, count, level, radius, "near player", addOutput);
+        }
+
+        public static void SpawnAt(string prefabName, float x, float y, float z, int count, int level, float radius, Action<string> addOutput)
+        {
+            ZNetScene znetScene = ZNetScene.instance;
+            if (znetScene == null)
+            {
+                addOutput("ERROR: ZNetScene not available");
+                return;
+            }
+
+            string resolvedName = ResolvePrefabName(prefabName, znetScene);
+            GameObject prefab = znetScene.GetPrefab(resolvedName);
+            if (prefab == null)
+            {
+                addOutput($"ERROR: Prefab '{prefabName}' not found");
+                return;
+            }
+
+            count = Mathf.Clamp(count, 1, 20);
+            level = Mathf.Clamp(level, 1, 10);
+            radius = Mathf.Clamp(radius, 0.5f, 50f);
+
+            SpawnPrefabAt(prefab, resolvedName, new Vector3(x, y, z), count, level, radius, "at", addOutput);
+        }
+
+        private static void SpawnPrefabAt(GameObject prefab, string resolvedName, Vector3 basePosition, int count, int level, float radius, string positionLabel, Action<string> addOutput)
+        {
+            List<string> zdoIds = new();
+            for (int i = 0; i < count; i++)
+            {
+                Vector3 offset = count == 1 ? Vector3.zero : UnityEngine.Random.insideUnitSphere * Math.Min(radius, 10f);
+                offset.y = 0f;
+                GameObject spawned = UnityEngine.Object.Instantiate(prefab, basePosition + offset, Quaternion.identity);
+
+                if (level > 1)
+                {
+                    ItemDrop itemDrop = spawned.GetComponent<ItemDrop>();
+                    if (itemDrop != null)
+                    {
+                        itemDrop.SetQuality(Mathf.Min(level, 4));
+                    }
+                    spawned.GetComponent<Character>()?.SetLevel(level);
+                }
+
+                ZNetView nview = spawned.GetComponent<ZNetView>();
+                if (nview != null && nview.IsValid())
+                {
+                    zdoIds.Add(nview.GetZDO().m_uid.ToString());
+                }
+            }
+
+            string zdoText = zdoIds.Count > 0 ? string.Join(",", zdoIds) : "none";
+            addOutput($"OK: Spawned {count}x {resolvedName} {positionLabel} {basePosition.x:F1},{basePosition.y:F1},{basePosition.z:F1}; zdo={zdoText}");
+        }
+
+        public static void PickNearest(string requestedName, float radius, Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            string requested = requestedName.Trim();
+            Vector3 playerPos = player.transform.position;
+            Collider[] colliders = Physics.OverlapSphere(playerPos, radius);
+            Pickable? bestPickable = null;
+            PickableItem? bestPickableItem = null;
+            string bestName = "";
+            float bestDistance = float.MaxValue;
+
+            foreach (Collider collider in colliders)
+            {
+                Pickable pickable = collider.GetComponentInParent<Pickable>();
+                if (pickable != null && pickable.CanBePicked() && PickableMatches(pickable, requested))
+                {
+                    float distance = Vector3.Distance(playerPos, pickable.transform.position);
+                    if (distance < bestDistance)
+                    {
+                        bestPickable = pickable;
+                        bestPickableItem = null;
+                        bestName = GetPickableName(pickable);
+                        bestDistance = distance;
+                    }
+                }
+
+                PickableItem pickableItem = collider.GetComponentInParent<PickableItem>();
+                if (pickableItem != null && PickableItemMatches(pickableItem, requested))
+                {
+                    float distance = Vector3.Distance(playerPos, pickableItem.transform.position);
+                    if (distance < bestDistance)
+                    {
+                        bestPickable = null;
+                        bestPickableItem = pickableItem;
+                        bestName = GetPickableItemName(pickableItem);
+                        bestDistance = distance;
+                    }
+                }
+            }
+
+            if (bestPickable != null)
+            {
+                bool result = bestPickable.Interact(player, false, false);
+                addOutput($"OK: Picked {bestName} at distance {bestDistance:F1}m (result={result})");
+                return;
+            }
+
+            if (bestPickableItem != null)
+            {
+                bool result = bestPickableItem.Interact(player, false, false);
+                addOutput($"OK: Picked {bestName} at distance {bestDistance:F1}m (result={result})");
+                return;
+            }
+
+            addOutput($"ERROR: No pickable matching '{requestedName}' found within {radius:F1}m");
+        }
+
+        public static void DamageNearestCharacter(string requestedName, float damage, float radius, Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            if (damage <= 0f)
+            {
+                addOutput("ERROR: Damage must be greater than zero");
+                return;
+            }
+
+            string requested = requestedName.Trim();
+            Vector3 playerPos = player.transform.position;
+            Collider[] colliders = Physics.OverlapSphere(playerPos, radius);
+            Character? bestCharacter = null;
+            string bestName = "";
+            float bestDistance = float.MaxValue;
+
+            foreach (Collider collider in colliders)
+            {
+                Character character = collider.GetComponentInParent<Character>();
+                if (character == null || character is Player || character.IsDead())
+                    continue;
+                if (!CharacterMatches(character, requested))
+                    continue;
+
+                float distance = Vector3.Distance(playerPos, character.transform.position);
+                if (distance < bestDistance)
+                {
+                    bestCharacter = character;
+                    bestName = GetCharacterName(character);
+                    bestDistance = distance;
+                }
+            }
+
+            if (bestCharacter == null)
+            {
+                addOutput($"ERROR: No non-player character matching '{requestedName}' found within {radius:F1}m");
+                return;
+            }
+
+            Vector3 direction = bestCharacter.transform.position - player.transform.position;
+            HitData hit = new()
+            {
+                m_hitType = HitData.HitType.PlayerHit,
+                m_skill = Skills.SkillType.Clubs,
+                m_point = bestCharacter.transform.position + Vector3.up,
+                m_dir = direction.sqrMagnitude > 0.01f ? direction.normalized : player.transform.forward,
+                m_pushForce = 2f,
+                m_backstabBonus = 1f,
+                m_staggerMultiplier = 1f,
+                m_dodgeable = true,
+                m_blockable = true,
+            };
+            hit.m_damage.m_blunt = damage;
+            hit.SetAttacker(player);
+            bestCharacter.Damage(hit);
+            addOutput($"OK: Damaged {bestName} for {damage:F1} blunt damage at distance {bestDistance:F1}m");
+        }
+
+        public static void SendChatRpc(string text, Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            if (ZRoutedRpc.instance == null)
+            {
+                addOutput("ERROR: ZRoutedRpc is not available");
+                return;
+            }
+
+            ZRoutedRpc.instance.InvokeRoutedRPC(
+                ZRoutedRpc.Everybody,
+                "ChatMessage",
+                player.GetHeadPoint(),
+                (int)Talker.Type.Shout,
+                UserInfo.GetLocalUser(),
+                text);
+            addOutput("OK: Sent ChatMessage routed RPC");
+        }
+
+        public static void SendDamageRpcToNearestCharacter(string requestedName, float damage, float radius, Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            if (damage <= 0f)
+            {
+                addOutput("ERROR: Damage must be greater than zero");
+                return;
+            }
+
+            Character? character = FindNearestCharacter(requestedName, radius, out string bestName, out float bestDistance);
+            if (character == null)
+            {
+                addOutput($"ERROR: No non-player character matching '{requestedName}' found within {radius:F1}m");
+                return;
+            }
+
+            ZNetView nview = character.GetComponent<ZNetView>();
+            if (nview == null || !nview.IsValid())
+            {
+                addOutput($"ERROR: Character '{bestName}' has no valid ZNetView");
+                return;
+            }
+
+            if (ZRoutedRpc.instance == null)
+            {
+                addOutput("ERROR: ZRoutedRpc is not available");
+                return;
+            }
+
+            HitData hit = BuildPlayerHit(player, character.transform.position, damage);
+            ZRoutedRpc.instance.InvokeRoutedRPC(ZRoutedRpc.Everybody, nview.GetZDO().m_uid, "RPC_Damage", hit);
+            addOutput($"OK: Sent RPC_Damage for {bestName} at distance {bestDistance:F1}m");
+        }
+
+        public static void SendDamageRpcBurstToNearestCharacter(string requestedName, float damage, float radius, int count, Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            if (ZRoutedRpc.instance == null)
+            {
+                addOutput("ERROR: ZRoutedRpc is not available");
+                return;
+            }
+
+            if (damage <= 0f)
+            {
+                addOutput("ERROR: Damage must be greater than zero");
+                return;
+            }
+
+            if (count <= 0)
+            {
+                addOutput("ERROR: Count must be greater than zero");
+                return;
+            }
+
+            count = Math.Min(count, 500);
+            Character? character = FindNearestCharacter(requestedName, radius, out string bestName, out float bestDistance);
+            if (character == null)
+            {
+                addOutput($"ERROR: No non-player character matching '{requestedName}' found within {radius:F1}m");
+                return;
+            }
+
+            ZNetView nview = character.GetComponent<ZNetView>();
+            if (nview == null || !nview.IsValid())
+            {
+                addOutput($"ERROR: Character '{bestName}' has no valid ZNetView");
+                return;
+            }
+
+            ZDOID targetZdo = nview.GetZDO().m_uid;
+            long totalTicks = 0L;
+            long maxTicks = 0L;
+            Stopwatch totalStopwatch = Stopwatch.StartNew();
+
+            for (int i = 0; i < count; i++)
+            {
+                HitData hit = BuildPlayerHit(player, character.transform.position, damage);
+                long started = Stopwatch.GetTimestamp();
+                ZRoutedRpc.instance.InvokeRoutedRPC(ZRoutedRpc.Everybody, targetZdo, "RPC_Damage", hit);
+                long elapsed = Stopwatch.GetTimestamp() - started;
+                totalTicks += elapsed;
+                if (elapsed > maxTicks)
+                    maxTicks = elapsed;
+            }
+
+            totalStopwatch.Stop();
+            double averageMilliseconds = totalTicks * 1000.0 / Stopwatch.Frequency / count;
+            double maxMilliseconds = maxTicks * 1000.0 / Stopwatch.Frequency;
+            addOutput($"OK: Sent RPC_Damage burst count={count} target={bestName} targetZdo={targetZdo} distance={bestDistance:F1}m avgMs={averageMilliseconds:F4} maxMs={maxMilliseconds:F4} totalMs={totalStopwatch.Elapsed.TotalMilliseconds:F4}");
+        }
+
+        public static void SendInteractionRpcToNearest(string kind, string requestedName, float radius, Action<string> addOutput)
+        {
+            string normalizedKind = kind.Trim().ToLowerInvariant();
+            switch (normalizedKind)
+            {
+                case "door":
+                    SendObjectRpc<Door>(requestedName, radius, "UseDoor", addOutput, true);
+                    return;
+                case "container":
+                    long playerId = Game.instance != null ? Game.instance.GetPlayerProfile().GetPlayerID() : 0L;
+                    if (playerId == 0L)
+                    {
+                        addOutput("ERROR: No player profile ID found");
+                        return;
+                    }
+                    SendObjectRpc<Container>(requestedName, radius, "RequestOpen", addOutput, playerId);
+                    return;
+                case "pickable":
+                    SendObjectRpc<Pickable>(requestedName, radius, "RPC_Pick", addOutput, 0);
+                    return;
+                default:
+                    addOutput("ERROR: Type must be door, container, or pickable");
+                    return;
+            }
+        }
+
+        private static void SendObjectRpc<T>(string requestedName, float radius, string methodName, Action<string> addOutput, params object[] parameters)
+            where T : Component
+        {
+            T? component = FindNearestComponent<T>(requestedName, radius, out string bestName, out float bestDistance);
+            if (component == null)
+            {
+                addOutput($"ERROR: No {typeof(T).Name} matching '{requestedName}' found within {radius:F1}m");
+                return;
+            }
+
+            ZNetView nview = component.GetComponentInParent<ZNetView>();
+            if (nview == null || !nview.IsValid())
+            {
+                addOutput($"ERROR: Object '{bestName}' has no valid ZNetView");
+                return;
+            }
+
+            ZRoutedRpc.instance.InvokeRoutedRPC(ZRoutedRpc.Everybody, nview.GetZDO().m_uid, methodName, parameters);
+            addOutput($"OK: Sent {methodName} for {bestName} at distance {bestDistance:F1}m");
+        }
+
+        private static Character? FindNearestCharacter(string requestedName, float radius, out string bestName, out float bestDistance)
+        {
+            Player player = Player.m_localPlayer;
+            bestName = "";
+            bestDistance = float.MaxValue;
+            Character? bestCharacter = null;
+            if (player == null)
+                return null;
+
+            Vector3 playerPos = player.transform.position;
+            foreach (Collider collider in Physics.OverlapSphere(playerPos, radius))
+            {
+                Character character = collider.GetComponentInParent<Character>();
+                if (character == null || character is Player || character.IsDead())
+                    continue;
+                if (!CharacterMatches(character, requestedName))
+                    continue;
+
+                float distance = Vector3.Distance(playerPos, character.transform.position);
+                if (distance < bestDistance)
+                {
+                    bestCharacter = character;
+                    bestName = GetCharacterName(character);
+                    bestDistance = distance;
+                }
+            }
+
+            return bestCharacter;
+        }
+
+        private static T? FindNearestComponent<T>(string requestedName, float radius, out string bestName, out float bestDistance)
+            where T : Component
+        {
+            Player player = Player.m_localPlayer;
+            bestName = "";
+            bestDistance = float.MaxValue;
+            T? bestComponent = null;
+            if (player == null)
+                return null;
+
+            Vector3 playerPos = player.transform.position;
+            foreach (Collider collider in Physics.OverlapSphere(playerPos, radius))
+            {
+                T component = collider.GetComponentInParent<T>();
+                if (component == null)
+                    continue;
+                if (!ObjectMatches(component.gameObject, requestedName))
+                    continue;
+
+                float distance = Vector3.Distance(playerPos, component.transform.position);
+                if (distance < bestDistance)
+                {
+                    bestComponent = component;
+                    bestName = Utils.GetPrefabName(component.gameObject);
+                    bestDistance = distance;
+                }
+            }
+
+            return bestComponent;
+        }
+
+        private static bool ObjectMatches(GameObject gameObject, string requestedName)
+        {
+            string requested = requestedName.Trim();
+            if (requested.Length == 0)
+                return true;
+
+            string prefabName = Utils.GetPrefabName(gameObject);
+            string objectName = gameObject.name.Replace("(Clone)", "").Trim();
+            return prefabName.Equals(requested, StringComparison.OrdinalIgnoreCase) ||
+                   objectName.Equals(requested, StringComparison.OrdinalIgnoreCase) ||
+                   prefabName.IndexOf(requested, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   objectName.IndexOf(requested, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static HitData BuildPlayerHit(Player player, Vector3 targetPosition, float damage)
+        {
+            Vector3 direction = targetPosition - player.transform.position;
+            HitData hit = new()
+            {
+                m_hitType = HitData.HitType.PlayerHit,
+                m_skill = Skills.SkillType.Clubs,
+                m_point = targetPosition + Vector3.up,
+                m_dir = direction.sqrMagnitude > 0.01f ? direction.normalized : player.transform.forward,
+                m_pushForce = 2f,
+                m_backstabBonus = 1f,
+                m_staggerMultiplier = 1f,
+                m_dodgeable = true,
+                m_blockable = true,
+            };
+            hit.m_damage.m_blunt = damage;
+            hit.SetAttacker(player);
+            return hit;
+        }
+
+        public static void SetGuardianPower(string powerName, Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            string power = powerName.Trim();
+            if (string.IsNullOrWhiteSpace(power))
+            {
+                addOutput("ERROR: Guardian power name is empty");
+                return;
+            }
+
+            int hash = power.GetStableHashCode();
+            StatusEffect? statusEffect = ObjectDB.instance != null ? ObjectDB.instance.GetStatusEffect(hash) : null;
+            if (statusEffect == null)
+            {
+                addOutput($"ERROR: Guardian power '{power}' was not found");
+                return;
+            }
+
+            player.SetGuardianPower(power);
+            player.m_guardianPowerCooldown = 0f;
+            addOutput($"OK: Guardian power set to {power}");
+        }
+
+        public static void SetDeathlinkChoice(string choiceName, Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            Assembly? deathlinkAssembly = AppDomain.CurrentDomain.GetAssemblies()
+                .FirstOrDefault(assembly => assembly.GetName().Name.Equals("Deathlink", StringComparison.OrdinalIgnoreCase));
+            if (deathlinkAssembly == null)
+            {
+                addOutput("ERROR: Deathlink assembly is not loaded");
+                return;
+            }
+
+            Type? dataObjectsType = deathlinkAssembly.GetType("Deathlink.Common.DataObjects");
+            Type? configDataType = deathlinkAssembly.GetType("Deathlink.Common.DeathConfigurationData");
+            if (dataObjectsType == null || configDataType == null)
+            {
+                addOutput("ERROR: Deathlink configuration types were not found");
+                return;
+            }
+
+            FieldInfo? levelsField = configDataType.GetField("DeathLevels", BindingFlags.Public | BindingFlags.Static);
+            object? levelsValue = levelsField?.GetValue(null);
+            string choice = choiceName.Trim();
+            string? actualChoice = FindDictionaryKey(levelsValue, choice);
+            if (actualChoice == null)
+            {
+                addOutput($"ERROR: Deathlink choice '{choiceName}' was not found");
+                return;
+            }
+
+            string key = dataObjectsType.GetField("DeathChoiceKey", BindingFlags.Public | BindingFlags.Static)?.GetValue(null) as string ?? "DL_DeathChoice";
+            player.RemoveUniqueKeyValue(key);
+            player.AddUniqueKeyValue(key, actualChoice);
+            configDataType.GetMethod("CheckAndSetPlayerDeathConfig", BindingFlags.Public | BindingFlags.Static)?.Invoke(null, new object[] { player });
+
+            addOutput($"OK: Deathlink choice set to {actualChoice}");
+        }
+
+        public static void Walk(float seconds, bool run, Action<string> addOutput)
+        {
+            if (seconds <= 0f)
+            {
+                addOutput("ERROR: Walk duration must be greater than zero");
+                return;
+            }
+
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            if (valheimCLIPlugin.Instance == null)
+            {
+                addOutput("ERROR: valheimCLI plugin instance is not available");
+                return;
+            }
+
+            valheimCLIPlugin.Instance.StartCoroutine(WalkRoutine(seconds, run));
+            addOutput($"OK: Walking forward for {seconds:F1}s (run={run})");
+        }
+
+        public static void PrintPlayerState(Action<string> addOutput)
+        {
+            if (!TryBuildPlayerState(out string details, out _))
+            {
+                addOutput(details);
+                return;
+            }
+
+            addOutput($"OK: {details}");
+        }
+
+        public static void CheckBirdDropSignal(Action<string> addOutput)
+        {
+            if (!TryBuildPlayerState(out string details, out PlayerStateSnapshot snapshot))
+            {
+                addOutput(details);
+                return;
+            }
+
+            bool signal = snapshot.ValkyrieActive || snapshot.PlayerInIntro || snapshot.PlayerAttached || snapshot.PlayerDead || snapshot.HeightAboveGround > 50f;
+            addOutput(signal
+                ? $"OK: Bird drop signal detected ({details})"
+                : $"ERROR: Bird drop signal not detected ({details})");
+        }
+
         private static void CheckIntroComplete(Action<string> addOutput)
         {
             Game game = Game.instance;
@@ -406,6 +1253,42 @@ namespace valheimCLI
             fejd.SetServerToJoin(joinData);
             fejd.JoinServer();
             addOutput($"OK: Dedicated server join started for {dedicated} using {profileDescription}");
+        }
+
+        public static void StartLocalWorld(string worldName, Action<string> addOutput)
+        {
+            if (worldName.Length < 3)
+            {
+                addOutput("ERROR: World name must be at least 3 characters");
+                return;
+            }
+
+            if (worldName.IndexOfAny(System.IO.Path.GetInvalidFileNameChars()) >= 0)
+            {
+                addOutput("ERROR: World name contains invalid filename characters");
+                return;
+            }
+
+            FejdStartup fejd = FejdStartup.instance;
+            if (fejd == null)
+            {
+                addOutput("ERROR: Main menu is not available");
+                return;
+            }
+
+            if (!TrySelectCurrentProfile(fejd, out string profileDescription, out string profileError))
+            {
+                addOutput(profileError);
+                return;
+            }
+
+            World world = World.GetCreateWorld(worldName, FileHelpers.FileSource.Local);
+            world.m_fileSource = FileHelpers.FileSource.Local;
+            WorldField?.SetValue(fejd, world);
+            SaveSystem.InvalidateCache();
+
+            addOutput($"OK: Starting local world '{world.m_name}' using {profileDescription}");
+            fejd.OnWorldStart();
         }
 
         public static void LogoutSave(Action<string> addOutput)
@@ -535,6 +1418,179 @@ namespace valheimCLI
 
             object? value = field.GetValue(instance);
             return value is bool boolValue ? boolValue : fallback;
+        }
+
+        private static bool PickableMatches(Pickable pickable, string requested)
+        {
+            return NameMatches(requested, pickable.name, GetPickableName(pickable), pickable.m_itemPrefab != null ? pickable.m_itemPrefab.name : "");
+        }
+
+        private static bool PickableItemMatches(PickableItem pickableItem, string requested)
+        {
+            return NameMatches(requested, pickableItem.name, GetPickableItemName(pickableItem));
+        }
+
+        private static bool CharacterMatches(Character character, string requested)
+        {
+            return NameMatches(requested, character.name, GetCharacterName(character));
+        }
+
+        private static string GetCharacterName(Character character)
+        {
+            try
+            {
+                return character.GetHoverName();
+            }
+            catch
+            {
+                return character.name;
+            }
+        }
+
+        private static string GetPickableName(Pickable pickable)
+        {
+            try
+            {
+                return pickable.GetHoverName();
+            }
+            catch
+            {
+                return pickable.m_itemPrefab != null ? pickable.m_itemPrefab.name : pickable.name;
+            }
+        }
+
+        private static string GetPickableItemName(PickableItem pickableItem)
+        {
+            try
+            {
+                return pickableItem.GetHoverName();
+            }
+            catch
+            {
+                return pickableItem.name;
+            }
+        }
+
+        private static bool NameMatches(string requested, params string[] candidates)
+        {
+            string needle = NormalizeName(requested);
+            return candidates.Any(candidate =>
+            {
+                string normalized = NormalizeName(candidate);
+                return normalized.Contains(needle) || needle.Contains(normalized);
+            });
+        }
+
+        private static string NormalizeName(string value)
+        {
+            return value
+                .ToLowerInvariant()
+                .Replace("(clone)", "")
+                .Replace("$item_", "")
+                .Replace("pickable_", "")
+                .Replace("_", "")
+                .Replace(" ", "")
+                .Trim()
+                ;
+        }
+
+        private static string? FindDictionaryKey(object? dictionary, string requested)
+        {
+            if (dictionary is not IDictionary entries)
+            {
+                return null;
+            }
+
+            foreach (object key in entries.Keys)
+            {
+                string? text = key?.ToString();
+                if (text != null && text.Equals(requested, StringComparison.OrdinalIgnoreCase))
+                {
+                    return text;
+                }
+            }
+
+            return null;
+        }
+
+        private static string ResolvePrefabName(string requestedName, ZNetScene znetScene)
+        {
+            GameObject exact = znetScene.GetPrefab(requestedName);
+            if (exact != null)
+            {
+                return requestedName;
+            }
+
+            foreach (string prefabName in znetScene.GetPrefabNames())
+            {
+                if (prefabName.Equals(requestedName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return prefabName;
+                }
+            }
+
+            return requestedName;
+        }
+
+        private static IEnumerator WalkRoutine(float seconds, bool run)
+        {
+            float end = Time.time + seconds;
+            while (Time.time < end)
+            {
+                Player player = Player.m_localPlayer;
+                if (player == null)
+                {
+                    yield break;
+                }
+
+                player.SetControls(Vector3.forward, false, false, false, false, false, false, false, false, run, false);
+                yield return null;
+            }
+
+            Player finalPlayer = Player.m_localPlayer;
+            if (finalPlayer != null)
+            {
+                finalPlayer.SetControls(Vector3.zero, false, false, false, false, false, false, false, false, false, false);
+            }
+        }
+
+        private static bool TryBuildPlayerState(out string details, out PlayerStateSnapshot snapshot)
+        {
+            snapshot = default;
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                details = "ERROR: No local player found";
+                return false;
+            }
+
+            Vector3 position = player.transform.position;
+            float groundHeight = 0f;
+            bool hasGround = ZoneSystem.instance != null && ZoneSystem.instance.GetGroundHeight(position, out groundHeight);
+            float heightAboveGround = hasGround ? position.y - groundHeight : 0f;
+            string deathlinkChoice = "";
+            player.TryGetUniqueKeyValue("DL_DeathChoice", out deathlinkChoice);
+
+            snapshot = new PlayerStateSnapshot
+            {
+                PlayerInIntro = player.InIntro(),
+                PlayerAttached = player.IsAttached(),
+                PlayerDead = player.IsDead(),
+                ValkyrieActive = Valkyrie.m_instance != null,
+                HeightAboveGround = heightAboveGround
+            };
+
+            details = $"position={position.x:F1},{position.y:F1},{position.z:F1}, heightAboveGround={heightAboveGround:F1}, health={player.GetHealth():F1}, playerInIntro={snapshot.PlayerInIntro}, playerAttached={snapshot.PlayerAttached}, playerDead={snapshot.PlayerDead}, valkyrieActive={snapshot.ValkyrieActive}, guardianPower={player.GetGuardianPowerName()}, deathlinkChoice={deathlinkChoice}";
+            return true;
+        }
+
+        private struct PlayerStateSnapshot
+        {
+            public bool PlayerInIntro;
+            public bool PlayerAttached;
+            public bool PlayerDead;
+            public bool ValkyrieActive;
+            public float HeightAboveGround;
         }
 
         private static void SetServerPassword(string password)

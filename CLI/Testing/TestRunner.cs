@@ -272,7 +272,9 @@ public class TestRunner
                     string expandedCommand = ExpandVariables(command);
                     LogVerbose($"    > {expandedCommand}");
 
-                    List<string> output = _client!.SendCommand(expandedCommand);
+                    List<string> output = IsLocalCommand(expandedCommand)
+                        ? await ExecuteLocalCommandAsync(GetLocalCommand(expandedCommand), settings.GetTimeoutSpan(), cancellationToken)
+                        : _client!.SendCommand(expandedCommand);
                     result.Output.AddRange(output);
 
                     foreach (string line in output)
@@ -346,19 +348,103 @@ public class TestRunner
         return true;
     }
 
+    private static bool IsLocalCommand(string command)
+    {
+        string trimmed = command.TrimStart();
+        return trimmed.StartsWith("local:", StringComparison.OrdinalIgnoreCase) ||
+               trimmed.StartsWith("shell:", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetLocalCommand(string command)
+    {
+        string trimmed = command.TrimStart();
+        int colonIndex = trimmed.IndexOf(':');
+        return colonIndex >= 0 ? trimmed[(colonIndex + 1)..].TrimStart() : trimmed;
+    }
+
+    private async Task<List<string>> ExecuteLocalCommandAsync(string command, TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        List<string> output = new();
+        using CancellationTokenSource timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutSource.CancelAfter(timeout);
+
+        ProcessStartInfo startInfo = new()
+        {
+            FileName = OperatingSystem.IsWindows() ? "cmd.exe" : "/bin/bash",
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+
+        if (OperatingSystem.IsWindows())
+        {
+            startInfo.ArgumentList.Add("/C");
+            startInfo.ArgumentList.Add(command);
+        }
+        else
+        {
+            startInfo.ArgumentList.Add("-lc");
+            startInfo.ArgumentList.Add(command);
+        }
+
+        using Process process = new() { StartInfo = startInfo };
+        process.Start();
+
+        Task<string> stdoutTask = process.StandardOutput.ReadToEndAsync(timeoutSource.Token);
+        Task<string> stderrTask = process.StandardError.ReadToEndAsync(timeoutSource.Token);
+
+        try
+        {
+            await process.WaitForExitAsync(timeoutSource.Token);
+            string stdout = await stdoutTask;
+            string stderr = await stderrTask;
+            AddProcessOutput(output, stdout);
+            AddProcessOutput(output, stderr);
+            output.Add($"localExitCode={process.ExitCode}");
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                if (!process.HasExited)
+                    process.Kill(entireProcessTree: true);
+            }
+            catch
+            {
+            }
+
+            output.Add($"ERROR: Local command timed out after {timeout.TotalSeconds:F0}s");
+        }
+
+        return output;
+    }
+
+    private static void AddProcessOutput(List<string> output, string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return;
+
+        foreach (string line in text.Replace("\r\n", "\n").Split('\n'))
+        {
+            if (!string.IsNullOrWhiteSpace(line))
+                output.Add(line);
+        }
+    }
+
     private bool CheckExpectation(ExpectCondition expect, List<string> output)
     {
         string combinedOutput = string.Join("\n", output);
+        string expectedOutput = ExpandVariables(expect.Output);
 
         if (expect.IsContains)
         {
-            string pattern = expect.GetPattern();
+            string pattern = GetExpectationPattern(expectedOutput, "contains");
             return combinedOutput.Contains(pattern, StringComparison.OrdinalIgnoreCase);
         }
 
         if (expect.IsMatches)
         {
-            string pattern = expect.GetPattern();
+            string pattern = GetExpectationPattern(expectedOutput, "matches");
             try
             {
                 return Regex.IsMatch(combinedOutput, pattern, RegexOptions.IgnoreCase);
@@ -371,7 +457,12 @@ public class TestRunner
         }
 
         // Default: exact match
-        return combinedOutput.Contains(expect.Output, StringComparison.OrdinalIgnoreCase);
+        return combinedOutput.Contains(expectedOutput, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string GetExpectationPattern(string output, string prefix)
+    {
+        return output.Substring(prefix.Length).Trim().Trim('"');
     }
 
     private string ExpandVariables(string input)
