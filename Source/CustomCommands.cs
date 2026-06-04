@@ -18,6 +18,7 @@ namespace valheimCLI
         private static readonly FieldInfo? GameFirstSpawnField = typeof(Game).GetField("m_firstSpawn", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo? GameInIntroField = typeof(Game).GetField("m_inIntro", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo? GameRequestRespawnField = typeof(Game).GetField("m_requestRespawn", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo? StoreGuiTraderField = typeof(StoreGui).GetField("m_trader", BindingFlags.Instance | BindingFlags.NonPublic);
 
         public static void Register()
         {
@@ -374,6 +375,53 @@ namespace valheimCLI
                 PrintPlayerState(args.Context.AddString);
             });
 
+            new Terminal.ConsoleCommand("cli_sleep_state", "Print local player bed flag and world sleep timing state", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                PrintSleepState(args.Context.AddString);
+            });
+
+            new Terminal.ConsoleCommand("cli_set_in_bed", "Set local player ZDO inBed flag for validation: cli_set_in_bed <true|false>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2 || !bool.TryParse(args[1], out bool inBed))
+                {
+                    args.Context.AddString("Usage: cli_set_in_bed <true|false>");
+                    return;
+                }
+
+                SetInBedFlag(inBed, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_bed_say", "Attach as if in bed and say a chat message: cli_bed_say <message> [direct]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2)
+                {
+                    args.Context.AddString("Usage: cli_bed_say <message> [direct]");
+                    return;
+                }
+
+                bool direct = args.Length >= 3 && args[args.Length - 1].Equals("direct", StringComparison.OrdinalIgnoreCase);
+                int messageArgCount = direct ? args.Length - 2 : args.Length - 1;
+                string message = string.Join(" ", Enumerable.Range(1, messageArgCount).Select(i => args[i]));
+                AttachBedAndSay(message, direct, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_forged_say_zdo", "Send a Say RPC against a specific ZDO: cli_forged_say_zdo <userId:id> <message>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 3 || !TryParseZdoId(args[1], out ZDOID targetZdo))
+                {
+                    args.Context.AddString("Usage: cli_forged_say_zdo <userId:id> <message>");
+                    return;
+                }
+
+                string message = string.Join(" ", Enumerable.Range(2, args.Length - 2).Select(i => args[i]));
+                SendForgedSayToZdo(targetZdo, message, args.Context.AddString);
+            });
+
+            new Terminal.ConsoleCommand("cli_clear_inventory", "Clear the local player's inventory for validation tests", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                ClearLocalInventory(args.Context.AddString);
+            });
+
             new Terminal.ConsoleCommand("cli_check_bird_drop", "Check for the carried/drop/death repro signal after normal landing", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 CheckBirdDropSignal(args.Context.AddString);
@@ -390,6 +438,46 @@ namespace valheimCLI
                 {
                     args.Context.AddString("OK: Store was not open");
                 }
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_check_global_key", "Check a ZoneSystem global key: cli_check_global_key <key>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2)
+                {
+                    args.Context.AddString("Usage: cli_check_global_key <key>");
+                    return;
+                }
+
+                CheckGlobalKey(args[1], args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_store_items", "Print the currently visible trader store items", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                PrintVisibleStoreItems(args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_trader_items_nearest", "Print available items for the nearest trader: cli_trader_items_nearest [radius] [name]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                float radius = 30f;
+                if (args.Length >= 2)
+                {
+                    float.TryParse(args[1], out radius);
+                }
+
+                string requestedName = args.Length >= 3 ? args[2] : "";
+                PrintNearestTraderItems(radius, requestedName, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_interact_nearest_trader", "Interact with the nearest trader: cli_interact_nearest_trader [radius] [name]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                float radius = 30f;
+                if (args.Length >= 2)
+                {
+                    float.TryParse(args[1], out radius);
+                }
+
+                string requestedName = args.Length >= 3 ? args[2] : "";
+                InteractNearestTrader(radius, requestedName, args.Context.AddString);
             }, isCheat: true);
 
             new Terminal.ConsoleCommand("cli_connect", "Queue a server join: cli_connect <host:port> [password]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
@@ -953,6 +1041,96 @@ namespace valheimCLI
             }
         }
 
+        public static void CheckGlobalKey(string key, Action<string> addOutput)
+        {
+            if (ZoneSystem.instance == null)
+            {
+                addOutput("ERROR: ZoneSystem not available");
+                return;
+            }
+
+            string normalizedKey = key.Trim();
+            if (normalizedKey.Length == 0)
+            {
+                addOutput("ERROR: Global key is empty");
+                return;
+            }
+
+            bool isSet = ZoneSystem.instance.GetGlobalKey(normalizedKey);
+            addOutput($"OK: globalKey={normalizedKey} set={isSet}");
+        }
+
+        public static void PrintVisibleStoreItems(Action<string> addOutput)
+        {
+            if (StoreGui.instance == null || !StoreGui.IsVisible())
+            {
+                addOutput("ERROR: Store is not visible");
+                return;
+            }
+
+            Trader? trader = StoreGuiTraderField?.GetValue(StoreGui.instance) as Trader;
+            if (trader == null)
+            {
+                addOutput("ERROR: Store trader is not available");
+                return;
+            }
+
+            PrintTraderItems(trader, "visible-store", 0f, addOutput);
+        }
+
+        public static void PrintNearestTraderItems(float radius, string requestedName, Action<string> addOutput)
+        {
+            radius = Mathf.Clamp(radius, 0.5f, 80f);
+            Trader? trader = FindNearestComponent<Trader>(requestedName, radius, out _, out float distance);
+            if (trader == null)
+            {
+                string target = string.IsNullOrWhiteSpace(requestedName) ? "trader" : $"trader matching '{requestedName}'";
+                addOutput($"ERROR: No {target} found within {radius:F1}m");
+                return;
+            }
+
+            PrintTraderItems(trader, "nearest-trader", distance, addOutput);
+        }
+
+        public static void InteractNearestTrader(float radius, string requestedName, Action<string> addOutput)
+        {
+            radius = Mathf.Clamp(radius, 0.5f, 80f);
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            Trader? trader = FindNearestComponent<Trader>(requestedName, radius, out string bestName, out float distance);
+            if (trader == null)
+            {
+                string target = string.IsNullOrWhiteSpace(requestedName) ? "trader" : $"trader matching '{requestedName}'";
+                addOutput($"ERROR: No {target} found within {radius:F1}m");
+                return;
+            }
+
+            bool result = trader.Interact(player, false, false);
+            bool storeVisible = StoreGui.instance != null && StoreGui.IsVisible();
+            addOutput($"OK: Interacted with trader={bestName} distance={distance:F1}m result={result} storeVisible={storeVisible}");
+        }
+
+        private static void PrintTraderItems(Trader trader, string source, float distance, Action<string> addOutput)
+        {
+            List<Trader.TradeItem> items = trader.GetAvailableItems();
+            string traderName = Utils.GetPrefabName(trader.gameObject);
+            string distanceText = distance > 0f ? $" distance={distance:F1}m" : "";
+            addOutput($"OK: {source} trader={traderName}{distanceText} itemCount={items.Count}");
+
+            foreach (Trader.TradeItem item in items)
+            {
+                string prefabName = item.m_prefab != null ? item.m_prefab.name : "<null>";
+                string displayName = item.m_prefab?.m_itemData?.m_shared?.m_name ?? "";
+                string requiredKey = item.m_requiredGlobalKey ?? "";
+                addOutput($"ITEM: prefab={prefabName} name={displayName} price={item.m_price} stack={item.m_stack} requiredGlobalKey={requiredKey}");
+            }
+        }
+
         private static void SendObjectRpc<T>(string requestedName, float radius, string methodName, Action<string> addOutput, params object[] parameters)
             where T : Component
         {
@@ -1177,6 +1355,197 @@ namespace valheimCLI
             addOutput($"OK: {details}");
         }
 
+        public static void PrintSleepState(Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            ZNetView nview = player.m_nview;
+            if (nview == null || !nview.IsValid())
+            {
+                addOutput("ERROR: Local player has no valid ZNetView");
+                return;
+            }
+
+            ZDO zdo = nview.GetZDO();
+            bool inBed = zdo.GetBool(ZDOVars.s_inBed);
+            string timeDetails = BuildTimeDetails();
+            addOutput($"OK: inBed={inBed}, playerInBed={player.InBed()}, playerSleeping={player.IsSleeping()}, attached={player.IsAttached()}, zdo={zdo.m_uid}, owner={zdo.GetOwner()}, {timeDetails}");
+        }
+
+        public static void SetInBedFlag(bool inBed, Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            ZNetView nview = player.m_nview;
+            if (nview == null || !nview.IsValid())
+            {
+                addOutput("ERROR: Local player has no valid ZNetView");
+                return;
+            }
+
+            ZDO zdo = nview.GetZDO();
+            bool before = zdo.GetBool(ZDOVars.s_inBed);
+            zdo.Set(ZDOVars.s_inBed, inBed);
+            addOutput($"OK: inBed before={before} after={zdo.GetBool(ZDOVars.s_inBed)}, playerInBed={player.InBed()}, playerSleeping={player.IsSleeping()}, zdo={zdo.m_uid}, owner={zdo.GetOwner()}, {BuildTimeDetails()}");
+        }
+
+        public static void AttachBedAndSay(string message, bool direct, Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            ZNetView nview = player.m_nview;
+            if (nview == null || !nview.IsValid())
+            {
+                addOutput("ERROR: Local player has no valid ZNetView");
+                return;
+            }
+
+            GameObject attachObject = new("valheimCLI_bed_attach_point");
+            attachObject.transform.position = player.transform.position;
+            attachObject.transform.rotation = player.transform.rotation;
+            UnityEngine.Object.DontDestroyOnLoad(attachObject);
+
+            player.AttachStart(
+                attachObject.transform,
+                null,
+                hideWeapons: true,
+                isBed: true,
+                onShip: false,
+                attachAnimation: "attach_bed",
+                detachOffset: new Vector3(0f, 0.5f, 0f));
+
+            if (direct)
+            {
+                nview.InvokeRPC(ZNetView.Everybody, "Say", (int)Talker.Type.Normal, UserInfo.GetLocalUser(), message);
+            }
+            else
+            {
+                Talker talker = player.GetComponent<Talker>();
+                if (talker == null)
+                {
+                    addOutput("ERROR: Local player has no Talker component");
+                    return;
+                }
+
+                talker.Say(Talker.Type.Normal, message);
+            }
+
+            ZDO zdo = nview.GetZDO();
+            addOutput($"OK: bedSay message={message} direct={direct}, inBed={zdo.GetBool(ZDOVars.s_inBed)}, playerInBed={player.InBed()}, playerSleeping={player.IsSleeping()}, attached={player.IsAttached()}, zdo={zdo.m_uid}, owner={zdo.GetOwner()}, {BuildTimeDetails()}");
+        }
+
+        public static void SendForgedSayToZdo(ZDOID targetZdo, string message, Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            ZNetView nview = player.m_nview;
+            if (nview == null || !nview.IsValid())
+            {
+                addOutput("ERROR: Local player has no valid ZNetView");
+                return;
+            }
+
+            if (targetZdo.IsNone())
+            {
+                addOutput("ERROR: Target ZDO cannot be none");
+                return;
+            }
+
+            if (ZRoutedRpc.instance == null)
+            {
+                addOutput("ERROR: ZRoutedRpc is not available");
+                return;
+            }
+
+            ZRoutedRpc.instance.InvokeRoutedRPC(
+                ZRoutedRpc.Everybody,
+                targetZdo,
+                "Say",
+                (int)Talker.Type.Normal,
+                UserInfo.GetLocalUser(),
+                message);
+
+            ZDO senderZdo = nview.GetZDO();
+            addOutput($"OK: forgedSay message={message}, targetZdo={targetZdo}, senderZdo={senderZdo.m_uid}, senderOwner={senderZdo.GetOwner()}");
+        }
+
+        private static bool TryParseZdoId(string value, out ZDOID zdoId)
+        {
+            zdoId = ZDOID.None;
+            string[] parts = value.Split(':');
+            if (parts.Length != 2)
+            {
+                return false;
+            }
+
+            if (!long.TryParse(parts[0], out long userId) || !uint.TryParse(parts[1], out uint id))
+            {
+                return false;
+            }
+
+            zdoId = new ZDOID(userId, id);
+            return true;
+        }
+
+        private static string BuildTimeDetails()
+        {
+            if (ZNet.instance == null || EnvMan.instance == null)
+            {
+                return "time=unavailable";
+            }
+
+            double timeSeconds = ZNet.instance.GetTimeSeconds();
+            return $"timeSeconds={timeSeconds:F2}, day={EnvMan.instance.GetDay(timeSeconds)}, dayFraction={EnvMan.instance.GetDayFraction():F3}, canSleep={EnvMan.CanSleep()}, isAfternoon={EnvMan.IsAfternoon()}, isNight={EnvMan.IsNight()}, isTimeSkipping={EnvMan.instance.IsTimeSkipping()}";
+        }
+
+        public static void ClearLocalInventory(Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            Inventory inventory = player.GetInventory();
+            if (inventory == null)
+            {
+                addOutput("ERROR: Local player inventory is not available");
+                return;
+            }
+
+            int before = inventory.NrOfItems();
+            int extraBefore = CountExtraSlotsItems();
+
+            player.UnequipAllItems();
+            inventory.RemoveAll();
+            player.ClearFood();
+
+            int after = inventory.NrOfItems();
+            int extraAfter = CountExtraSlotsItems();
+            addOutput($"OK: cleared inventory before={before} after={after} extraSlotsBefore={extraBefore} extraSlotsAfter={extraAfter}");
+        }
+
         public static void CheckBirdDropSignal(Action<string> addOutput)
         {
             if (!TryBuildPlayerState(out string details, out PlayerStateSnapshot snapshot))
@@ -1189,6 +1558,42 @@ namespace valheimCLI
             addOutput(signal
                 ? $"OK: Bird drop signal detected ({details})"
                 : $"ERROR: Bird drop signal not detected ({details})");
+        }
+
+        private static int CountExtraSlotsItems()
+        {
+            Type? apiType = AppDomain.CurrentDomain.GetAssemblies()
+                .Select(assembly => assembly.GetType("ExtraSlots.API", throwOnError: false))
+                .FirstOrDefault(type => type != null);
+            MethodInfo? method = apiType?.GetMethod("GetAllExtraSlotsItems", BindingFlags.Public | BindingFlags.Static);
+            if (method == null)
+            {
+                return -1;
+            }
+
+            try
+            {
+                object? result = method.Invoke(null, Array.Empty<object>());
+                if (result is not IEnumerable enumerable)
+                {
+                    return -1;
+                }
+
+                int count = 0;
+                foreach (object value in enumerable)
+                {
+                    if (value is ItemDrop.ItemData)
+                    {
+                        count++;
+                    }
+                }
+
+                return count;
+            }
+            catch
+            {
+                return -1;
+            }
         }
 
         private static void CheckIntroComplete(Action<string> addOutput)
