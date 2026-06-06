@@ -235,10 +235,11 @@ namespace valheimCLI
                             var command = line.Substring(4).Trim();
                             // Remove any invisible/control characters
                             command = new string(command.Where(c => !char.IsControl(c) && c >= 32).ToArray());
+                            _logger.LogInfo($"Queued CLI command: {command}");
                             _pendingCommands.Enqueue(command);
 
                             // Wait for output with timeout
-                            var timeout = DateTime.Now.AddSeconds(5);
+                            var timeout = DateTime.Now.AddSeconds(30);
                             while (DateTime.Now < timeout && _outputBuffer.IsEmpty)
                             {
                                 Thread.Sleep(50);

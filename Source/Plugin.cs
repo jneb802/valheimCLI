@@ -67,7 +67,7 @@ namespace valheimCLI
             Log.LogInfo($"{ModName} loaded. CLI server on port {_portConfig.Value}");
         }
 
-        public void Update()
+        private void Update()
         {
             _stateTracker?.Update();
             ProcessPendingCommands();
@@ -85,6 +85,7 @@ namespace valheimCLI
 
                 try
                 {
+                    Log.LogInfo($"Executing CLI command: {command}");
                     if (!TryExecuteBuiltInCommand(command))
                     {
                         ExecuteCommand(command);
@@ -175,6 +176,36 @@ namespace valheimCLI
                 return true;
             }
 
+            if (parts[0].Equals("cli_goto_location", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2)
+                {
+                    _commandServer?.SendOutput("Usage: cli_goto_location <location_prefab_name_or_group>");
+                    return true;
+                }
+
+                CustomCommands.GotoLocation(parts[1], line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_find_locations", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2)
+                {
+                    _commandServer?.SendOutput("Usage: cli_find_locations <text> [limit]");
+                    return true;
+                }
+
+                int limit = 20;
+                if (parts.Length >= 3)
+                {
+                    int.TryParse(parts[2], out limit);
+                }
+
+                CustomCommands.FindLocations(parts[1], Math.Max(1, limit), line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
             if (parts[0].Equals("cli_logout_save", StringComparison.OrdinalIgnoreCase))
             {
                 CustomCommands.LogoutSave(line => _commandServer?.SendOutput(line));
@@ -244,6 +275,88 @@ namespace valheimCLI
                 }
 
                 CustomCommands.SpawnAt(parts[1], x, y, z, count, level, radius, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_mwl_port_status", StringComparison.OrdinalIgnoreCase))
+            {
+                float radius = 80f;
+                if (parts.Length >= 2)
+                {
+                    float.TryParse(parts[1], out radius);
+                }
+
+                CustomCommands.PrintMwlPortStatus(radius, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_mwl_goto_port", StringComparison.OrdinalIgnoreCase))
+            {
+                int index = 0;
+                if (parts.Length >= 2)
+                {
+                    int.TryParse(parts[1], out index);
+                }
+
+                CustomCommands.GotoMwlPort(Math.Max(0, index), line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_mwl_clear_shipments", StringComparison.OrdinalIgnoreCase))
+            {
+                CustomCommands.ClearMwlShipments(line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_mwl_port_payment_regression", StringComparison.OrdinalIgnoreCase))
+            {
+                string itemPrefab = parts.Length >= 2 ? parts[1] : "Wood";
+                int itemCount = 10;
+                if (parts.Length >= 3)
+                {
+                    int.TryParse(parts[2], out itemCount);
+                }
+
+                CustomCommands.RunMwlPortPaymentRegression(itemPrefab, Math.Max(1, itemCount), line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_mwl_port_delivery_regression", StringComparison.OrdinalIgnoreCase))
+            {
+                string itemPrefab = parts.Length >= 2 ? parts[1] : "Wood";
+                int itemCount = 10;
+                if (parts.Length >= 3)
+                {
+                    int.TryParse(parts[2], out itemCount);
+                }
+
+                CustomCommands.RunMwlPortDeliveryRegression(itemPrefab, Math.Max(1, itemCount), line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_mwl_port_ownership_seed", StringComparison.OrdinalIgnoreCase))
+            {
+                string itemPrefab = parts.Length >= 2 ? parts[1] : "Wood";
+                int itemCount = 10;
+                if (parts.Length >= 3)
+                {
+                    int.TryParse(parts[2], out itemCount);
+                }
+
+                CustomCommands.SeedMwlPortOwnershipShipment(itemPrefab, Math.Max(1, itemCount), line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_mwl_port_ownership_check", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2)
+                {
+                    _commandServer?.SendOutput("Usage: cli_mwl_port_ownership_check <shipmentId> [blocked|allowed]");
+                    return true;
+                }
+
+                string expectation = parts.Length >= 3 ? parts[2] : "blocked";
+                CustomCommands.CheckMwlPortOwnershipShipment(parts[1], expectation, line => _commandServer?.SendOutput(line));
                 return true;
             }
 
