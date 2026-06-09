@@ -41,8 +41,13 @@ public class GameLauncher
             return envPath;
         }
 
-        // Priority 3: Default macOS Steam path
+        // Priority 3: Default Steam path for the current OS
         string homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (OperatingSystem.IsLinux())
+        {
+            return Path.Combine(homeDir, ".steam", "debian-installation", "steamapps", "common", "Valheim");
+        }
+
         return Path.Combine(homeDir, "Library", "Application Support", "Steam", "steamapps", "common", "Valheim");
     }
 
@@ -51,8 +56,7 @@ public class GameLauncher
     /// </summary>
     public bool IsGameRunning()
     {
-        // Check both cases (case-sensitive on macOS)
-        return ProcessExists("valheim") || ProcessExists("Valheim");
+        return ProcessExists("valheim") || ProcessExists("Valheim") || ProcessExists("valheim.x86_64");
     }
 
     /// <summary>
@@ -197,10 +201,11 @@ public class GameLauncher
             }
         }
 
-        // Find and kill any Valheim processes (check both cases for macOS)
+        // Find and kill any Valheim processes.
         Action<Process> killAction = p => p.Kill(entireProcessTree: true);
         ProcessExists("valheim", killAction);
         ProcessExists("Valheim", killAction);
+        ProcessExists("valheim.x86_64", killAction);
     }
 
     /// <summary>
