@@ -1,0 +1,138 @@
+name: Praetoris Telemetry Evidence
+description: Join the Hetzner telemetry server and perform in-game actions that should produce server telemetry.
+
+game:
+  launch: true
+  launchTimeout: 360s
+  stopAfter: false
+
+settings:
+  timeout: 600s
+  stopOnFailure: true
+
+variables:
+  character: TelemetryEvidence
+  server: "178.156.172.16:2456"
+  password: "warpalicious"
+
+tests:
+  - name: Wait for Main Menu
+    waitFor:
+      state: MainMenu
+      timeout: 360s
+      message: Waiting for Valheim to reach the main menu...
+
+  - name: Create Fresh Local Character
+    commands:
+      - cli_create_character ${character} --replace --local
+    expect:
+      output: 'contains "OK: Created and selected character"'
+    wait: 1s
+
+  - name: Join Hetzner Telemetry Server
+    commands:
+      - cli_connect_direct ${server} ${password}
+    expect:
+      output: 'contains "OK: Dedicated server join started"'
+    wait: 1s
+
+  - name: Wait for Server World
+    waitFor:
+      state: InWorld
+      timeout: 360s
+      message: Waiting for the client to enter the Hetzner server world...
+
+  - name: Report Connection Status
+    commands:
+      - cli_connection_status
+    expect:
+      output: 'contains "connectionStatus=Connected"'
+    wait: 1s
+
+  - name: Enable Test Commands
+    commands:
+      - devcommands
+      - god
+      - heal
+    wait: 1s
+
+  - name: Send Chat Evidence
+    commands:
+      - cli_send_chat_rpc praetoris telemetry validation chat
+    expect:
+      output: 'contains "OK: Sent ChatMessage"'
+    wait: 2s
+
+  - name: Damage Enemy Evidence
+    commands:
+      - spawn Greydwarf 1 1 2
+    wait: 2s
+
+  - name: Hit Spawned Enemy
+    commands:
+      - cli_rpc_damage_nearest_character Greydwarf 20 50
+    expect:
+      output: 'contains "OK: Sent RPC_Damage"'
+    wait: 2s
+
+  - name: Clean Enemy Evidence
+    commands:
+      - forcedelete 20 Greydwarf
+    wait: 1s
+
+  - name: Door Interaction Evidence
+    commands:
+      - spawn wood_door 1 1 2
+    wait: 2s
+
+  - name: Interact With Door
+    commands:
+      - cli_rpc_use_nearest door wood_door 10
+    expect:
+      output: 'contains "OK: Sent UseDoor"'
+    wait: 2s
+
+  - name: Clean Door Evidence
+    commands:
+      - forcedelete 20 wood_door
+    wait: 1s
+
+  - name: Container Interaction Evidence
+    commands:
+      - spawn piece_chest_wood 1 1 2
+    wait: 2s
+
+  - name: Interact With Container
+    commands:
+      - cli_rpc_use_nearest container piece_chest_wood 10
+    expect:
+      output: 'contains "OK: Sent RequestOpen"'
+    wait: 1s
+
+  - name: Close Container Ui
+    commands:
+      - cli_close_store
+    wait: 1s
+
+  - name: Clean Container Evidence
+    commands:
+      - forcedelete 20 piece_chest_wood
+    wait: 1s
+
+  - name: Pickable Evidence
+    commands:
+      - spawn pickable_flint 1 1 2
+    wait: 2s
+
+  - name: Pick Spawned Item
+    commands:
+      - cli_rpc_use_nearest pickable pickable_flint 20
+    expect:
+      output: 'contains "OK: Sent RPC_Pick"'
+    wait: 2s
+
+cleanup:
+  - forcedelete 20 Greydwarf
+  - forcedelete 20 wood_door
+  - forcedelete 20 piece_chest_wood
+  - removedrops

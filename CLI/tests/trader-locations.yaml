@@ -1,0 +1,207 @@
+name: Trader Location Tests
+description: Visit all custom trader locations and verify vendor interaction
+
+game:
+  launch: true
+  launchTimeout: 120s
+  stopAfter: false
+
+settings:
+  timeout: 60s
+  stopOnFailure: false
+
+variables:
+  world_name: "tradertest"
+  n: "1"
+
+tests:
+  # --- World Setup ---
+  - name: Wait for Main Menu
+    waitFor:
+      state: MainMenu
+      timeout: 120s
+      message: Waiting for game to reach main menu...
+
+  - name: Create Test World
+    commands:
+      - world_create ${world_name}${n}
+    wait: 2s
+
+  - name: Start World
+    commands:
+      - world_start ${world_name}${n}
+    wait: 2s
+
+  - name: Wait for World Generation
+    waitFor:
+      state: InWorld
+      timeout: 600s
+      message: Waiting for world generation and player spawn...
+
+  - name: Enable Dev Commands
+    commands:
+      - devcommands
+    wait: 500ms
+
+  - name: Enable God Mode
+    commands:
+      - god
+    wait: 500ms
+
+  # --- Location 1: MWL_PlainsTavern1 ---
+  - name: "Goto MWL_PlainsTavern1"
+    commands:
+      - cli_goto_location MWL_PlainsTavern1
+    expect:
+      output: contains "OK"
+    wait: 5s
+
+  - name: "Interact MWL_PlainsTavern1 Vendor"
+    commands:
+      - cli_interact_nearest 30
+    expect:
+      output: contains "OK"
+    wait: 2s
+
+  - name: "Close Store - PlainsTavern1"
+    commands:
+      - cli_close_store
+    expect:
+      output: contains "OK"
+    wait: 1s
+
+  # --- Location 2: MWL_PlainsCamp1 ---
+  - name: "Goto MWL_PlainsCamp1"
+    commands:
+      - cli_goto_location MWL_PlainsCamp1
+    expect:
+      output: contains "OK"
+    wait: 5s
+
+  - name: "Interact MWL_PlainsCamp1 Vendor"
+    commands:
+      - cli_interact_nearest 30
+    expect:
+      output: contains "OK"
+    wait: 2s
+
+  - name: "Close Store - PlainsCamp1"
+    commands:
+      - cli_close_store
+    expect:
+      output: contains "OK"
+    wait: 1s
+
+  # --- Location 3: MWL_BlackForestBlacksmith1 ---
+  - name: "Goto MWL_BlackForestBlacksmith1"
+    commands:
+      - cli_goto_location MWL_BlackForestBlacksmith1
+    expect:
+      output: contains "OK"
+    wait: 5s
+
+  - name: "Interact MWL_BlackForestBlacksmith1 Vendor"
+    commands:
+      - cli_interact_nearest 30
+    expect:
+      output: contains "OK"
+    wait: 2s
+
+  - name: "Close Store - BlackForestBlacksmith1"
+    commands:
+      - cli_close_store
+    expect:
+      output: contains "OK"
+    wait: 1s
+
+  # --- Location 4: MWL_BlackForestBlacksmith2 ---
+  - name: "Goto MWL_BlackForestBlacksmith2"
+    commands:
+      - cli_goto_location MWL_BlackForestBlacksmith2
+    expect:
+      output: contains "OK"
+    wait: 5s
+
+  - name: "Interact MWL_BlackForestBlacksmith2 Vendor"
+    commands:
+      - cli_interact_nearest 30
+    expect:
+      output: contains "OK"
+    wait: 2s
+
+  - name: "Close Store - BlackForestBlacksmith2"
+    commands:
+      - cli_close_store
+    expect:
+      output: contains "OK"
+    wait: 1s
+
+  # --- Location 5: MWL_MountainsBlacksmith1 ---
+  - name: "Goto MWL_MountainsBlacksmith1"
+    commands:
+      - cli_goto_location MWL_MountainsBlacksmith1
+    expect:
+      output: contains "OK"
+    wait: 5s
+
+  - name: "Interact MWL_MountainsBlacksmith1 Vendor"
+    commands:
+      - cli_interact_nearest 30
+    expect:
+      output: contains "OK"
+    wait: 2s
+
+  - name: "Close Store - MountainsBlacksmith1"
+    commands:
+      - cli_close_store
+    expect:
+      output: contains "OK"
+    wait: 1s
+
+  # --- Location 6: MWL_MistlandsBlacksmith1 ---
+  - name: "Goto MWL_MistlandsBlacksmith1"
+    commands:
+      - cli_goto_location MWL_MistlandsBlacksmith1
+    expect:
+      output: contains "OK"
+    wait: 5s
+
+  - name: "Interact MWL_MistlandsBlacksmith1 Vendor"
+    commands:
+      - cli_interact_nearest 30
+    expect:
+      output: contains "OK"
+    wait: 2s
+
+  - name: "Close Store - MistlandsBlacksmith1"
+    commands:
+      - cli_close_store
+    expect:
+      output: contains "OK"
+    wait: 1s
+
+  # --- Location 7: MWL_OceanTavern1 ---
+  - name: "Goto MWL_OceanTavern1"
+    commands:
+      - cli_goto_location MWL_OceanTavern1
+    expect:
+      output: contains "OK"
+    wait: 5s
+
+  - name: "Interact MWL_OceanTavern1 Vendor"
+    commands:
+      - cli_interact_nearest 30
+    expect:
+      output: contains "OK"
+    wait: 2s
+
+  - name: "Close Store - OceanTavern1"
+    commands:
+      - cli_close_store
+    expect:
+      output: contains "OK"
+    wait: 1s
+
+cleanup:
+  - god
+  - cli_close_store
