@@ -357,6 +357,28 @@ namespace valheimCLI
                 PrintPlayerState(args.Context.AddString);
             });
 
+            new Terminal.ConsoleCommand("cli_set_tod", "Set local debug time of day: cli_set_tod <0-1|-1>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2 || !float.TryParse(args[1], out float dayFraction))
+                {
+                    args.Context.AddString("Usage: cli_set_tod <0-1|-1>");
+                    return;
+                }
+
+                SetDebugTimeOfDay(dayFraction, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_set_env", "Set local debug environment: cli_set_env <env|reset>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2)
+                {
+                    args.Context.AddString("Usage: cli_set_env <env|reset>");
+                    return;
+                }
+
+                SetDebugEnvironment(args[1], args.Context.AddString);
+            }, isCheat: true);
+
             new Terminal.ConsoleCommand("cli_sleep_state", "Print local player bed flag and world sleep timing state", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 PrintSleepState(args.Context.AddString);
@@ -3017,6 +3039,54 @@ namespace valheimCLI
 
             details = $"position={position.x:F1},{position.y:F1},{position.z:F1}, heightAboveGround={heightAboveGround:F1}, health={player.GetHealth():F1}, playerInIntro={snapshot.PlayerInIntro}, playerAttached={snapshot.PlayerAttached}, playerDead={snapshot.PlayerDead}, valkyrieActive={snapshot.ValkyrieActive}, guardianPower={player.GetGuardianPowerName()}, deathlinkChoice={deathlinkChoice}";
             return true;
+        }
+
+        internal static void SetDebugTimeOfDay(float dayFraction, Action<string> addOutput)
+        {
+            if (EnvMan.instance == null)
+            {
+                addOutput("ERROR: EnvMan is not ready");
+                return;
+            }
+
+            if (dayFraction < 0f)
+            {
+                EnvMan.instance.m_debugTimeOfDay = false;
+                addOutput("OK: local debug time of day reset");
+                return;
+            }
+
+            EnvMan.instance.m_debugTimeOfDay = true;
+            EnvMan.instance.m_debugTime = Mathf.Clamp01(dayFraction);
+            addOutput($"OK: local debug time of day set to {EnvMan.instance.m_debugTime:F3}");
+        }
+
+        internal static void SetDebugEnvironment(string environmentName, Action<string> addOutput)
+        {
+            if (EnvMan.instance == null)
+            {
+                addOutput("ERROR: EnvMan is not ready");
+                return;
+            }
+
+            if (environmentName.Equals("reset", StringComparison.OrdinalIgnoreCase) ||
+                environmentName.Equals("none", StringComparison.OrdinalIgnoreCase) ||
+                environmentName.Equals("clearenv", StringComparison.OrdinalIgnoreCase))
+            {
+                EnvMan.instance.m_debugEnv = "";
+                addOutput("OK: local debug environment reset");
+                return;
+            }
+
+            EnvSetup environment = EnvMan.instance.GetEnv(environmentName);
+            if (environment == null)
+            {
+                addOutput($"ERROR: Environment not found: {environmentName}");
+                return;
+            }
+
+            EnvMan.instance.m_debugEnv = environment.m_name;
+            addOutput($"OK: local debug environment set to {environment.m_name}");
         }
 
         private struct PlayerStateSnapshot

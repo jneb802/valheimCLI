@@ -148,17 +148,57 @@ public class ValheimClient : IDisposable
         return result;
     }
 
+    public CommandResult ExecuteCommand(string command)
+    {
+        return CommandResult.FromOutput(command, SendCommand(command));
+    }
+
+    public bool TryGetConnectionStatus(out string connectionStatus, out string server)
+    {
+        connectionStatus = "";
+        server = "";
+        CommandResult result = ExecuteCommand("cli_connection_status");
+        foreach (string line in result.Output)
+        {
+            int statusIndex = line.IndexOf("connectionStatus=", StringComparison.OrdinalIgnoreCase);
+            if (statusIndex < 0)
+            {
+                continue;
+            }
+
+            string payload = line[statusIndex..];
+            string[] parts = payload.Split(',', StringSplitOptions.TrimEntries);
+            foreach (string part in parts)
+            {
+                if (part.StartsWith("connectionStatus=", StringComparison.OrdinalIgnoreCase))
+                {
+                    connectionStatus = part["connectionStatus=".Length..];
+                }
+                else if (part.StartsWith("server=", StringComparison.OrdinalIgnoreCase))
+                {
+                    server = part["server=".Length..];
+                }
+            }
+        }
+
+        return !string.IsNullOrWhiteSpace(connectionStatus);
+    }
+
     /// <summary>
     /// Wait for a specific game state with timeout
     /// </summary>
-    public async Task<bool> WaitForStateAsync(string targetState, TimeSpan timeout, CancellationToken cancellationToken = default)
+    public async Task<bool> WaitForStateAsync(
+        string targetState,
+        TimeSpan timeout,
+        CancellationToken cancellationToken = default,
+        TimeSpan? interval = null)
     {
         if (_stream == null || _reader == null)
             throw new InvalidOperationException("Not connected");
 
         DateTime deadline = DateTime.Now.Add(timeout);
         DateTime lastPollTime = DateTime.MinValue;
-        TimeSpan pollInterval = TimeSpan.FromSeconds(2);
+        TimeSpan pollInterval = interval ?? TimeSpan.FromSeconds(2);
 
         while (DateTime.Now < deadline && !cancellationToken.IsCancellationRequested)
         {

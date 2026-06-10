@@ -81,9 +81,9 @@ public class TestSettings
             if (int.TryParse(duration[..^1], out int m))
                 return TimeSpan.FromMinutes(m);
         }
-        else if (int.TryParse(duration, out int defaultMs))
+        else if (int.TryParse(duration, out int defaultSeconds))
         {
-            return TimeSpan.FromMilliseconds(defaultMs);
+            return TimeSpan.FromSeconds(defaultSeconds);
         }
 
         return TimeSpan.FromSeconds(30);
@@ -185,6 +185,7 @@ public class TestPlanResult
     public string FilePath { get; set; } = "";
     public DateTime StartTime { get; set; }
     public DateTime EndTime { get; set; }
+    public string ArtifactDirectory { get; set; } = "";
     public List<TestCaseResult> TestResults { get; set; } = new();
 
     public int Passed => TestResults.Count(r => r.Result == TestResult.Passed);

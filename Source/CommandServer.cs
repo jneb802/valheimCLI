@@ -252,6 +252,11 @@ namespace valheimCLI
                                 outputLines.Add(output);
                             }
 
+                            if (outputLines.Count == 0)
+                            {
+                                outputLines.Add("ERROR: code=command_timeout message=Command timed out waiting for output.");
+                            }
+
                             writer.WriteLine($"OUTPUT:{outputLines.Count}");
                             foreach (var outputLine in outputLines)
                             {
@@ -268,7 +273,7 @@ namespace valheimCLI
             }
             catch (Exception ex)
             {
-                _logger.LogError($"Client handler error: {ex.Message}");
+                _logger.LogError($"Client handler error: {ex}");
             }
             finally
             {

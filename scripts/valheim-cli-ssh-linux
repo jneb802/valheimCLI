@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+host="${VALHEIM_CLI_SSH_HOST:?set VALHEIM_CLI_SSH_HOST}"
+exe="${VALHEIM_CLI_REMOTE_EXE:-valheim-cli}"
+game_path="${VALHEIM_PATH:-}"
+
+remote_args=()
+if [[ -n "$game_path" ]]; then
+  remote_args+=(--game-path "$game_path")
+fi
+remote_args+=("$@")
+
+printf -v quoted '%q ' "$exe" "${remote_args[@]}"
+ssh "$host" "$quoted"

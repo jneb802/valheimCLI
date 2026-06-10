@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using YamlDotNet.Serialization;
 using YamlDotNet.Serialization.NamingConventions;
@@ -39,7 +40,8 @@ public class TestRunner
         TestPlanResult planResult = new()
         {
             FilePath = filePath,
-            StartTime = DateTime.Now
+            StartTime = DateTime.Now,
+            ArtifactDirectory = CreateArtifactDirectory(filePath)
         };
 
         bool launchedGame = false;
@@ -151,6 +153,7 @@ public class TestRunner
         }
 
         planResult.EndTime = DateTime.Now;
+        WriteArtifacts(planResult);
         PrintSummary(planResult);
         return planResult;
     }
@@ -522,7 +525,37 @@ public class TestRunner
         Log($"  Errors:  {result.Errors}", result.Errors > 0 ? ConsoleColor.Magenta : ConsoleColor.Gray);
         Log($"  Total:   {result.TestResults.Count}", ConsoleColor.White);
         Log($"  Duration: {result.TotalDuration.TotalSeconds:F2}s", ConsoleColor.Gray);
+        Log($"  Artifacts: {result.ArtifactDirectory}", ConsoleColor.Gray);
         Log("═══════════════════════════════════════════════════════", ConsoleColor.Cyan);
+    }
+
+    private string CreateArtifactDirectory(string filePath)
+    {
+        string root = !string.IsNullOrWhiteSpace(_options.ArtifactsDirectory)
+            ? _options.ArtifactsDirectory
+            : Path.Combine("CLI", "runs");
+        string planName = Path.GetFileNameWithoutExtension(filePath);
+        string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        string directory = Path.Combine(root, $"{stamp}-{planName}");
+        Directory.CreateDirectory(directory);
+        return directory;
+    }
+
+    private static void WriteArtifacts(TestPlanResult result)
+    {
+        Directory.CreateDirectory(result.ArtifactDirectory);
+        string transcriptPath = Path.Combine(result.ArtifactDirectory, "transcript.txt");
+        List<string> transcript = new();
+        foreach (TestCaseResult test in result.TestResults)
+        {
+            transcript.Add($"[{test.Result}] {test.Name}: {test.Message}");
+            transcript.AddRange(test.Output.Select(line => "  " + line));
+        }
+        File.WriteAllLines(transcriptPath, transcript);
+
+        string summaryPath = Path.Combine(result.ArtifactDirectory, "summary.json");
+        JsonSerializerOptions options = new() { WriteIndented = true, Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() } };
+        File.WriteAllText(summaryPath, JsonSerializer.Serialize(result, options));
     }
 
     private void Log(string message, ConsoleColor color = ConsoleColor.White)
@@ -561,6 +594,8 @@ public class TestRunnerOptions
     public bool? Launch { get; set; } = null;
     public bool? StopAfter { get; set; } = null;
     public TimeSpan? LaunchTimeout { get; set; } = null;
+    public string? ArtifactsDirectory { get; set; } = null;
+    public bool Json { get; set; }
 
     // CLI variables (override YAML variables)
     public Dictionary<string, string> Variables { get; set; } = new();
