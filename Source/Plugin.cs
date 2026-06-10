@@ -93,7 +93,7 @@ namespace valheimCLI
                 }
                 catch (Exception ex)
                 {
-                    _commandServer.SendOutput($"Error: {ex.Message}");
+                    _commandServer.SendOutput($"ERROR: code=unexpected_exception message={ex.Message}");
                     Log.LogError($"Command execution error: {ex}");
                 }
             }
@@ -173,6 +173,30 @@ namespace valheimCLI
             if (parts[0].Equals("cli_connection_status", StringComparison.OrdinalIgnoreCase))
             {
                 _commandServer?.SendOutput($"OK: connectionStatus={ZNet.GetConnectionStatus()}, server={ZNet.GetServerString()}");
+                return true;
+            }
+
+            if (parts[0].Equals("cli_set_tod", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2 || !float.TryParse(parts[1], out float dayFraction))
+                {
+                    _commandServer?.SendOutput("Usage: cli_set_tod <0-1|-1>");
+                    return true;
+                }
+
+                CustomCommands.SetDebugTimeOfDay(dayFraction, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_set_env", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2)
+                {
+                    _commandServer?.SendOutput("Usage: cli_set_env <env|reset>");
+                    return true;
+                }
+
+                CustomCommands.SetDebugEnvironment(parts[1], line => _commandServer?.SendOutput(line));
                 return true;
             }
 

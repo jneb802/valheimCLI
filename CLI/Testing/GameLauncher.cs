@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 
 namespace valheim_cli.Testing;
 
@@ -48,6 +49,16 @@ public class GameLauncher
             return Path.Combine(homeDir, ".steam", "debian-installation", "steamapps", "common", "Valheim");
         }
 
+        if (OperatingSystem.IsWindows())
+        {
+            return Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                "Steam",
+                "steamapps",
+                "common",
+                "Valheim");
+        }
+
         return Path.Combine(homeDir, "Library", "Application Support", "Steam", "steamapps", "common", "Valheim");
     }
 
@@ -57,6 +68,11 @@ public class GameLauncher
     public bool IsGameRunning()
     {
         return ProcessExists("valheim") || ProcessExists("Valheim") || ProcessExists("valheim.x86_64");
+    }
+
+    public bool IsSteamRunning()
+    {
+        return ProcessExists("steam") || ProcessExists("Steam") || ProcessExists("steamwebhelper");
     }
 
     /// <summary>
@@ -91,6 +107,18 @@ public class GameLauncher
     {
         using ValheimClient client = new ValheimClient(_host, _port);
         return client.Connect();
+    }
+
+    public bool TryOpenClient(out ValheimClient client)
+    {
+        client = new ValheimClient(_host, _port);
+        if (client.Connect())
+        {
+            return true;
+        }
+
+        client.Dispose();
+        return false;
     }
 
     /// <summary>
@@ -180,6 +208,148 @@ public class GameLauncher
         return false;
     }
 
+    public async Task<GameStatus> WaitForTargetAsync(
+        WaitTarget target,
+        TimeSpan timeout,
+        TimeSpan interval,
+        CancellationToken cancellationToken = default)
+    {
+        DateTime deadline = DateTime.Now.Add(timeout);
+        GameStatus last = GetStatus();
+
+        while (DateTime.Now < deadline && !cancellationToken.IsCancellationRequested)
+        {
+            last = GetStatus();
+            if (last.Satisfies(target))
+            {
+                return last;
+            }
+
+            if (target == WaitTarget.ServerConnected && last.HasUnrecoverableConnectionFailure)
+            {
+                return last;
+            }
+
+            await Task.Delay(interval, cancellationToken);
+        }
+
+        last.WaitTimedOut = true;
+        last.WaitTargetName = WaitTargets.ToName(target);
+        return last;
+    }
+
+    public async Task<JoinResult> JoinDirectAsync(
+        string server,
+        string? password,
+        string? character,
+        bool createCharacter,
+        TimeSpan timeout,
+        TimeSpan interval,
+        CancellationToken cancellationToken = default)
+    {
+        JoinResult result = new() { Server = server };
+        GameStatus terminalStatus = await WaitForTargetAsync(WaitTarget.Terminal, timeout, interval, cancellationToken);
+        if (!terminalStatus.Satisfies(WaitTarget.Terminal))
+        {
+            result.ErrorCode = terminalStatus.WaitTimedOut ? "timeout" : terminalStatus.DiagnosticCode;
+            result.Message = "Valheim CLI server was not ready for commands.";
+            result.FinalStatus = terminalStatus;
+            return result;
+        }
+
+        using ValheimClient client = new ValheimClient(_host, _port);
+        if (!client.Connect())
+        {
+            result.ErrorCode = "connection_failed";
+            result.Message = $"Cannot connect to Valheim CLI server at {_host}:{_port}.";
+            result.FinalStatus = GetStatus();
+            return result;
+        }
+
+        if (!string.IsNullOrWhiteSpace(character))
+        {
+            GameStatus menuStatus = await WaitForTargetAsync(WaitTarget.MainMenu, timeout, interval, cancellationToken);
+            if (!menuStatus.Satisfies(WaitTarget.MainMenu))
+            {
+                result.ErrorCode = menuStatus.WaitTimedOut ? "timeout" : menuStatus.DiagnosticCode;
+                result.Message = "Main menu was not ready for character selection.";
+                result.FinalStatus = menuStatus;
+                return result;
+            }
+
+            string command = createCharacter
+                ? $"cli_create_character {character} --local"
+                : $"cli_select_character {character}";
+            CommandResult characterResult = client.ExecuteCommand(command);
+            result.Steps.Add(characterResult);
+            if (!characterResult.Ok)
+            {
+                result.ErrorCode = characterResult.ErrorCode;
+                result.Message = characterResult.Message;
+                result.FinalStatus = GetStatus();
+                return result;
+            }
+        }
+
+        string joinCommand = $"cli_connect_direct {server}";
+        if (!string.IsNullOrWhiteSpace(password))
+        {
+            joinCommand += $" {password}";
+        }
+
+        CommandResult joinCommandResult = client.ExecuteCommand(joinCommand);
+        result.Steps.Add(new CommandResult
+        {
+            Command = "cli_connect_direct <server> <password>",
+            Ok = joinCommandResult.Ok,
+            ErrorCode = joinCommandResult.ErrorCode,
+            Message = joinCommandResult.Message,
+            Output = joinCommandResult.Output
+        });
+
+        if (!joinCommandResult.Ok)
+        {
+            result.ErrorCode = joinCommandResult.ErrorCode;
+            result.Message = joinCommandResult.Message;
+            result.FinalStatus = GetStatus();
+            return result;
+        }
+
+        GameStatus connectedStatus = await WaitForTargetAsync(WaitTarget.ServerConnected, timeout, interval, cancellationToken);
+        result.FinalStatus = connectedStatus;
+        if (connectedStatus.Satisfies(WaitTarget.ServerConnected))
+        {
+            result.Ok = true;
+            result.Message = "Connected to dedicated server.";
+            return result;
+        }
+
+        result.ErrorCode = connectedStatus.WaitTimedOut ? "timeout" : connectedStatus.DiagnosticCode;
+        result.Message = ClassifyJoinFailure(connectedStatus);
+        return result;
+    }
+
+    private static string ClassifyJoinFailure(GameStatus status)
+    {
+        string connectionStatus = status.ConnectionStatus.ToLowerInvariant();
+        if (connectionStatus.Contains("errorversion"))
+        {
+            return "Wrong game or mod version.";
+        }
+
+        if (connectionStatus.Contains("errorpassword"))
+        {
+            return "Server password was rejected.";
+        }
+
+        if (connectionStatus.Contains("disconnected"))
+        {
+            return "Disconnected before server connection completed.";
+        }
+
+        return "Server connection was not established before timeout.";
+    }
+
     /// <summary>
     /// Stop the game process gracefully
     /// </summary>
@@ -214,7 +384,20 @@ public class GameLauncher
     public GameStatus GetStatus()
     {
         bool running = IsGameRunning();
-        bool connected = TryConnect();
+        bool connected = false;
+        string state = "Unknown";
+        string connectionStatus = "";
+        string server = "";
+        PluginLogInfo pluginLog = GetPluginLogInfo();
+        if (TryOpenClient(out ValheimClient client))
+        {
+            using (client)
+            {
+                connected = true;
+                state = client.GetState();
+                client.TryGetConnectionStatus(out connectionStatus, out server);
+            }
+        }
 
         return new GameStatus
         {
@@ -222,8 +405,51 @@ public class GameLauncher
             IsConnected = connected,
             GamePath = _gamePath,
             Host = _host,
-            Port = _port
+            Port = _port,
+            State = state,
+            ConnectionStatus = connectionStatus,
+            ConnectedServer = server,
+            PluginLog = pluginLog
         };
+    }
+
+    public PluginLogInfo GetPluginLogInfo()
+    {
+        string logPath = Path.Combine(_gamePath, "BepInEx", "LogOutput.log");
+        PluginLogInfo info = new() { Path = logPath };
+        if (!File.Exists(logPath))
+        {
+            return info;
+        }
+
+        info.Exists = true;
+        try
+        {
+            string text;
+            using (FileStream stream = new FileStream(logPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+            using (StreamReader reader = new StreamReader(stream))
+            {
+                text = reader.ReadToEnd();
+            }
+            MatchCollection matches = Regex.Matches(text, @"valheimCLI loaded\. CLI server on port (?<port>\d+)", RegexOptions.IgnoreCase);
+            if (matches.Count == 0)
+            {
+                return info;
+            }
+
+            Match last = matches[^1];
+            info.PluginLoaded = true;
+            if (int.TryParse(last.Groups["port"].Value, out int detectedPort))
+            {
+                info.Port = detectedPort;
+            }
+        }
+        catch
+        {
+            info.Exists = false;
+        }
+
+        return info;
     }
 }
 
@@ -234,11 +460,109 @@ public class GameStatus
     public string GamePath { get; set; } = "";
     public string Host { get; set; } = "";
     public int Port { get; set; }
+    public string State { get; set; } = "Unknown";
+    public string ConnectionStatus { get; set; } = "";
+    public string ConnectedServer { get; set; } = "";
+    public bool WaitTimedOut { get; set; }
+    public string WaitTargetName { get; set; } = "";
+    public PluginLogInfo PluginLog { get; set; } = new();
+
+    public bool ProcessReady => IsRunning;
+    public bool PluginServerReady => IsConnected;
+    public bool TerminalReady => IsConnected;
+    public bool MainMenuReady => State.Equals("MainMenu", StringComparison.OrdinalIgnoreCase);
+    public bool InWorldReady => State.Equals("InWorld", StringComparison.OrdinalIgnoreCase);
+    public bool LocalPlayerReady => InWorldReady;
+    public bool ServerConnected => InWorldReady && ConnectionStatus.Equals("Connected", StringComparison.OrdinalIgnoreCase);
+    public bool HasUnrecoverableConnectionFailure => ConnectionStatus.Contains("ErrorVersion", StringComparison.OrdinalIgnoreCase) ||
+                                                     ConnectionStatus.Contains("ErrorPassword", StringComparison.OrdinalIgnoreCase);
+    public string DiagnosticCode
+    {
+        get
+        {
+            if (!IsRunning)
+            {
+                return "game_not_running";
+            }
+
+            if (!IsConnected)
+            {
+                if (PluginLog.PluginLoaded && PluginLog.Port.HasValue && PluginLog.Port.Value != Port)
+                {
+                    return "wrong_port";
+                }
+
+                if (PluginLog.PluginLoaded)
+                {
+                    return "plugin_server_not_listening";
+                }
+
+                if (PluginLog.Exists)
+                {
+                    return "plugin_missing_or_not_loaded";
+                }
+
+                return "bepinex_log_missing";
+            }
+
+            return "not_ready";
+        }
+    }
+
+    public string DiagnosticMessage
+    {
+        get
+        {
+            string code = DiagnosticCode;
+            switch (code)
+            {
+                case "game_not_running":
+                    return "Valheim process is not running.";
+                case "wrong_port":
+                    return $"valheimCLI loaded on port {PluginLog.Port}, but the CLI is checking {Port}.";
+                case "plugin_server_not_listening":
+                    return "valheimCLI appears in the BepInEx log, but the requested CLI port is not accepting connections.";
+                case "plugin_missing_or_not_loaded":
+                    return "BepInEx log exists, but no valheimCLI loaded marker was found.";
+                case "bepinex_log_missing":
+                    return "BepInEx log was not found at the resolved game path.";
+                case "not_ready":
+                    return IsConnected ? "CLI server is reachable." : "Game is running, but the requested readiness target has not been reached.";
+                default:
+                    return "Game is running, but the requested readiness target has not been reached.";
+            }
+        }
+    }
+
+    public bool Satisfies(WaitTarget target)
+    {
+        return target switch
+        {
+            WaitTarget.Process => ProcessReady,
+            WaitTarget.PluginServer => PluginServerReady,
+            WaitTarget.Terminal => TerminalReady,
+            WaitTarget.MainMenu => MainMenuReady,
+            WaitTarget.InWorld => InWorldReady,
+            WaitTarget.LocalPlayer => LocalPlayerReady,
+            WaitTarget.ServerConnected => ServerConnected,
+            _ => false
+        };
+    }
 
     public override string ToString()
     {
         string runningStatus = IsRunning ? "Running" : "Not running";
         string connectionStatus = IsConnected ? "Connected" : "Not connected";
-        return $"Game: {runningStatus}, Server: {connectionStatus} ({Host}:{Port})";
+        return $"Game: {runningStatus}, Server: {connectionStatus} ({Host}:{Port}), State: {State}";
     }
+}
+
+public class JoinResult
+{
+    public bool Ok { get; set; }
+    public string Server { get; set; } = "";
+    public string Message { get; set; } = "";
+    public string ErrorCode { get; set; } = "";
+    public List<CommandResult> Steps { get; set; } = new();
+    public GameStatus? FinalStatus { get; set; }
 }

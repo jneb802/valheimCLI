@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+exe="${VALHEIM_CLI_EXE:-./CLI/bin/Debug/net9.0/valheim-cli}"
+game_path="${VALHEIM_PATH:-}"
+
+args=()
+if [[ -n "$game_path" ]]; then
+  args+=(--game-path "$game_path")
+fi
+
+exec "$exe" "${args[@]}" "$@"

@@ -32,5 +32,20 @@ logoutput.log
 *.tmp
 *.temp
 
+# Local validation plans and generated artifacts
+CLI/runs/
+CLI/local-tests/
+CLI/tmp/
+CLI/screenshots/
+CLI/logs/
+CLI/evidence/
+*.log
+*.png
+*.jpg
+*.jpeg
+*.mp4
+*.webm
+*.jsonl
+
 # CLAUDE.md  # Uncomment to ignore Claude Code context file
 .claude/
