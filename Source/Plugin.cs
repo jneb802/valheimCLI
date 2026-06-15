@@ -302,6 +302,24 @@ namespace valheimCLI
                 return true;
             }
 
+            if (parts[0].Equals("cli_zdo_resend_destroyed", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2)
+                {
+                    _commandServer?.SendOutput("Usage: cli_zdo_resend_destroyed <zdoId> [delaySeconds]");
+                    return true;
+                }
+
+                float delaySeconds = 3f;
+                if (parts.Length >= 3)
+                {
+                    float.TryParse(parts[2], out delaySeconds);
+                }
+
+                CustomCommands.ResendDestroyedZdo(parts[1], Math.Max(0.5f, delaySeconds), line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
             if (parts[0].Equals("cli_mwl_port_status", StringComparison.OrdinalIgnoreCase))
             {
                 float radius = 80f;
