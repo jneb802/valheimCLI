@@ -215,6 +215,23 @@ namespace valheimCLI
                 SpawnAt(args[1], x, y, z, count, level, radius, args.Context.AddString);
             }, isCheat: true);
 
+            new Terminal.ConsoleCommand("cli_zdo_resend_destroyed", "Destroy a local ZDO, then resend it through ZDOData: cli_zdo_resend_destroyed <zdoId> [delaySeconds]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2)
+                {
+                    args.Context.AddString("Usage: cli_zdo_resend_destroyed <zdoId> [delaySeconds]");
+                    return;
+                }
+
+                float delaySeconds = 3f;
+                if (args.Length >= 3)
+                {
+                    float.TryParse(args[2], out delaySeconds);
+                }
+
+                ResendDestroyedZdo(args[1], Math.Max(0.5f, delaySeconds), args.Context.AddString);
+            }, isCheat: true);
+
             new Terminal.ConsoleCommand("cli_send_chat_rpc", "Send a routed chat RPC to the server: cli_send_chat_rpc <message>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length < 2)
@@ -2449,6 +2466,102 @@ namespace valheimCLI
             bool before = zdo.GetBool(ZDOVars.s_inBed);
             zdo.Set(ZDOVars.s_inBed, inBed);
             addOutput($"OK: inBed before={before} after={zdo.GetBool(ZDOVars.s_inBed)}, playerInBed={player.InBed()}, playerSleeping={player.IsSleeping()}, zdo={zdo.m_uid}, owner={zdo.GetOwner()}, {BuildTimeDetails()}");
+        }
+
+        public static void ResendDestroyedZdo(string zdoIdText, float delaySeconds, Action<string> addOutput)
+        {
+            if (!TryParseZdoId(zdoIdText, out ZDOID zdoId))
+            {
+                addOutput("ERROR: Invalid ZDO id. Expected user:id.");
+                return;
+            }
+
+            if (ZDOMan.instance == null || ZNet.instance == null || ZRoutedRpc.instance == null)
+            {
+                addOutput("ERROR: ZDO/ZNet systems are not available");
+                return;
+            }
+
+            ZNetPeer serverPeer = ZNet.instance.GetServerPeer();
+            if (serverPeer == null || serverPeer.m_rpc == null)
+            {
+                addOutput("ERROR: Server peer RPC is not available");
+                return;
+            }
+
+            ZDO zdo = ZDOMan.instance.GetZDO(zdoId);
+            if (zdo == null)
+            {
+                addOutput($"ERROR: ZDO {zdoId} is not loaded locally");
+                return;
+            }
+
+            if (!zdo.IsOwner())
+            {
+                addOutput($"ERROR: Local client is not owner of ZDO {zdoId}; owner={zdo.GetOwner()}");
+                return;
+            }
+
+            ushort ownerRevision = (ushort)(zdo.OwnerRevision + 1);
+            uint dataRevision = zdo.DataRevision + 1U;
+            long ownerPeerId = ZDOMan.GetSessionID();
+            Vector3 position = zdo.GetPosition();
+            int prefabHash = zdo.GetPrefab();
+            ZPackage itemPayload = new();
+            itemPayload.Write((ushort)0);
+            itemPayload.Write(prefabHash);
+            byte[] payloadBytes = itemPayload.GetArray();
+
+            ZPackage destroyPackage = new();
+            destroyPackage.Write(1);
+            destroyPackage.Write(zdoId);
+            ZRoutedRpc.instance.InvokeRoutedRPC(ZRoutedRpc.Everybody, "DestroyZDO", destroyPackage);
+            ZDOMan.instance.DestroyZDO(zdo);
+
+            if (valheimCLIPlugin.Instance == null)
+            {
+                addOutput("ERROR: valheimCLI plugin instance is not available");
+                return;
+            }
+
+            valheimCLIPlugin.Instance.StartCoroutine(ResendDestroyedZdoRoutine(
+                serverPeer.m_rpc,
+                zdoId,
+                ownerRevision,
+                dataRevision,
+                ownerPeerId,
+                position,
+                payloadBytes,
+                delaySeconds,
+                addOutput));
+
+            addOutput($"OK: queued destroyed ZDO resend zdo={zdoId}, prefabHash={prefabHash}, dataRevision={dataRevision}, delay={delaySeconds:F1}s");
+        }
+
+        private static IEnumerator ResendDestroyedZdoRoutine(
+            ZRpc serverRpc,
+            ZDOID zdoId,
+            ushort ownerRevision,
+            uint dataRevision,
+            long ownerPeerId,
+            Vector3 position,
+            byte[] payloadBytes,
+            float delaySeconds,
+            Action<string> addOutput)
+        {
+            yield return new WaitForSeconds(delaySeconds);
+
+            ZPackage zdoData = new();
+            zdoData.Write(0);
+            zdoData.Write(zdoId);
+            zdoData.Write(ownerRevision);
+            zdoData.Write(dataRevision);
+            zdoData.Write(ownerPeerId);
+            zdoData.Write(position);
+            zdoData.Write(new ZPackage(payloadBytes));
+            zdoData.Write(ZDOID.None);
+            serverRpc.Invoke("ZDOData", zdoData);
+            addOutput($"OK: resent destroyed ZDOData zdo={zdoId}, dataRevision={dataRevision}, ownerRevision={ownerRevision}");
         }
 
         public static void AttachBedAndSay(string message, bool direct, Action<string> addOutput)
