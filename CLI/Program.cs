@@ -251,18 +251,90 @@ class Program
             return status.IsConnected ? 0 : (int)CliExitCode.ConnectionFailure;
         }
 
-        Console.WriteLine("Valheim CLI Status");
-        Console.WriteLine("==================");
-        Console.WriteLine($"Game Path:   {status.GamePath}");
-        Console.WriteLine($"Game:        {(status.IsRunning ? "Running" : "Not running")}");
-        Console.WriteLine($"Server:      {status.Host}:{status.Port}");
-        Console.WriteLine($"Connection:  {(status.IsConnected ? "Connected" : "Not connected")}");
-        Console.WriteLine($"State:       {status.State}");
-        Console.WriteLine($"Game Server: {status.ConnectionStatus} {status.ConnectedServer}".TrimEnd());
-        Console.WriteLine($"Diagnostic:  {(status.IsConnected ? "ready" : status.DiagnosticCode)}");
-        Console.WriteLine($"Details:     {status.DiagnosticMessage}");
+        WriteCompactStatus(status);
 
         return status.IsConnected ? 0 : 1;
+    }
+
+    static void WriteCompactStatus(GameStatus status)
+    {
+        string diagnosticCode = status.IsConnected ? "ready" : status.DiagnosticCode;
+        string connectionStatus = string.IsNullOrWhiteSpace(status.ConnectionStatus) ? "none" : status.ConnectionStatus;
+        string connectedServer = string.IsNullOrWhiteSpace(status.ConnectedServer) ? "none" : status.ConnectedServer;
+
+        Console.WriteLine($"valheim-cli status ok={ToBool(status.IsConnected)} code={diagnosticCode}");
+        Console.WriteLine(
+            "readiness " +
+            $"process={ToBool(status.ProcessReady)} " +
+            $"plugin={ToBool(status.PluginServerReady)} " +
+            $"terminal={ToBool(status.TerminalReady)} " +
+            $"mainMenu={ToBool(status.MainMenuReady)} " +
+            $"inWorld={ToBool(status.InWorldReady)} " +
+            $"localPlayer={ToBool(status.LocalPlayerReady)} " +
+            $"serverConnected={ToBool(status.ServerConnected)}");
+        Console.WriteLine(
+            "context " +
+            $"game={FormatState(status.IsRunning ? "running" : "not_running")} " +
+            $"state={FormatState(status.State)} " +
+            $"cli={status.Host}:{status.Port} " +
+            $"connection={FormatState(connectionStatus)} " +
+            $"server={FormatState(connectedServer)}");
+        Console.WriteLine($"diagnostic {diagnosticCode}: {status.DiagnosticMessage}");
+        Console.WriteLine($"next {NextStatusAction(status)}");
+        Console.WriteLine($"path {status.GamePath}");
+    }
+
+    static string NextStatusAction(GameStatus status)
+    {
+        if (status.ServerConnected)
+        {
+            return "Client is in-world and connected; run Valheim commands or validation steps.";
+        }
+
+        if (status.InWorldReady)
+        {
+            return "Client is in-world; run commands or join a server when needed.";
+        }
+
+        if (status.MainMenuReady)
+        {
+            return "Main menu is ready; run join --server HOST:2456 or cli_connect_direct.";
+        }
+
+        if (status.IsConnected)
+        {
+            return "CLI server is reachable; wait for main-menu or run terminal-safe commands.";
+        }
+
+        switch (status.DiagnosticCode)
+        {
+            case "game_not_running":
+                return "Start Valheim with the desired profile, then rerun valheim-cli --status.";
+            case "wrong_port":
+                return status.PluginLog.Port.HasValue
+                    ? $"Rerun with -p {status.PluginLog.Port.Value} or update the plugin port config."
+                    : "Check the valheimCLI port in the BepInEx log and rerun with -p PORT.";
+            case "plugin_server_not_listening":
+                return "Wait for startup to finish; if this persists, inspect the BepInEx log.";
+            case "plugin_missing_or_not_loaded":
+                return status.IsRunning
+                    ? "Wait for startup to finish; if this persists, verify valheimCLI.dll is in the active BepInEx profile."
+                    : "Install valheimCLI.dll in the active BepInEx profile and restart Valheim.";
+            case "bepinex_log_missing":
+                return "Check --game-path or launch Valheim with BepInEx enabled.";
+            default:
+                return "Wait for readiness or inspect the Valheim/BepInEx log.";
+        }
+    }
+
+    static string ToBool(bool value)
+    {
+        return value ? "true" : "false";
+    }
+
+    static string FormatState(string value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "none" : value.Replace(' ', '_');
     }
 
     static async Task<int> RunTestMode(string testFile)
