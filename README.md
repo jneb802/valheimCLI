@@ -28,6 +28,9 @@ valheim> spawn Boar 5
 # Structured status for scripts
 ./CLI/bin/Debug/net9.0/valheim-cli --status --json
 
+# Compact agent-readable status
+./CLI/bin/Debug/net9.0/valheim-cli --status
+
 # Launch with phase diagnostics
 ./CLI/bin/Debug/net9.0/valheim-cli --launch --timeout 180s --json
 
@@ -50,7 +53,18 @@ valheim> spawn Boar 5
 
 ## Readiness And Exit Codes
 
-`--status` reports separate readiness fields for the game process, plugin TCP server, terminal command bridge, main menu, in-world player, local player, and dedicated-server connection. Use `--json` for stable automation output.
+`--status` prints a compact agent-readable summary:
+
+```text
+valheim-cli status ok=false code=game_not_running
+readiness process=false plugin=false terminal=false mainMenu=false inWorld=false localPlayer=false serverConnected=false
+context game=not_running state=Unknown cli=127.0.0.1:5555 connection=none server=none
+diagnostic game_not_running: Valheim process is not running.
+next Start Valheim with the desired profile, then rerun valheim-cli --status.
+path /path/to/Valheim
+```
+
+The readiness line reports separate fields for the game process, plugin TCP server, terminal command bridge, main menu, in-world player, local player, and dedicated-server connection. Use `--json` for stable automation output.
 
 Status diagnostics distinguish these connection failures when the facts are available:
 
