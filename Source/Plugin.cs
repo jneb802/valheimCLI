@@ -302,6 +302,117 @@ namespace valheimCLI
                 return true;
             }
 
+            if (parts[0].Equals("cli_spawn_frozen", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2)
+                {
+                    _commandServer?.SendOutput("Usage: cli_spawn_frozen <prefab> [count] [level] [distance] [spacing]");
+                    return true;
+                }
+
+                int count = 1;
+                if (parts.Length >= 3)
+                {
+                    int.TryParse(parts[2], out count);
+                }
+
+                int level = 1;
+                if (parts.Length >= 4)
+                {
+                    int.TryParse(parts[3], out level);
+                }
+
+                float distance = 12f;
+                if (parts.Length >= 5)
+                {
+                    float.TryParse(parts[4], out distance);
+                }
+
+                float spacing = 3f;
+                if (parts.Length >= 6)
+                {
+                    float.TryParse(parts[5], out spacing);
+                }
+
+                CustomCommands.SpawnFrozenNear(parts[1], count, level, distance, spacing, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_freeze_nearest_character", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2)
+                {
+                    _commandServer?.SendOutput("Usage: cli_freeze_nearest_character <name> [radius]");
+                    return true;
+                }
+
+                float radius = 30f;
+                if (parts.Length >= 3)
+                {
+                    float.TryParse(parts[2], out radius);
+                }
+
+                CustomCommands.FreezeNearestCharacter(parts[1], radius, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_aim_at", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 4 ||
+                    !float.TryParse(parts[1], out float aimX) ||
+                    !float.TryParse(parts[2], out float aimY) ||
+                    !float.TryParse(parts[3], out float aimZ))
+                {
+                    _commandServer?.SendOutput("Usage: cli_aim_at <x> <y> <z>");
+                    return true;
+                }
+
+                CustomCommands.AimAtPoint(new UnityEngine.Vector3(aimX, aimY, aimZ), line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_aim_at_nearest_character", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2)
+                {
+                    _commandServer?.SendOutput("Usage: cli_aim_at_nearest_character <name> [radius] [heightOffset]");
+                    return true;
+                }
+
+                float radius = 50f;
+                if (parts.Length >= 3)
+                {
+                    float.TryParse(parts[2], out radius);
+                }
+
+                float heightOffset = 0.8f;
+                if (parts.Length >= 4)
+                {
+                    float.TryParse(parts[3], out heightOffset);
+                }
+
+                CustomCommands.AimAtNearestCharacter(parts[1], radius, heightOffset, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_fire_current_weapon", StringComparison.OrdinalIgnoreCase))
+            {
+                float holdSeconds = 0.15f;
+                if (parts.Length >= 2)
+                {
+                    float.TryParse(parts[1], out holdSeconds);
+                }
+
+                float waitLoadedSeconds = 4f;
+                if (parts.Length >= 3)
+                {
+                    float.TryParse(parts[2], out waitLoadedSeconds);
+                }
+
+                CustomCommands.FireCurrentWeapon(holdSeconds, waitLoadedSeconds, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
             if (parts[0].Equals("cli_zdo_resend_destroyed", StringComparison.OrdinalIgnoreCase))
             {
                 if (parts.Length < 2)

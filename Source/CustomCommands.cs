@@ -229,6 +229,112 @@ namespace valheimCLI
                 SpawnAt(args[1], x, y, z, count, level, radius, args.Context.AddString);
             }, isCheat: true);
 
+            new Terminal.ConsoleCommand("cli_spawn_frozen", "Spawn frozen damageable creatures in front of the local player: cli_spawn_frozen <prefab> [count] [level] [distance] [spacing]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2)
+                {
+                    args.Context.AddString("Usage: cli_spawn_frozen <prefab> [count] [level] [distance] [spacing]");
+                    return;
+                }
+
+                int count = 1;
+                if (args.Length >= 3)
+                {
+                    int.TryParse(args[2], out count);
+                }
+
+                int level = 1;
+                if (args.Length >= 4)
+                {
+                    int.TryParse(args[3], out level);
+                }
+
+                float distance = 12f;
+                if (args.Length >= 5)
+                {
+                    float.TryParse(args[4], out distance);
+                }
+
+                float spacing = 3f;
+                if (args.Length >= 6)
+                {
+                    float.TryParse(args[5], out spacing);
+                }
+
+                SpawnFrozenNear(args[1], count, level, distance, spacing, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_freeze_nearest_character", "Freeze the nearest damageable non-player character: cli_freeze_nearest_character <name> [radius]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2)
+                {
+                    args.Context.AddString("Usage: cli_freeze_nearest_character <name> [radius]");
+                    return;
+                }
+
+                float radius = 30f;
+                if (args.Length >= 3)
+                {
+                    float.TryParse(args[2], out radius);
+                }
+
+                FreezeNearestCharacter(args[1], radius, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_aim_at", "Aim the local player at world coordinates: cli_aim_at <x> <y> <z>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 4 ||
+                    !float.TryParse(args[1], out float x) ||
+                    !float.TryParse(args[2], out float y) ||
+                    !float.TryParse(args[3], out float z))
+                {
+                    args.Context.AddString("Usage: cli_aim_at <x> <y> <z>");
+                    return;
+                }
+
+                AimAtPoint(new Vector3(x, y, z), args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_aim_at_nearest_character", "Aim the local player at the nearest non-player character: cli_aim_at_nearest_character <name> [radius] [heightOffset]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2)
+                {
+                    args.Context.AddString("Usage: cli_aim_at_nearest_character <name> [radius] [heightOffset]");
+                    return;
+                }
+
+                float radius = 50f;
+                if (args.Length >= 3)
+                {
+                    float.TryParse(args[2], out radius);
+                }
+
+                float heightOffset = 0.8f;
+                if (args.Length >= 4)
+                {
+                    float.TryParse(args[3], out heightOffset);
+                }
+
+                AimAtNearestCharacter(args[1], radius, heightOffset, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_fire_current_weapon", "Fire the equipped weapon through normal player controls: cli_fire_current_weapon [holdSeconds] [waitLoadedSeconds]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                float holdSeconds = 0.15f;
+                if (args.Length >= 2)
+                {
+                    float.TryParse(args[1], out holdSeconds);
+                }
+
+                float waitLoadedSeconds = 4f;
+                if (args.Length >= 3)
+                {
+                    float.TryParse(args[2], out waitLoadedSeconds);
+                }
+
+                FireCurrentWeapon(holdSeconds, waitLoadedSeconds, args.Context.AddString);
+            }, isCheat: true);
+
             new Terminal.ConsoleCommand("cli_zdo_resend_destroyed", "Destroy a local ZDO, then resend it through ZDOData: cli_zdo_resend_destroyed <zdoId> [delaySeconds]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length < 2)
@@ -1845,6 +1951,160 @@ namespace valheimCLI
             SpawnPrefabAt(prefab, resolvedName, new Vector3(x, y, z), count, level, radius, "at", addOutput);
         }
 
+        public static void SpawnFrozenNear(string prefabName, int count, int level, float distance, float spacing, Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            ZNetScene znetScene = ZNetScene.instance;
+            if (znetScene == null)
+            {
+                addOutput("ERROR: ZNetScene not available");
+                return;
+            }
+
+            string resolvedName = ResolvePrefabName(prefabName, znetScene);
+            GameObject prefab = znetScene.GetPrefab(resolvedName);
+            if (prefab == null)
+            {
+                addOutput($"ERROR: Prefab '{prefabName}' not found");
+                return;
+            }
+
+            if (prefab.GetComponent<Character>() == null)
+            {
+                addOutput($"ERROR: Prefab '{resolvedName}' is not a character");
+                return;
+            }
+
+            count = Mathf.Clamp(count, 1, 20);
+            level = Mathf.Clamp(level, 1, 10);
+            distance = Mathf.Clamp(distance, 1f, 80f);
+            spacing = Mathf.Clamp(spacing, 0.5f, 20f);
+
+            Vector3 forward = player.transform.forward;
+            forward.y = 0f;
+            if (forward.sqrMagnitude < 0.001f)
+            {
+                forward = Vector3.forward;
+            }
+            forward.Normalize();
+            Vector3 right = Vector3.Cross(Vector3.up, forward).normalized;
+            Vector3 center = player.transform.position + forward * distance;
+            Quaternion rotation = Quaternion.LookRotation(-forward, Vector3.up);
+
+            List<string> zdoIds = new();
+            for (int i = 0; i < count; i++)
+            {
+                float offset = (i - (count - 1) * 0.5f) * spacing;
+                Vector3 position = center + right * offset;
+                GameObject spawned = UnityEngine.Object.Instantiate(prefab, position, rotation);
+                Character character = spawned.GetComponent<Character>();
+                if (character == null)
+                {
+                    UnityEngine.Object.Destroy(spawned);
+                    continue;
+                }
+
+                if (level > 1)
+                {
+                    character.SetLevel(level);
+                }
+
+                FreezeCharacter(spawned, position, rotation);
+                ZNetView nview = spawned.GetComponent<ZNetView>();
+                if (nview != null && nview.IsValid())
+                {
+                    zdoIds.Add(nview.GetZDO().m_uid.ToString());
+                }
+            }
+
+            string zdoText = zdoIds.Count > 0 ? string.Join(",", zdoIds) : "none";
+            addOutput($"OK: Spawned frozen {count}x {resolvedName} distance={distance:F1} spacing={spacing:F1}; zdo={zdoText}");
+        }
+
+        public static void FreezeNearestCharacter(string requestedName, float radius, Action<string> addOutput)
+        {
+            Character? character = FindNearestCharacter(requestedName, radius, out string bestName, out float bestDistance);
+            if (character == null)
+            {
+                addOutput($"ERROR: No non-player character matching '{requestedName}' found within {radius:F1}m");
+                return;
+            }
+
+            FreezeCharacter(character.gameObject, character.transform.position, character.transform.rotation);
+            addOutput($"OK: Frozen {bestName} at distance {bestDistance:F1}m");
+        }
+
+        public static void AimAtPoint(Vector3 point, Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            Vector3 origin = player.GetEyePoint();
+            Vector3 direction = point - origin;
+            if (direction.sqrMagnitude < 0.001f)
+            {
+                addOutput("ERROR: Aim target is too close to player eye position");
+                return;
+            }
+
+            player.AttackTowardsPlayerLookDir = true;
+            player.SetLookDir(direction.normalized);
+            player.FaceLookDirection();
+            addOutput($"OK: Aimed at {point.x:F2},{point.y:F2},{point.z:F2}");
+        }
+
+        public static void AimAtNearestCharacter(string requestedName, float radius, float heightOffset, Action<string> addOutput)
+        {
+            Character? character = FindNearestCharacter(requestedName, radius, out string bestName, out float bestDistance);
+            if (character == null)
+            {
+                addOutput($"ERROR: No non-player character matching '{requestedName}' found within {radius:F1}m");
+                return;
+            }
+
+            Vector3 point = character.GetCenterPoint() + Vector3.up * heightOffset;
+            AimAtPoint(point, addOutput);
+            addOutput($"OK: Aim target={bestName} distance={bestDistance:F1}m point={point.x:F2},{point.y:F2},{point.z:F2}");
+        }
+
+        public static void FireCurrentWeapon(float holdSeconds, float waitLoadedSeconds, Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            ItemDrop.ItemData weapon = player.GetCurrentWeapon();
+            if (weapon == null)
+            {
+                addOutput("ERROR: No current weapon equipped");
+                return;
+            }
+
+            if (valheimCLIPlugin.Instance == null)
+            {
+                addOutput("ERROR: valheimCLI plugin instance is not available");
+                return;
+            }
+
+            holdSeconds = Mathf.Clamp(holdSeconds, 0.05f, 10f);
+            waitLoadedSeconds = Mathf.Clamp(waitLoadedSeconds, 0f, 30f);
+            valheimCLIPlugin.Instance.StartCoroutine(FireCurrentWeaponRoutine(holdSeconds, waitLoadedSeconds));
+            addOutput($"OK: Queued fire currentWeapon='{weapon.m_shared.m_name}' holdSeconds={holdSeconds:F2} waitLoadedSeconds={waitLoadedSeconds:F1}");
+        }
+
         private static void SpawnPrefabAt(GameObject prefab, string resolvedName, Vector3 basePosition, int count, int level, float radius, string positionLabel, Action<string> addOutput)
         {
             List<string> zdoIds = new();
@@ -3149,6 +3409,83 @@ namespace valheimCLI
             return requestedName;
         }
 
+        private static void FreezeCharacter(GameObject gameObject, Vector3 position, Quaternion rotation)
+        {
+            Character character = gameObject.GetComponent<Character>();
+            if (character != null)
+            {
+                character.SetMoveDir(Vector3.zero);
+            }
+
+            BaseAI baseAI = gameObject.GetComponent<BaseAI>();
+            if (baseAI != null)
+            {
+                baseAI.SetHuntPlayer(false);
+                baseAI.StopMoving();
+                baseAI.enabled = false;
+            }
+
+            ZNetView nview = gameObject.GetComponent<ZNetView>();
+            if (nview != null && nview.IsValid())
+            {
+                ZDO zdo = nview.GetZDO();
+                zdo.Set(ZDOVars.s_huntPlayer, false);
+                zdo.Set(ZDOVars.s_alert, false);
+            }
+
+            FrozenCharacterAnchor anchor = gameObject.GetComponent<FrozenCharacterAnchor>();
+            if (anchor == null)
+            {
+                anchor = gameObject.AddComponent<FrozenCharacterAnchor>();
+            }
+
+            anchor.Initialize(position, rotation);
+        }
+
+        private static IEnumerator FireCurrentWeaponRoutine(float holdSeconds, float waitLoadedSeconds)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                yield break;
+            }
+
+            ItemDrop.ItemData weapon = player.GetCurrentWeapon();
+            if (weapon == null)
+            {
+                yield break;
+            }
+
+            float loadTimeout = Time.time + waitLoadedSeconds;
+            while (weapon.m_shared.m_attack.m_requiresReload && !player.IsWeaponLoaded() && Time.time < loadTimeout)
+            {
+                player.SetControls(Vector3.zero, false, false, false, false, false, false, false, false, false, false);
+                yield return new WaitForFixedUpdate();
+
+                if (player.GetCurrentWeapon() != weapon)
+                {
+                    yield break;
+                }
+            }
+
+            if (weapon.m_shared.m_attack.m_requiresReload && !player.IsWeaponLoaded())
+            {
+                yield break;
+            }
+
+            player.AttackTowardsPlayerLookDir = true;
+            float releaseTime = Time.time + holdSeconds;
+            bool firstFrame = true;
+            while (Time.time < releaseTime)
+            {
+                player.SetControls(Vector3.zero, firstFrame, true, false, false, false, false, false, false, false, false);
+                firstFrame = false;
+                yield return new WaitForFixedUpdate();
+            }
+
+            player.SetControls(Vector3.zero, false, false, false, false, false, false, false, false, false, false);
+        }
+
         private static IEnumerator WalkRoutine(float seconds, bool run)
         {
             float end = Time.time + seconds;
@@ -3269,6 +3606,86 @@ namespace valheimCLI
             }
 
             setter.Invoke(null, new object[] { password });
+        }
+
+        private sealed class FrozenCharacterAnchor : MonoBehaviour
+        {
+            private Vector3 _position;
+            private Quaternion _rotation;
+            private Character? _character;
+            private BaseAI? _baseAI;
+            private Rigidbody? _body;
+            private RigidbodyConstraints _originalConstraints;
+            private bool _initialized;
+
+            public void Initialize(Vector3 position, Quaternion rotation)
+            {
+                _position = position;
+                _rotation = rotation;
+                _character = GetComponent<Character>();
+                _baseAI = GetComponent<BaseAI>();
+                _body = GetComponent<Rigidbody>();
+                if (_body != null)
+                {
+                    _originalConstraints = _body.constraints;
+                    _body.linearVelocity = Vector3.zero;
+                    _body.angularVelocity = Vector3.zero;
+                    _body.constraints = RigidbodyConstraints.FreezeAll;
+                }
+
+                _initialized = true;
+                ApplyFrozenState();
+            }
+
+            private void LateUpdate()
+            {
+                if (!_initialized)
+                {
+                    return;
+                }
+
+                if (_character == null || _character.IsDead())
+                {
+                    RestoreBody();
+                    Destroy(this);
+                    return;
+                }
+
+                ApplyFrozenState();
+            }
+
+            private void ApplyFrozenState()
+            {
+                if (_baseAI != null)
+                {
+                    _baseAI.SetHuntPlayer(false);
+                    _baseAI.StopMoving();
+                    _baseAI.enabled = false;
+                }
+
+                if (_character != null)
+                {
+                    _character.SetMoveDir(Vector3.zero);
+                }
+
+                if (_body != null)
+                {
+                    _body.linearVelocity = Vector3.zero;
+                    _body.angularVelocity = Vector3.zero;
+                }
+
+                transform.SetPositionAndRotation(_position, _rotation);
+            }
+
+            private void RestoreBody()
+            {
+                if (_body == null)
+                {
+                    return;
+                }
+
+                _body.constraints = _originalConstraints;
+            }
         }
     }
 }
