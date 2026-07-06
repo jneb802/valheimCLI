@@ -65,6 +65,20 @@ namespace valheimCLI
                 GotoLocation(args[1], args.Context.AddString);
             }, isCheat: true);
 
+            new Terminal.ConsoleCommand("cli_teleport", "Teleport the player to exact coordinates: cli_teleport <x> <y> <z>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 4 ||
+                    !float.TryParse(args[1], out float teleportX) ||
+                    !float.TryParse(args[2], out float teleportY) ||
+                    !float.TryParse(args[3], out float teleportZ))
+                {
+                    args.Context.AddString("Usage: cli_teleport <x> <y> <z>");
+                    return;
+                }
+
+                TeleportPlayer(new Vector3(teleportX, teleportY, teleportZ), args.Context.AddString);
+            }, isCheat: true);
+
             new Terminal.ConsoleCommand("cli_find_locations", "Find placed locations by prefab or group text: cli_find_locations <text> [limit]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length < 2)
@@ -805,6 +819,19 @@ namespace valheimCLI
             addOutput($"OK: MWL_CLEAR_SHIPMENTS requested={snapshot.Count}");
         }
 
+        public static void TeleportPlayer(Vector3 position, Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            player.TeleportTo(position, player.transform.rotation, distantTeleport: true);
+            addOutput($"OK: Teleported to {position.x:F1}, {position.y:F1}, {position.z:F1}");
+        }
+
         public static void GotoLocation(string locationNameOrGroup, Action<string> addOutput)
         {
             Player player = Player.m_localPlayer;
@@ -828,10 +855,12 @@ namespace valheimCLI
                 return;
             }
 
+            ZoneSystem.LocationInstance? nearest = null;
+            float nearestDistance = float.MaxValue;
             foreach (KeyValuePair<Vector2i, ZoneSystem.LocationInstance> kvp in locationInstances)
             {
                 ZoneSystem.LocationInstance locationInstance = kvp.Value;
-                if (!locationInstance.m_placed || locationInstance.m_location == null)
+                if (locationInstance.m_location == null)
                 {
                     continue;
                 }
@@ -843,13 +872,24 @@ namespace valheimCLI
                     continue;
                 }
 
-                Vector3 position = locationInstance.m_position;
-                player.TeleportTo(position, player.transform.rotation, distantTeleport: true);
-                addOutput($"OK: Teleported to {locationInstance.m_location.m_prefabName} group={locationInstance.m_location.m_group} at {position.x:F0}, {position.y:F0}, {position.z:F0}");
+                float distance = Vector3.Distance(player.transform.position, locationInstance.m_position);
+                if (distance < nearestDistance)
+                {
+                    nearestDistance = distance;
+                    nearest = locationInstance;
+                }
+            }
+
+            if (nearest == null)
+            {
+                addOutput($"ERROR: Location or group '{locationNameOrGroup}' not found");
                 return;
             }
 
-            addOutput($"ERROR: Location or group '{locationNameOrGroup}' not found");
+            ZoneSystem.LocationInstance target = nearest.Value;
+            Vector3 targetPosition = target.m_position;
+            player.TeleportTo(targetPosition, player.transform.rotation, distantTeleport: true);
+            addOutput($"OK: Teleported to {target.m_location.m_prefabName} group={target.m_location.m_group} at {targetPosition.x:F0}, {targetPosition.y:F0}, {targetPosition.z:F0} placed={target.m_placed} distance={nearestDistance:F0}");
         }
 
         public static void FindLocations(string query, int limit, Action<string> addOutput)
@@ -869,12 +909,12 @@ namespace valheimCLI
             }
 
             string normalizedQuery = query.Trim();
-            int emitted = 0;
-            int matched = 0;
+            Vector3 playerPosition = Player.m_localPlayer != null ? Player.m_localPlayer.transform.position : Vector3.zero;
+            List<ZoneSystem.LocationInstance> matches = new();
             foreach (KeyValuePair<Vector2i, ZoneSystem.LocationInstance> kvp in locationInstances)
             {
                 ZoneSystem.LocationInstance locationInstance = kvp.Value;
-                if (!locationInstance.m_placed || locationInstance.m_location == null)
+                if (locationInstance.m_location == null)
                 {
                     continue;
                 }
@@ -887,18 +927,25 @@ namespace valheimCLI
                     continue;
                 }
 
-                matched++;
+                matches.Add(locationInstance);
+            }
+
+            matches.Sort((a, b) => Vector3.Distance(playerPosition, a.m_position).CompareTo(Vector3.Distance(playerPosition, b.m_position)));
+            int emitted = 0;
+            foreach (ZoneSystem.LocationInstance locationInstance in matches)
+            {
                 if (emitted >= limit)
                 {
-                    continue;
+                    break;
                 }
 
                 Vector3 position = locationInstance.m_position;
-                addOutput($"LOCATION prefab={prefabName} group={groupName} pos=({position.x:F0},{position.y:F0},{position.z:F0})");
+                float distance = Vector3.Distance(playerPosition, position);
+                addOutput($"LOCATION prefab={locationInstance.m_location.m_prefabName} group={locationInstance.m_location.m_group} pos=({position.x:F0},{position.y:F0},{position.z:F0}) placed={locationInstance.m_placed} distance={distance:F0}");
                 emitted++;
             }
 
-            addOutput($"OK: FIND_LOCATIONS query='{query}' matched={matched} shown={emitted}");
+            addOutput($"OK: FIND_LOCATIONS query='{query}' matched={matches.Count} shown={emitted}");
         }
 
         public static void RunMwlPortPaymentRegression(string itemPrefab, int itemCount, Action<string> addOutput)
