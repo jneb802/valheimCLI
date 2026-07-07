@@ -241,6 +241,16 @@ class Program
                     status = status.ConnectionStatus,
                     server = status.ConnectedServer
                 },
+                load = new
+                {
+                    phase = status.LoadPhase,
+                    locationsGenerated = status.LocationsGenerated,
+                    locationProgress = status.LocationProgress,
+                    estimatedLocationSeconds = status.EstimatedLocationSeconds,
+                    locationCount = status.LocationCount,
+                    activeAreaLoaded = status.ActiveAreaLoaded,
+                    respawnWait = status.RespawnWait
+                },
                 diagnostics = new
                 {
                     code = status.DiagnosticCode,
@@ -276,9 +286,21 @@ class Program
             "context " +
             $"game={FormatState(status.IsRunning ? "running" : "not_running")} " +
             $"state={FormatState(status.State)} " +
+            $"phase={FormatState(status.LoadPhase)} " +
             $"cli={status.Host}:{status.Port} " +
             $"connection={FormatState(connectionStatus)} " +
             $"server={FormatState(connectedServer)}");
+        if (!string.IsNullOrWhiteSpace(status.LoadPhase))
+        {
+            Console.WriteLine(
+                "load " +
+                $"locationsGenerated={ToBool(status.LocationsGenerated)} " +
+                $"locationProgress={status.LocationProgress.ToString("F3", System.Globalization.CultureInfo.InvariantCulture)} " +
+                $"estimatedLocationSeconds={status.EstimatedLocationSeconds.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)} " +
+                $"locationCount={status.LocationCount} " +
+                $"activeAreaLoaded={ToBool(status.ActiveAreaLoaded)} " +
+                $"respawnWait={status.RespawnWait.ToString("F1", System.Globalization.CultureInfo.InvariantCulture)}");
+        }
         Console.WriteLine($"diagnostic {diagnosticCode}: {status.DiagnosticMessage}");
         Console.WriteLine($"next {NextStatusAction(status)}");
         Console.WriteLine($"path {status.GamePath}");
@@ -299,6 +321,21 @@ class Program
         if (status.MainMenuReady)
         {
             return "Main menu is ready; run join --server HOST:2456 or cli_connect_direct.";
+        }
+
+        if (status.LoadPhase.Equals("generating_locations", StringComparison.OrdinalIgnoreCase))
+        {
+            return "World location generation is still running; wait for locationProgress to reach 1.000 before expecting a local player.";
+        }
+
+        if (status.LoadPhase.Equals("loading_active_area", StringComparison.OrdinalIgnoreCase))
+        {
+            return "World generation is done, but the active area is still loading; wait before running player commands.";
+        }
+
+        if (status.LoadPhase.Equals("respawning", StringComparison.OrdinalIgnoreCase))
+        {
+            return "World is loaded and the client is waiting for player respawn.";
         }
 
         if (status.IsConnected)

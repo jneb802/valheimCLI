@@ -394,8 +394,36 @@ public class GameLauncher
             using (client)
             {
                 connected = true;
-                state = client.GetState();
+                Dictionary<string, string> statusDetails = client.GetStatusDetails();
+                if (statusDetails.TryGetValue("state", out string? detailedState) && !string.IsNullOrWhiteSpace(detailedState))
+                {
+                    state = detailedState;
+                }
+                else
+                {
+                    state = client.GetState();
+                }
+
                 client.TryGetConnectionStatus(out connectionStatus, out server);
+                return new GameStatus
+                {
+                    IsRunning = running,
+                    IsConnected = connected,
+                    GamePath = _gamePath,
+                    Host = _host,
+                    Port = _port,
+                    State = state,
+                    LoadPhase = GetDetail(statusDetails, "phase"),
+                    LocationsGenerated = GetBoolDetail(statusDetails, "locationsGenerated"),
+                    LocationProgress = GetFloatDetail(statusDetails, "locationProgress"),
+                    EstimatedLocationSeconds = GetFloatDetail(statusDetails, "estimatedLocationSeconds"),
+                    LocationCount = GetIntDetail(statusDetails, "locationCount"),
+                    ActiveAreaLoaded = GetBoolDetail(statusDetails, "activeAreaLoaded"),
+                    RespawnWait = GetFloatDetail(statusDetails, "respawnWait"),
+                    ConnectionStatus = connectionStatus,
+                    ConnectedServer = server,
+                    PluginLog = pluginLog
+                };
             }
         }
 
@@ -411,6 +439,40 @@ public class GameLauncher
             ConnectedServer = server,
             PluginLog = pluginLog
         };
+    }
+
+    private static string GetDetail(Dictionary<string, string> details, string key)
+    {
+        return details.TryGetValue(key, out string? value) ? value : "";
+    }
+
+    private static bool GetBoolDetail(Dictionary<string, string> details, string key)
+    {
+        return details.TryGetValue(key, out string? value) && value.Equals("true", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static float GetFloatDetail(Dictionary<string, string> details, string key)
+    {
+        if (!details.TryGetValue(key, out string? value))
+        {
+            return 0f;
+        }
+
+        return float.TryParse(value, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out float parsed)
+            ? parsed
+            : 0f;
+    }
+
+    private static int GetIntDetail(Dictionary<string, string> details, string key)
+    {
+        if (!details.TryGetValue(key, out string? value))
+        {
+            return 0;
+        }
+
+        return int.TryParse(value, System.Globalization.NumberStyles.Integer, System.Globalization.CultureInfo.InvariantCulture, out int parsed)
+            ? parsed
+            : 0;
     }
 
     public PluginLogInfo GetPluginLogInfo()
@@ -461,6 +523,13 @@ public class GameStatus
     public string Host { get; set; } = "";
     public int Port { get; set; }
     public string State { get; set; } = "Unknown";
+    public string LoadPhase { get; set; } = "";
+    public bool LocationsGenerated { get; set; }
+    public float LocationProgress { get; set; }
+    public float EstimatedLocationSeconds { get; set; }
+    public int LocationCount { get; set; }
+    public bool ActiveAreaLoaded { get; set; }
+    public float RespawnWait { get; set; }
     public string ConnectionStatus { get; set; } = "";
     public string ConnectedServer { get; set; } = "";
     public bool WaitTimedOut { get; set; }
