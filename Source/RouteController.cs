@@ -33,6 +33,7 @@ namespace valheimCLI
         private static Coroutine? _active;
         private static int _currentIndex = -1;
         private static string _lastResult = "idle";
+        private static PlayerController? _disabledController;
 
         public static bool IsRunning => _active != null;
 
@@ -162,6 +163,17 @@ namespace valheimCLI
 
         private static IEnumerator FollowRoutine()
         {
+            // Vanilla PlayerController re-issues SetControls from real input every
+            // physics tick, zeroing scripted steering. Disable it for the duration.
+            Player routePlayer = Player.m_localPlayer;
+            _disabledController = routePlayer != null ? routePlayer.GetComponent<PlayerController>() : null;
+            if (_disabledController != null)
+            {
+                _disabledController.enabled = false;
+            }
+
+            WaitForFixedUpdate wait = new();
+
             for (int i = 0; i < Route.Count; i++)
             {
                 _currentIndex = i;
@@ -186,6 +198,7 @@ namespace valheimCLI
                     if (player == null)
                     {
                         _lastResult = "aborted: player lost";
+                        ReleaseControls();
                         _active = null;
                         yield break;
                     }
@@ -210,9 +223,12 @@ namespace valheimCLI
                         break;
                     }
 
+                    // SetControls' movedir is look-relative (z = along look direction),
+                    // so face the waypoint and push forward.
+                    player.SetLookDir(direction.normalized);
                     player.SetWalk(wp.Gait == Gait.Walk);
-                    player.SetControls(direction.normalized, false, false, false, false, false, false, false, false, wp.Gait == Gait.Sprint, false);
-                    yield return null;
+                    player.SetControls(Vector3.forward, false, false, false, false, false, false, false, false, wp.Gait == Gait.Sprint, false);
+                    yield return wait;
                 }
             }
 
@@ -233,6 +249,12 @@ namespace valheimCLI
             {
                 player.SetWalk(false);
                 player.SetControls(Vector3.zero, false, false, false, false, false, false, false, false, false, false);
+            }
+
+            if (_disabledController != null)
+            {
+                _disabledController.enabled = true;
+                _disabledController = null;
             }
         }
 
