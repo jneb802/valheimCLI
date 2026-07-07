@@ -302,6 +302,240 @@ namespace valheimCLI
                 return true;
             }
 
+            if (parts[0].Equals("cli_spawn_frozen", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2)
+                {
+                    _commandServer?.SendOutput("Usage: cli_spawn_frozen <prefab> [count] [level] [distance] [spacing]");
+                    return true;
+                }
+
+                int count = 1;
+                if (parts.Length >= 3)
+                {
+                    int.TryParse(parts[2], out count);
+                }
+
+                int level = 1;
+                if (parts.Length >= 4)
+                {
+                    int.TryParse(parts[3], out level);
+                }
+
+                float distance = 12f;
+                if (parts.Length >= 5)
+                {
+                    float.TryParse(parts[4], out distance);
+                }
+
+                float spacing = 3f;
+                if (parts.Length >= 6)
+                {
+                    float.TryParse(parts[5], out spacing);
+                }
+
+                CustomCommands.SpawnFrozenNear(parts[1], count, level, distance, spacing, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_destroy_nearby_characters", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2)
+                {
+                    _commandServer?.SendOutput("Usage: cli_destroy_nearby_characters <name|*> [radius]");
+                    return true;
+                }
+
+                float radius = 40f;
+                if (parts.Length >= 3)
+                {
+                    float.TryParse(parts[2], out radius);
+                }
+
+                CustomCommands.DestroyNearbyCharacters(parts[1], radius, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_set_nearby_character_health", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 3 || !float.TryParse(parts[2], out float health))
+                {
+                    _commandServer?.SendOutput("Usage: cli_set_nearby_character_health <name|*> <health> [radius]");
+                    return true;
+                }
+
+                float radius = 40f;
+                if (parts.Length >= 4)
+                {
+                    float.TryParse(parts[3], out radius);
+                }
+
+                CustomCommands.SetNearbyCharacterHealth(parts[1], health, radius, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_freeze_nearest_character", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2)
+                {
+                    _commandServer?.SendOutput("Usage: cli_freeze_nearest_character <name> [radius]");
+                    return true;
+                }
+
+                float radius = 30f;
+                if (parts.Length >= 3)
+                {
+                    float.TryParse(parts[2], out radius);
+                }
+
+                CustomCommands.FreezeNearestCharacter(parts[1], radius, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_aim_at", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 4 ||
+                    !float.TryParse(parts[1], out float aimX) ||
+                    !float.TryParse(parts[2], out float aimY) ||
+                    !float.TryParse(parts[3], out float aimZ))
+                {
+                    _commandServer?.SendOutput("Usage: cli_aim_at <x> <y> <z>");
+                    return true;
+                }
+
+                CustomCommands.AimAtPoint(new UnityEngine.Vector3(aimX, aimY, aimZ), line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_aim_at_nearest_character", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2)
+                {
+                    _commandServer?.SendOutput("Usage: cli_aim_at_nearest_character <name> [radius] [heightOffset]");
+                    return true;
+                }
+
+                float radius = 50f;
+                if (parts.Length >= 3)
+                {
+                    float.TryParse(parts[2], out radius);
+                }
+
+                float heightOffset = 0.8f;
+                if (parts.Length >= 4)
+                {
+                    float.TryParse(parts[3], out heightOffset);
+                }
+
+                CustomCommands.AimAtNearestCharacter(parts[1], radius, heightOffset, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_fire_current_weapon", StringComparison.OrdinalIgnoreCase))
+            {
+                float holdSeconds = 0.15f;
+                if (parts.Length >= 2)
+                {
+                    float.TryParse(parts[1], out holdSeconds);
+                }
+
+                float waitLoadedSeconds = 4f;
+                if (parts.Length >= 3)
+                {
+                    float.TryParse(parts[2], out waitLoadedSeconds);
+                }
+
+                CustomCommands.FireCurrentWeapon(holdSeconds, waitLoadedSeconds, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_weapon_state", StringComparison.OrdinalIgnoreCase))
+            {
+                CustomCommands.PrintWeaponState(line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_set_player_safety", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2 || !bool.TryParse(parts[1], out bool enabled))
+                {
+                    _commandServer?.SendOutput("Usage: cli_set_player_safety <true|false>");
+                    return true;
+                }
+
+                CustomCommands.SetPlayerSafety(enabled, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_give_item", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2)
+                {
+                    _commandServer?.SendOutput("Usage: cli_give_item <prefab> [count] [quality]");
+                    return true;
+                }
+
+                int count = 1;
+                if (parts.Length >= 3)
+                {
+                    int.TryParse(parts[2], out count);
+                }
+
+                int quality = 1;
+                if (parts.Length >= 4)
+                {
+                    int.TryParse(parts[3], out quality);
+                }
+
+                CustomCommands.GiveItem(parts[1], Math.Max(1, count), Math.Max(1, Math.Min(4, quality)), line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_equip_item", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2)
+                {
+                    _commandServer?.SendOutput("Usage: cli_equip_item <prefab-or-display-name>");
+                    return true;
+                }
+
+                CustomCommands.EquipInventoryItem(parts[1], line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_apply_magic_effect", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 3)
+                {
+                    _commandServer?.SendOutput("Usage: cli_apply_magic_effect <item> <effect> [rarity] [value]");
+                    return true;
+                }
+
+                string rarity = parts.Length >= 4 ? parts[3] : "Magic";
+                float value = 1f;
+                if (parts.Length >= 5)
+                {
+                    float.TryParse(parts[4], out value);
+                }
+
+                CustomCommands.ApplyMagicEffect(parts[1], parts[2], rarity, value, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_setup_reload_on_kill_clip", StringComparison.OrdinalIgnoreCase))
+            {
+                string crossbow = parts.Length >= 2 ? parts[1] : "CrossbowArbalest";
+                string bolt = parts.Length >= 3 ? parts[2] : "BoltCarapace";
+                int boltCount = 100;
+                if (parts.Length >= 4)
+                {
+                    int.TryParse(parts[3], out boltCount);
+                }
+
+                CustomCommands.SetupReloadOnKillClip(crossbow, bolt, Math.Max(1, boltCount), line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
             if (parts[0].Equals("cli_zdo_resend_destroyed", StringComparison.OrdinalIgnoreCase))
             {
                 if (parts.Length < 2)

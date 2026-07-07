@@ -65,6 +65,20 @@ namespace valheimCLI
                 GotoLocation(args[1], args.Context.AddString);
             }, isCheat: true);
 
+            new Terminal.ConsoleCommand("cli_teleport", "Teleport the player to exact coordinates: cli_teleport <x> <y> <z>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 4 ||
+                    !float.TryParse(args[1], out float teleportX) ||
+                    !float.TryParse(args[2], out float teleportY) ||
+                    !float.TryParse(args[3], out float teleportZ))
+                {
+                    args.Context.AddString("Usage: cli_teleport <x> <y> <z>");
+                    return;
+                }
+
+                TeleportPlayer(new Vector3(teleportX, teleportY, teleportZ), args.Context.AddString);
+            }, isCheat: true);
+
             new Terminal.ConsoleCommand("cli_find_locations", "Find placed locations by prefab or group text: cli_find_locations <text> [limit]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length < 2)
@@ -213,6 +227,227 @@ namespace valheimCLI
                 }
 
                 SpawnAt(args[1], x, y, z, count, level, radius, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_spawn_frozen", "Spawn frozen damageable creatures in front of the local player: cli_spawn_frozen <prefab> [count] [level] [distance] [spacing]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2)
+                {
+                    args.Context.AddString("Usage: cli_spawn_frozen <prefab> [count] [level] [distance] [spacing]");
+                    return;
+                }
+
+                int count = 1;
+                if (args.Length >= 3)
+                {
+                    int.TryParse(args[2], out count);
+                }
+
+                int level = 1;
+                if (args.Length >= 4)
+                {
+                    int.TryParse(args[3], out level);
+                }
+
+                float distance = 12f;
+                if (args.Length >= 5)
+                {
+                    float.TryParse(args[4], out distance);
+                }
+
+                float spacing = 3f;
+                if (args.Length >= 6)
+                {
+                    float.TryParse(args[5], out spacing);
+                }
+
+                SpawnFrozenNear(args[1], count, level, distance, spacing, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_destroy_nearby_characters", "Destroy nearby non-player characters by prefab/name: cli_destroy_nearby_characters <name|*> [radius]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2)
+                {
+                    args.Context.AddString("Usage: cli_destroy_nearby_characters <name|*> [radius]");
+                    return;
+                }
+
+                float radius = 40f;
+                if (args.Length >= 3)
+                {
+                    float.TryParse(args[2], out radius);
+                }
+
+                DestroyNearbyCharacters(args[1], radius, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_set_nearby_character_health", "Set nearby non-player character health by prefab/name: cli_set_nearby_character_health <name|*> <health> [radius]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 3 || !float.TryParse(args[2], out float health))
+                {
+                    args.Context.AddString("Usage: cli_set_nearby_character_health <name|*> <health> [radius]");
+                    return;
+                }
+
+                float radius = 40f;
+                if (args.Length >= 4)
+                {
+                    float.TryParse(args[3], out radius);
+                }
+
+                SetNearbyCharacterHealth(args[1], health, radius, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_freeze_nearest_character", "Freeze the nearest damageable non-player character: cli_freeze_nearest_character <name> [radius]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2)
+                {
+                    args.Context.AddString("Usage: cli_freeze_nearest_character <name> [radius]");
+                    return;
+                }
+
+                float radius = 30f;
+                if (args.Length >= 3)
+                {
+                    float.TryParse(args[2], out radius);
+                }
+
+                FreezeNearestCharacter(args[1], radius, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_aim_at", "Aim the local player at world coordinates: cli_aim_at <x> <y> <z>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 4 ||
+                    !float.TryParse(args[1], out float x) ||
+                    !float.TryParse(args[2], out float y) ||
+                    !float.TryParse(args[3], out float z))
+                {
+                    args.Context.AddString("Usage: cli_aim_at <x> <y> <z>");
+                    return;
+                }
+
+                AimAtPoint(new Vector3(x, y, z), args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_aim_at_nearest_character", "Aim the local player at the nearest non-player character: cli_aim_at_nearest_character <name> [radius] [heightOffset]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2)
+                {
+                    args.Context.AddString("Usage: cli_aim_at_nearest_character <name> [radius] [heightOffset]");
+                    return;
+                }
+
+                float radius = 50f;
+                if (args.Length >= 3)
+                {
+                    float.TryParse(args[2], out radius);
+                }
+
+                float heightOffset = 0.8f;
+                if (args.Length >= 4)
+                {
+                    float.TryParse(args[3], out heightOffset);
+                }
+
+                AimAtNearestCharacter(args[1], radius, heightOffset, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_fire_current_weapon", "Fire the equipped weapon through normal player controls: cli_fire_current_weapon [holdSeconds] [waitLoadedSeconds]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                float holdSeconds = 0.15f;
+                if (args.Length >= 2)
+                {
+                    float.TryParse(args[1], out holdSeconds);
+                }
+
+                float waitLoadedSeconds = 4f;
+                if (args.Length >= 3)
+                {
+                    float.TryParse(args[2], out waitLoadedSeconds);
+                }
+
+                FireCurrentWeapon(holdSeconds, waitLoadedSeconds, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_weapon_state", "Print equipped weapon, ammo, and reload state", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                PrintWeaponState(args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_set_player_safety", "Set local player god and ghost modes: cli_set_player_safety <true|false>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2 || !bool.TryParse(args[1], out bool enabled))
+                {
+                    args.Context.AddString("Usage: cli_set_player_safety <true|false>");
+                    return;
+                }
+
+                SetPlayerSafety(enabled, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_give_item", "Add an item directly to the local player inventory: cli_give_item <prefab> [count] [quality]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2)
+                {
+                    args.Context.AddString("Usage: cli_give_item <prefab> [count] [quality]");
+                    return;
+                }
+
+                int count = 1;
+                if (args.Length >= 3)
+                {
+                    int.TryParse(args[2], out count);
+                }
+
+                int quality = 1;
+                if (args.Length >= 4)
+                {
+                    int.TryParse(args[3], out quality);
+                }
+
+                GiveItem(args[1], Math.Max(1, count), Mathf.Clamp(quality, 1, 4), args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_equip_item", "Equip an item from the local player inventory: cli_equip_item <prefab-or-display-name>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2)
+                {
+                    args.Context.AddString("Usage: cli_equip_item <prefab-or-display-name>");
+                    return;
+                }
+
+                EquipInventoryItem(args[1], args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_apply_magic_effect", "Apply a single Epic Loot effect to an inventory item: cli_apply_magic_effect <item> <effect> [rarity] [value]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 3)
+                {
+                    args.Context.AddString("Usage: cli_apply_magic_effect <item> <effect> [rarity] [value]");
+                    return;
+                }
+
+                string rarity = args.Length >= 4 ? args[3] : "Magic";
+                float value = 1f;
+                if (args.Length >= 5)
+                {
+                    float.TryParse(args[4], out value);
+                }
+
+                ApplyMagicEffect(args[1], args[2], rarity, value, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_setup_reload_on_kill_clip", "Prepare inventory for ReloadOnKill capture: cli_setup_reload_on_kill_clip [crossbow] [bolt] [boltCount]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                string crossbow = args.Length >= 2 ? args[1] : "CrossbowArbalest";
+                string bolt = args.Length >= 3 ? args[2] : "BoltCarapace";
+                int boltCount = 100;
+                if (args.Length >= 4)
+                {
+                    int.TryParse(args[3], out boltCount);
+                }
+
+                SetupReloadOnKillClip(crossbow, bolt, Math.Max(1, boltCount), args.Context.AddString);
             }, isCheat: true);
 
             new Terminal.ConsoleCommand("cli_zdo_resend_destroyed", "Destroy a local ZDO, then resend it through ZDOData: cli_zdo_resend_destroyed <zdoId> [delaySeconds]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
@@ -805,6 +1040,19 @@ namespace valheimCLI
             addOutput($"OK: MWL_CLEAR_SHIPMENTS requested={snapshot.Count}");
         }
 
+        public static void TeleportPlayer(Vector3 position, Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            player.TeleportTo(position, player.transform.rotation, distantTeleport: true);
+            addOutput($"OK: Teleported to {position.x:F1}, {position.y:F1}, {position.z:F1}");
+        }
+
         public static void GotoLocation(string locationNameOrGroup, Action<string> addOutput)
         {
             Player player = Player.m_localPlayer;
@@ -828,10 +1076,12 @@ namespace valheimCLI
                 return;
             }
 
+            ZoneSystem.LocationInstance? nearest = null;
+            float nearestDistance = float.MaxValue;
             foreach (KeyValuePair<Vector2i, ZoneSystem.LocationInstance> kvp in locationInstances)
             {
                 ZoneSystem.LocationInstance locationInstance = kvp.Value;
-                if (!locationInstance.m_placed || locationInstance.m_location == null)
+                if (locationInstance.m_location == null)
                 {
                     continue;
                 }
@@ -843,13 +1093,24 @@ namespace valheimCLI
                     continue;
                 }
 
-                Vector3 position = locationInstance.m_position;
-                player.TeleportTo(position, player.transform.rotation, distantTeleport: true);
-                addOutput($"OK: Teleported to {locationInstance.m_location.m_prefabName} group={locationInstance.m_location.m_group} at {position.x:F0}, {position.y:F0}, {position.z:F0}");
+                float distance = Vector3.Distance(player.transform.position, locationInstance.m_position);
+                if (distance < nearestDistance)
+                {
+                    nearestDistance = distance;
+                    nearest = locationInstance;
+                }
+            }
+
+            if (nearest == null)
+            {
+                addOutput($"ERROR: Location or group '{locationNameOrGroup}' not found");
                 return;
             }
 
-            addOutput($"ERROR: Location or group '{locationNameOrGroup}' not found");
+            ZoneSystem.LocationInstance target = nearest.Value;
+            Vector3 targetPosition = target.m_position;
+            player.TeleportTo(targetPosition, player.transform.rotation, distantTeleport: true);
+            addOutput($"OK: Teleported to {target.m_location.m_prefabName} group={target.m_location.m_group} at {targetPosition.x:F0}, {targetPosition.y:F0}, {targetPosition.z:F0} placed={target.m_placed} distance={nearestDistance:F0}");
         }
 
         public static void FindLocations(string query, int limit, Action<string> addOutput)
@@ -869,12 +1130,12 @@ namespace valheimCLI
             }
 
             string normalizedQuery = query.Trim();
-            int emitted = 0;
-            int matched = 0;
+            Vector3 playerPosition = Player.m_localPlayer != null ? Player.m_localPlayer.transform.position : Vector3.zero;
+            List<ZoneSystem.LocationInstance> matches = new();
             foreach (KeyValuePair<Vector2i, ZoneSystem.LocationInstance> kvp in locationInstances)
             {
                 ZoneSystem.LocationInstance locationInstance = kvp.Value;
-                if (!locationInstance.m_placed || locationInstance.m_location == null)
+                if (locationInstance.m_location == null)
                 {
                     continue;
                 }
@@ -887,18 +1148,25 @@ namespace valheimCLI
                     continue;
                 }
 
-                matched++;
+                matches.Add(locationInstance);
+            }
+
+            matches.Sort((a, b) => Vector3.Distance(playerPosition, a.m_position).CompareTo(Vector3.Distance(playerPosition, b.m_position)));
+            int emitted = 0;
+            foreach (ZoneSystem.LocationInstance locationInstance in matches)
+            {
                 if (emitted >= limit)
                 {
-                    continue;
+                    break;
                 }
 
                 Vector3 position = locationInstance.m_position;
-                addOutput($"LOCATION prefab={prefabName} group={groupName} pos=({position.x:F0},{position.y:F0},{position.z:F0})");
+                float distance = Vector3.Distance(playerPosition, position);
+                addOutput($"LOCATION prefab={locationInstance.m_location.m_prefabName} group={locationInstance.m_location.m_group} pos=({position.x:F0},{position.y:F0},{position.z:F0}) placed={locationInstance.m_placed} distance={distance:F0}");
                 emitted++;
             }
 
-            addOutput($"OK: FIND_LOCATIONS query='{query}' matched={matched} shown={emitted}");
+            addOutput($"OK: FIND_LOCATIONS query='{query}' matched={matches.Count} shown={emitted}");
         }
 
         public static void RunMwlPortPaymentRegression(string itemPrefab, int itemCount, Action<string> addOutput)
@@ -1796,6 +2064,238 @@ namespace valheimCLI
             radius = Mathf.Clamp(radius, 0.5f, 50f);
 
             SpawnPrefabAt(prefab, resolvedName, new Vector3(x, y, z), count, level, radius, "at", addOutput);
+        }
+
+        public static void SpawnFrozenNear(string prefabName, int count, int level, float distance, float spacing, Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            ZNetScene znetScene = ZNetScene.instance;
+            if (znetScene == null)
+            {
+                addOutput("ERROR: ZNetScene not available");
+                return;
+            }
+
+            string resolvedName = ResolvePrefabName(prefabName, znetScene);
+            GameObject prefab = znetScene.GetPrefab(resolvedName);
+            if (prefab == null)
+            {
+                addOutput($"ERROR: Prefab '{prefabName}' not found");
+                return;
+            }
+
+            if (prefab.GetComponent<Character>() == null)
+            {
+                addOutput($"ERROR: Prefab '{resolvedName}' is not a character");
+                return;
+            }
+
+            count = Mathf.Clamp(count, 1, 20);
+            level = Mathf.Clamp(level, 1, 10);
+            distance = Mathf.Clamp(distance, 1f, 80f);
+            spacing = Mathf.Clamp(spacing, 0.5f, 20f);
+
+            Vector3 forward = player.transform.forward;
+            forward.y = 0f;
+            if (forward.sqrMagnitude < 0.001f)
+            {
+                forward = Vector3.forward;
+            }
+            forward.Normalize();
+            Vector3 right = Vector3.Cross(Vector3.up, forward).normalized;
+            Vector3 center = player.transform.position + forward * distance;
+            Quaternion rotation = Quaternion.LookRotation(-forward, Vector3.up);
+
+            List<string> zdoIds = new();
+            for (int i = 0; i < count; i++)
+            {
+                float offset = (i - (count - 1) * 0.5f) * spacing;
+                Vector3 position = center + right * offset;
+                GameObject spawned = UnityEngine.Object.Instantiate(prefab, position, rotation);
+                Character character = spawned.GetComponent<Character>();
+                if (character == null)
+                {
+                    UnityEngine.Object.Destroy(spawned);
+                    continue;
+                }
+
+                if (level > 1)
+                {
+                    character.SetLevel(level);
+                }
+
+                FreezeCharacter(spawned, position, rotation);
+                ZNetView nview = spawned.GetComponent<ZNetView>();
+                if (nview != null && nview.IsValid())
+                {
+                    zdoIds.Add(nview.GetZDO().m_uid.ToString());
+                }
+            }
+
+            string zdoText = zdoIds.Count > 0 ? string.Join(",", zdoIds) : "none";
+            addOutput($"OK: Spawned frozen {count}x {resolvedName} distance={distance:F1} spacing={spacing:F1}; zdo={zdoText}");
+        }
+
+        public static void DestroyNearbyCharacters(string requestedName, float radius, Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            bool matchAll = requestedName.Equals("*", StringComparison.Ordinal);
+            radius = Mathf.Clamp(radius, 1f, 120f);
+            Vector3 playerPos = player.transform.position;
+            Collider[] colliders = Physics.OverlapSphere(playerPos, radius);
+            HashSet<Character> characters = new();
+            foreach (Collider collider in colliders)
+            {
+                Character character = collider.GetComponentInParent<Character>();
+                if (character == null || character is Player)
+                    continue;
+                if (!matchAll && !CharacterMatches(character, requestedName))
+                    continue;
+
+                characters.Add(character);
+            }
+
+            int destroyed = 0;
+            foreach (Character character in characters)
+            {
+                GameObject gameObject = character.gameObject;
+                if (ZNetScene.instance != null)
+                {
+                    ZNetScene.instance.Destroy(gameObject);
+                }
+                else
+                {
+                    UnityEngine.Object.Destroy(gameObject);
+                }
+
+                destroyed++;
+            }
+
+            addOutput($"OK: destroyedCharacters={destroyed} match={requestedName} radius={radius:F1}");
+        }
+
+        public static void SetNearbyCharacterHealth(string requestedName, float health, float radius, Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            bool matchAll = requestedName.Equals("*", StringComparison.Ordinal);
+            health = Mathf.Clamp(health, 1f, 10000f);
+            radius = Mathf.Clamp(radius, 1f, 120f);
+            Vector3 playerPos = player.transform.position;
+            Collider[] colliders = Physics.OverlapSphere(playerPos, radius);
+            HashSet<Character> characters = new();
+            foreach (Collider collider in colliders)
+            {
+                Character character = collider.GetComponentInParent<Character>();
+                if (character == null || character is Player || character.IsDead())
+                    continue;
+                if (!matchAll && !CharacterMatches(character, requestedName))
+                    continue;
+
+                characters.Add(character);
+            }
+
+            foreach (Character character in characters)
+            {
+                character.SetHealth(health);
+            }
+
+            addOutput($"OK: setHealthCharacters={characters.Count} match={requestedName} health={health:F1} radius={radius:F1}");
+        }
+
+        public static void FreezeNearestCharacter(string requestedName, float radius, Action<string> addOutput)
+        {
+            Character? character = FindNearestCharacter(requestedName, radius, out string bestName, out float bestDistance);
+            if (character == null)
+            {
+                addOutput($"ERROR: No non-player character matching '{requestedName}' found within {radius:F1}m");
+                return;
+            }
+
+            FreezeCharacter(character.gameObject, character.transform.position, character.transform.rotation);
+            addOutput($"OK: Frozen {bestName} at distance {bestDistance:F1}m");
+        }
+
+        public static void AimAtPoint(Vector3 point, Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            Vector3 origin = player.GetEyePoint();
+            Vector3 direction = point - origin;
+            if (direction.sqrMagnitude < 0.001f)
+            {
+                addOutput("ERROR: Aim target is too close to player eye position");
+                return;
+            }
+
+            player.AttackTowardsPlayerLookDir = true;
+            player.SetLookDir(direction.normalized);
+            player.FaceLookDirection();
+            addOutput($"OK: Aimed at {point.x:F2},{point.y:F2},{point.z:F2}");
+        }
+
+        public static void AimAtNearestCharacter(string requestedName, float radius, float heightOffset, Action<string> addOutput)
+        {
+            Character? character = FindNearestCharacter(requestedName, radius, out string bestName, out float bestDistance);
+            if (character == null)
+            {
+                addOutput($"ERROR: No non-player character matching '{requestedName}' found within {radius:F1}m");
+                return;
+            }
+
+            Vector3 point = character.GetCenterPoint() + Vector3.up * heightOffset;
+            AimAtPoint(point, addOutput);
+            addOutput($"OK: Aim target={bestName} distance={bestDistance:F1}m point={point.x:F2},{point.y:F2},{point.z:F2}");
+        }
+
+        public static void FireCurrentWeapon(float holdSeconds, float waitLoadedSeconds, Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            ItemDrop.ItemData weapon = player.GetCurrentWeapon();
+            if (weapon == null)
+            {
+                addOutput("ERROR: No current weapon equipped");
+                return;
+            }
+
+            if (valheimCLIPlugin.Instance == null)
+            {
+                addOutput("ERROR: valheimCLI plugin instance is not available");
+                return;
+            }
+
+            holdSeconds = Mathf.Clamp(holdSeconds, 0.05f, 10f);
+            waitLoadedSeconds = Mathf.Clamp(waitLoadedSeconds, 0f, 30f);
+            valheimCLIPlugin.Instance.StartCoroutine(FireCurrentWeaponRoutine(holdSeconds, waitLoadedSeconds));
+            addOutput($"OK: Queued fire currentWeapon='{weapon.m_shared.m_name}' holdSeconds={holdSeconds:F2} waitLoadedSeconds={waitLoadedSeconds:F1}");
         }
 
         private static void SpawnPrefabAt(GameObject prefab, string resolvedName, Vector3 basePosition, int count, int level, float radius, string positionLabel, Action<string> addOutput)
@@ -2711,6 +3211,281 @@ namespace valheimCLI
             addOutput($"OK: cleared inventory before={before} after={after} extraSlotsBefore={extraBefore} extraSlotsAfter={extraAfter}");
         }
 
+        public static void GiveItem(string itemPrefab, int count, int quality, Action<string> addOutput)
+        {
+            if (!TryGetLocalInventory(addOutput, out Inventory inventory))
+            {
+                return;
+            }
+
+            ItemDrop.ItemData item = inventory.AddItem(itemPrefab, count, quality, 0, 0L, "", true);
+            if (item == null)
+            {
+                addOutput($"ERROR: Could not add item prefab '{itemPrefab}'");
+                return;
+            }
+
+            item.m_durability = item.GetMaxDurability();
+            addOutput($"OK: added item prefab={itemPrefab} name={item.m_shared.m_name} stack={item.m_stack} quality={item.m_quality}");
+        }
+
+        public static void EquipInventoryItem(string requestedName, Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            ItemDrop.ItemData? item = FindInventoryItem(player.GetInventory(), requestedName);
+            if (item == null)
+            {
+                addOutput($"ERROR: No inventory item matching '{requestedName}'");
+                return;
+            }
+
+            bool equipped = player.EquipItem(item);
+            addOutput(equipped
+                ? $"OK: equipped item prefab={GetItemPrefabName(item)} name={item.m_shared.m_name} type={item.m_shared.m_itemType}"
+                : $"ERROR: Equip failed prefab={GetItemPrefabName(item)} name={item.m_shared.m_name} type={item.m_shared.m_itemType}");
+        }
+
+        public static void ApplyMagicEffect(string requestedItemName, string effectType, string rarityName, float effectValue, Action<string> addOutput)
+        {
+            if (!TryGetLocalInventory(addOutput, out Inventory inventory))
+            {
+                return;
+            }
+
+            ItemDrop.ItemData? item = FindInventoryItem(inventory, requestedItemName);
+            if (item == null)
+            {
+                addOutput($"ERROR: No inventory item matching '{requestedItemName}'");
+                return;
+            }
+
+            if (!TryApplyEpicLootMagicEffect(item, effectType, rarityName, effectValue, out string details))
+            {
+                addOutput($"ERROR: {details}");
+                return;
+            }
+
+            addOutput($"OK: applied magic effect item={GetItemPrefabName(item)} effect={effectType} rarity={rarityName} value={effectValue:F2} details={details}");
+        }
+
+        public static void SetupReloadOnKillClip(string crossbowPrefab, string boltPrefab, int boltCount, Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            Inventory inventory = player.GetInventory();
+            if (inventory == null)
+            {
+                addOutput("ERROR: Local player inventory is not available");
+                return;
+            }
+
+            ClearLocalInventory(addOutput);
+
+            ItemDrop.ItemData crossbow = inventory.AddItem(crossbowPrefab, 1, 4, 0, 0L, "", true);
+            if (crossbow == null)
+            {
+                addOutput($"ERROR: Could not add crossbow prefab '{crossbowPrefab}'");
+                return;
+            }
+
+            crossbow.m_durability = crossbow.GetMaxDurability();
+            if (!TryApplyEpicLootMagicEffect(crossbow, "ReloadOnKill", "Magic", 1f, out string magicDetails))
+            {
+                addOutput($"ERROR: Could not apply ReloadOnKill to {crossbowPrefab}: {magicDetails}");
+                return;
+            }
+
+            ItemDrop.ItemData bolts = inventory.AddItem(boltPrefab, boltCount, 1, 0, 0L, "", true);
+            if (bolts == null)
+            {
+                addOutput($"ERROR: Could not add bolt prefab '{boltPrefab}'");
+                return;
+            }
+
+            string[] armorPrefabs = new[] { "HelmetCarapace", "ArmorCarapaceChest", "ArmorCarapaceLegs", "CapeFeather" };
+            List<string> equippedArmor = new();
+            foreach (string armorPrefab in armorPrefabs)
+            {
+                ItemDrop.ItemData armor = inventory.AddItem(armorPrefab, 1, 4, 0, 0L, "", true);
+                if (armor == null)
+                {
+                    addOutput($"WARN: Could not add optional armor prefab '{armorPrefab}'");
+                    continue;
+                }
+
+                armor.m_durability = armor.GetMaxDurability();
+                if (player.EquipItem(armor))
+                {
+                    equippedArmor.Add(armorPrefab);
+                }
+            }
+
+            bool ammoEquipped = player.EquipItem(bolts);
+            bool crossbowEquipped = player.EquipItem(crossbow);
+            addOutput($"OK: setup reload-on-kill clip crossbow={crossbowPrefab} bolts={boltPrefab} boltCount={boltCount} magic={magicDetails} crossbowEquipped={crossbowEquipped} ammoEquipped={ammoEquipped} armor={string.Join(",", equippedArmor)}");
+            PrintWeaponState(addOutput);
+        }
+
+        public static void PrintWeaponState(Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            ItemDrop.ItemData weapon = player.GetCurrentWeapon();
+            ItemDrop.ItemData ammo = player.GetAmmoItem();
+            string weaponText = weapon == null ? "none" : $"{GetItemPrefabName(weapon)}/{weapon.m_shared.m_name}";
+            string ammoText = ammo == null ? "none" : $"{GetItemPrefabName(ammo)}/{ammo.m_shared.m_name} stack={ammo.m_stack}";
+            bool requiresReload = weapon?.m_shared.m_attack.m_requiresReload ?? false;
+            bool loaded = player.IsWeaponLoaded();
+            addOutput($"OK: weapon={weaponText} ammo={ammoText} requiresReload={requiresReload} loaded={loaded} inAttack={player.InAttack()}");
+        }
+
+        public static void SetPlayerSafety(bool enabled, Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            player.SetGodMode(enabled);
+            player.SetGhostMode(enabled);
+            addOutput($"OK: playerSafety enabled={enabled} god={player.InGodMode()} ghost={player.InGhostMode()}");
+        }
+
+        private static bool TryGetLocalInventory(Action<string> addOutput, out Inventory inventory)
+        {
+            inventory = null!;
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return false;
+            }
+
+            inventory = player.GetInventory();
+            if (inventory == null)
+            {
+                addOutput("ERROR: Local player inventory is not available");
+                return false;
+            }
+
+            return true;
+        }
+
+        private static ItemDrop.ItemData? FindInventoryItem(Inventory inventory, string requestedName)
+        {
+            if (inventory == null)
+            {
+                return null;
+            }
+
+            string requested = requestedName.Trim();
+            foreach (ItemDrop.ItemData item in inventory.GetAllItems())
+            {
+                string prefabName = GetItemPrefabName(item);
+                if (prefabName.Equals(requested, StringComparison.OrdinalIgnoreCase) ||
+                    item.m_shared.m_name.Equals(requested, StringComparison.OrdinalIgnoreCase) ||
+                    Localization.instance.Localize(item.m_shared.m_name).Equals(requested, StringComparison.OrdinalIgnoreCase))
+                {
+                    return item;
+                }
+            }
+
+            return inventory.GetAllItems()
+                .FirstOrDefault(item => GetItemPrefabName(item).IndexOf(requested, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                        item.m_shared.m_name.IndexOf(requested, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                        Localization.instance.Localize(item.m_shared.m_name).IndexOf(requested, StringComparison.OrdinalIgnoreCase) >= 0);
+        }
+
+        private static string GetItemPrefabName(ItemDrop.ItemData item)
+        {
+            return item?.m_dropPrefab != null ? item.m_dropPrefab.name : "unknown";
+        }
+
+        private static bool TryApplyEpicLootMagicEffect(ItemDrop.ItemData item, string effectType, string rarityName, float effectValue, out string details)
+        {
+            details = "";
+            Assembly? epicLootAssembly = AppDomain.CurrentDomain.GetAssemblies()
+                .FirstOrDefault(assembly => string.Equals(assembly.GetName().Name, "EpicLoot", StringComparison.OrdinalIgnoreCase));
+            if (epicLootAssembly == null)
+            {
+                details = "EpicLoot assembly is not loaded";
+                return false;
+            }
+
+            Type? magicItemType = epicLootAssembly.GetType("EpicLoot.MagicItem", throwOnError: false);
+            Type? magicItemEffectType = epicLootAssembly.GetType("EpicLoot.MagicItemEffect", throwOnError: false);
+            Type? rarityType = epicLootAssembly.GetType("EpicLoot.ItemRarity", throwOnError: false);
+            Type? itemDataExtensionsType = epicLootAssembly.GetType("EpicLoot.ItemDataExtensions", throwOnError: false);
+            if (magicItemType == null || magicItemEffectType == null || rarityType == null || itemDataExtensionsType == null)
+            {
+                details = "EpicLoot magic item runtime types were not found";
+                return false;
+            }
+
+            MethodInfo? saveMagicItemMethod = itemDataExtensionsType.GetMethod("SaveMagicItem", BindingFlags.Public | BindingFlags.Static);
+            if (saveMagicItemMethod == null)
+            {
+                details = "EpicLoot ItemDataExtensions.SaveMagicItem was not found";
+                return false;
+            }
+
+            try
+            {
+                object magicItem = Activator.CreateInstance(magicItemType);
+                object rarity = Enum.Parse(rarityType, rarityName, true);
+                FieldInfo? rarityField = magicItemType.GetField("Rarity", BindingFlags.Public | BindingFlags.Instance);
+                FieldInfo? effectsField = magicItemType.GetField("Effects", BindingFlags.Public | BindingFlags.Instance);
+                if (rarityField == null || effectsField == null)
+                {
+                    details = "EpicLoot MagicItem fields were not found";
+                    return false;
+                }
+
+                rarityField.SetValue(magicItem, rarity);
+                object? effect = Activator.CreateInstance(magicItemEffectType, effectType, effectValue);
+                if (effect == null)
+                {
+                    details = "Could not create EpicLoot MagicItemEffect";
+                    return false;
+                }
+
+                if (effectsField.GetValue(magicItem) is not IList effects)
+                {
+                    details = "EpicLoot MagicItem effects list was not available";
+                    return false;
+                }
+
+                effects.Add(effect);
+                saveMagicItemMethod.Invoke(null, new object[] { item, magicItem });
+                details = $"assembly={epicLootAssembly.GetName().Version}";
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Exception actual = ex is TargetInvocationException && ex.InnerException != null ? ex.InnerException : ex;
+                details = $"{actual.GetType().Name}: {actual.Message}";
+                return false;
+            }
+        }
+
         public static void CheckBirdDropSignal(Action<string> addOutput)
         {
             if (!TryBuildPlayerState(out string details, out PlayerStateSnapshot snapshot))
@@ -3102,6 +3877,88 @@ namespace valheimCLI
             return requestedName;
         }
 
+        private static void FreezeCharacter(GameObject gameObject, Vector3 position, Quaternion rotation)
+        {
+            Character character = gameObject.GetComponent<Character>();
+            if (character != null)
+            {
+                character.SetMoveDir(Vector3.zero);
+            }
+
+            BaseAI baseAI = gameObject.GetComponent<BaseAI>();
+            if (baseAI != null)
+            {
+                baseAI.SetHuntPlayer(false);
+                baseAI.StopMoving();
+                baseAI.enabled = false;
+            }
+
+            ZNetView nview = gameObject.GetComponent<ZNetView>();
+            if (nview != null && nview.IsValid())
+            {
+                ZDO zdo = nview.GetZDO();
+                zdo.Set(ZDOVars.s_huntPlayer, false);
+                zdo.Set(ZDOVars.s_alert, false);
+            }
+
+            FrozenCharacterAnchor anchor = gameObject.GetComponent<FrozenCharacterAnchor>();
+            if (anchor == null)
+            {
+                anchor = gameObject.AddComponent<FrozenCharacterAnchor>();
+            }
+
+            anchor.Initialize(position, rotation);
+        }
+
+        private static IEnumerator FireCurrentWeaponRoutine(float holdSeconds, float waitLoadedSeconds)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                yield break;
+            }
+
+            ItemDrop.ItemData weapon = player.GetCurrentWeapon();
+            if (weapon == null)
+            {
+                yield break;
+            }
+
+            float loadTimeout = Time.time + waitLoadedSeconds;
+            if (weapon.m_shared.m_attack.m_requiresReload && !player.IsWeaponLoaded())
+            {
+                player.QueueReloadAction();
+            }
+
+            while (weapon.m_shared.m_attack.m_requiresReload && !player.IsWeaponLoaded() && Time.time < loadTimeout)
+            {
+                yield return new WaitForFixedUpdate();
+
+                if (player.GetCurrentWeapon() != weapon)
+                {
+                    yield break;
+                }
+            }
+
+            if (weapon.m_shared.m_attack.m_requiresReload && !player.IsWeaponLoaded())
+            {
+                yield break;
+            }
+
+            player.AttackTowardsPlayerLookDir = true;
+            player.FaceLookDirection();
+            if (!player.StartAttack(null, false))
+            {
+                yield break;
+            }
+
+            float endTime = Time.time + holdSeconds;
+            while (Time.time < endTime)
+            {
+                yield return new WaitForFixedUpdate();
+            }
+        }
+
         private static IEnumerator WalkRoutine(float seconds, bool run)
         {
             float end = Time.time + seconds;
@@ -3222,6 +4079,86 @@ namespace valheimCLI
             }
 
             setter.Invoke(null, new object[] { password });
+        }
+
+        private sealed class FrozenCharacterAnchor : MonoBehaviour
+        {
+            private Vector3 _position;
+            private Quaternion _rotation;
+            private Character? _character;
+            private BaseAI? _baseAI;
+            private Rigidbody? _body;
+            private RigidbodyConstraints _originalConstraints;
+            private bool _initialized;
+
+            public void Initialize(Vector3 position, Quaternion rotation)
+            {
+                _position = position;
+                _rotation = rotation;
+                _character = GetComponent<Character>();
+                _baseAI = GetComponent<BaseAI>();
+                _body = GetComponent<Rigidbody>();
+                if (_body != null)
+                {
+                    _originalConstraints = _body.constraints;
+                    _body.linearVelocity = Vector3.zero;
+                    _body.angularVelocity = Vector3.zero;
+                    _body.constraints = RigidbodyConstraints.FreezeAll;
+                }
+
+                _initialized = true;
+                ApplyFrozenState();
+            }
+
+            private void LateUpdate()
+            {
+                if (!_initialized)
+                {
+                    return;
+                }
+
+                if (_character == null || _character.IsDead())
+                {
+                    RestoreBody();
+                    Destroy(this);
+                    return;
+                }
+
+                ApplyFrozenState();
+            }
+
+            private void ApplyFrozenState()
+            {
+                if (_baseAI != null)
+                {
+                    _baseAI.SetHuntPlayer(false);
+                    _baseAI.StopMoving();
+                    _baseAI.enabled = false;
+                }
+
+                if (_character != null)
+                {
+                    _character.SetMoveDir(Vector3.zero);
+                }
+
+                if (_body != null)
+                {
+                    _body.linearVelocity = Vector3.zero;
+                    _body.angularVelocity = Vector3.zero;
+                }
+
+                transform.SetPositionAndRotation(_position, _rotation);
+            }
+
+            private void RestoreBody()
+            {
+                if (_body == null)
+                {
+                    return;
+                }
+
+                _body.constraints = _originalConstraints;
+            }
         }
     }
 }
