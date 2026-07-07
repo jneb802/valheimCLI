@@ -2342,10 +2342,16 @@ namespace valheimCLI
                 return;
             }
 
+            Vector3 aimDir = direction.normalized;
             player.AttackTowardsPlayerLookDir = true;
-            player.SetLookDir(direction.normalized);
+            player.SetLookDir(aimDir);
+            // SetLookDir only writes m_lookDir and the flattened m_lookYaw. Player
+            // overrides UpdateEyeRotation to rebuild the eye (and therefore GetAimDir)
+            // from m_lookYaw + m_lookPitch every frame, so without setting the pitch
+            // field the vertical component of the aim is lost and projectiles fly level.
+            player.m_lookPitch = -Mathf.Asin(Mathf.Clamp(aimDir.y, -1f, 1f)) * Mathf.Rad2Deg;
             player.FaceLookDirection();
-            addOutput($"OK: Aimed at {point.x:F2},{point.y:F2},{point.z:F2}");
+            addOutput($"OK: Aimed at {point.x:F2},{point.y:F2},{point.z:F2} pitch={player.m_lookPitch:F1}");
         }
 
         public static void AimAtNearestCharacter(string requestedName, float radius, float heightOffset, Action<string> addOutput)
