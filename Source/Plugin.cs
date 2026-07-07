@@ -338,6 +338,42 @@ namespace valheimCLI
                 return true;
             }
 
+            if (parts[0].Equals("cli_destroy_nearby_characters", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2)
+                {
+                    _commandServer?.SendOutput("Usage: cli_destroy_nearby_characters <name|*> [radius]");
+                    return true;
+                }
+
+                float radius = 40f;
+                if (parts.Length >= 3)
+                {
+                    float.TryParse(parts[2], out radius);
+                }
+
+                CustomCommands.DestroyNearbyCharacters(parts[1], radius, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_set_nearby_character_health", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 3 || !float.TryParse(parts[2], out float health))
+                {
+                    _commandServer?.SendOutput("Usage: cli_set_nearby_character_health <name|*> <health> [radius]");
+                    return true;
+                }
+
+                float radius = 40f;
+                if (parts.Length >= 4)
+                {
+                    float.TryParse(parts[3], out radius);
+                }
+
+                CustomCommands.SetNearbyCharacterHealth(parts[1], health, radius, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
             if (parts[0].Equals("cli_freeze_nearest_character", StringComparison.OrdinalIgnoreCase))
             {
                 if (parts.Length < 2)
@@ -410,6 +446,93 @@ namespace valheimCLI
                 }
 
                 CustomCommands.FireCurrentWeapon(holdSeconds, waitLoadedSeconds, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_weapon_state", StringComparison.OrdinalIgnoreCase))
+            {
+                CustomCommands.PrintWeaponState(line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_set_player_safety", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2 || !bool.TryParse(parts[1], out bool enabled))
+                {
+                    _commandServer?.SendOutput("Usage: cli_set_player_safety <true|false>");
+                    return true;
+                }
+
+                CustomCommands.SetPlayerSafety(enabled, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_give_item", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2)
+                {
+                    _commandServer?.SendOutput("Usage: cli_give_item <prefab> [count] [quality]");
+                    return true;
+                }
+
+                int count = 1;
+                if (parts.Length >= 3)
+                {
+                    int.TryParse(parts[2], out count);
+                }
+
+                int quality = 1;
+                if (parts.Length >= 4)
+                {
+                    int.TryParse(parts[3], out quality);
+                }
+
+                CustomCommands.GiveItem(parts[1], Math.Max(1, count), Math.Max(1, Math.Min(4, quality)), line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_equip_item", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2)
+                {
+                    _commandServer?.SendOutput("Usage: cli_equip_item <prefab-or-display-name>");
+                    return true;
+                }
+
+                CustomCommands.EquipInventoryItem(parts[1], line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_apply_magic_effect", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 3)
+                {
+                    _commandServer?.SendOutput("Usage: cli_apply_magic_effect <item> <effect> [rarity] [value]");
+                    return true;
+                }
+
+                string rarity = parts.Length >= 4 ? parts[3] : "Magic";
+                float value = 1f;
+                if (parts.Length >= 5)
+                {
+                    float.TryParse(parts[4], out value);
+                }
+
+                CustomCommands.ApplyMagicEffect(parts[1], parts[2], rarity, value, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_setup_reload_on_kill_clip", StringComparison.OrdinalIgnoreCase))
+            {
+                string crossbow = parts.Length >= 2 ? parts[1] : "CrossbowArbalest";
+                string bolt = parts.Length >= 3 ? parts[2] : "BoltCarapace";
+                int boltCount = 100;
+                if (parts.Length >= 4)
+                {
+                    int.TryParse(parts[3], out boltCount);
+                }
+
+                CustomCommands.SetupReloadOnKillClip(crossbow, bolt, Math.Max(1, boltCount), line => _commandServer?.SendOutput(line));
                 return true;
             }
 
