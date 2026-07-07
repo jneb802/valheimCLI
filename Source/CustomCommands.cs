@@ -22,6 +22,8 @@ namespace valheimCLI
 
         public static void Register()
         {
+            RouteController.Register();
+
             new Terminal.ConsoleCommand("cli_create_character", "Create and select a local character: cli_create_character <name> [--replace] [--local]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length < 2)
