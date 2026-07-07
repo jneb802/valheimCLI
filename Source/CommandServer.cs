@@ -191,6 +191,15 @@ namespace valheimCLI
                             continue;
                         }
 
+                        if (line == "STATUS")
+                        {
+                            string currentStatus = _stateTracker != null
+                                ? _stateTracker.CurrentStatusLine
+                                : "state=Unknown phase=unknown";
+                            writer.WriteLine($"STATUS:{currentStatus}");
+                            continue;
+                        }
+
                         if (line == "SUBSCRIBE_STATE")
                         {
                             lock (_subscribersLock)

@@ -89,6 +89,64 @@ public class ValheimClient : IDisposable
         return "Unknown";
     }
 
+    public Dictionary<string, string> GetStatusDetails()
+    {
+        EnsureConnected();
+
+        _writer!.WriteLine("STATUS");
+        int previousReadTimeout = _stream?.ReadTimeout ?? Timeout.Infinite;
+        string? response = null;
+        try
+        {
+            if (_stream != null)
+            {
+                _stream.ReadTimeout = 1000;
+            }
+
+            response = _reader!.ReadLine();
+        }
+        catch (IOException)
+        {
+            response = null;
+        }
+        finally
+        {
+            if (_stream != null)
+            {
+                _stream.ReadTimeout = previousReadTimeout;
+            }
+        }
+
+        if (response == null || !response.StartsWith("STATUS:"))
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["state"] = GetState(),
+                ["phase"] = "unknown"
+            };
+        }
+
+        return ParseKeyValueStatus(response.Substring("STATUS:".Length));
+    }
+
+    private static Dictionary<string, string> ParseKeyValueStatus(string payload)
+    {
+        Dictionary<string, string> result = new(StringComparer.OrdinalIgnoreCase);
+        string[] parts = payload.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        foreach (string part in parts)
+        {
+            int equals = part.IndexOf('=');
+            if (equals <= 0 || equals == part.Length - 1)
+            {
+                continue;
+            }
+
+            result[part[..equals]] = part[(equals + 1)..];
+        }
+
+        return result;
+    }
+
     public bool SubscribeToStateChanges()
     {
         EnsureConnected();
