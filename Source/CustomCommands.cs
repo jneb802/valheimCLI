@@ -267,6 +267,17 @@ namespace valheimCLI
                 SpawnFrozenNear(args[1], count, level, distance, spacing, args.Context.AddString);
             }, isCheat: true);
 
+            new Terminal.ConsoleCommand("cli_nearby_prefabs", "List prefab objects within a radius of the local player: cli_nearby_prefabs [radius]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                float radius = 2f;
+                if (args.Length >= 2)
+                {
+                    float.TryParse(args[1], out radius);
+                }
+
+                ListNearbyPrefabs(radius, args.Context.AddString);
+            }, isCheat: true);
+
             new Terminal.ConsoleCommand("cli_destroy_nearby_characters", "Destroy nearby non-player characters by prefab/name: cli_destroy_nearby_characters <name|*> [radius]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length < 2)
@@ -370,6 +381,36 @@ namespace valheimCLI
                 }
 
                 FireCurrentWeapon(holdSeconds, waitLoadedSeconds, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_hold_attack", "Hold primary attack so melee combos chain fluidly: cli_hold_attack [seconds]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                float seconds = 3f;
+                if (args.Length >= 2)
+                {
+                    float.TryParse(args[1], out seconds);
+                }
+
+                HoldAttack(seconds, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_set_camera_shake", "Set camera shake intensity (0 disables, 1 is vanilla): cli_set_camera_shake <intensity>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2 || !float.TryParse(args[1], out float intensity))
+                {
+                    args.Context.AddString("Usage: cli_set_camera_shake <intensity>");
+                    return;
+                }
+
+                GameCamera camera = GameCamera.instance;
+                if (camera == null)
+                {
+                    args.Context.AddString("ERROR: GameCamera not available");
+                    return;
+                }
+
+                camera.m_shakeIntensity = Mathf.Clamp(intensity, 0f, 5f);
+                args.Context.AddString($"OK: camera shake intensity set to {camera.m_shakeIntensity:F2}");
             }, isCheat: true);
 
             new Terminal.ConsoleCommand("cli_weapon_state", "Print equipped weapon, ammo, and reload state", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
@@ -2120,6 +2161,10 @@ namespace valheimCLI
             {
                 float offset = (i - (count - 1) * 0.5f) * spacing;
                 Vector3 position = center + right * offset;
+                if (ZoneSystem.instance != null && ZoneSystem.instance.GetGroundHeight(position, out float groundY))
+                {
+                    position.y = groundY;
+                }
                 GameObject spawned = UnityEngine.Object.Instantiate(prefab, position, rotation);
                 Character character = spawned.GetComponent<Character>();
                 if (character == null)
@@ -2143,6 +2188,50 @@ namespace valheimCLI
 
             string zdoText = zdoIds.Count > 0 ? string.Join(",", zdoIds) : "none";
             addOutput($"OK: Spawned frozen {count}x {resolvedName} distance={distance:F1} spacing={spacing:F1}; zdo={zdoText}");
+        }
+
+        public static void ListNearbyPrefabs(float radius, Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            radius = Mathf.Clamp(radius, 0.5f, 30f);
+            Vector3 playerPos = player.transform.position;
+            Collider[] colliders = Physics.OverlapSphere(playerPos, radius);
+            Dictionary<GameObject, float> found = new();
+            foreach (Collider collider in colliders)
+            {
+                if (collider.GetComponentInParent<Player>() != null)
+                    continue;
+                if (collider.GetComponentInParent<Heightmap>() != null)
+                    continue;
+
+                ZNetView nview = collider.GetComponentInParent<ZNetView>();
+                GameObject root = nview != null ? nview.gameObject : collider.gameObject;
+                float distance = Vector3.Distance(playerPos, collider.ClosestPoint(playerPos));
+                if (!found.TryGetValue(root, out float existing) || distance < existing)
+                {
+                    found[root] = distance;
+                }
+            }
+
+            foreach (KeyValuePair<GameObject, float> entry in found.OrderBy(item => item.Value))
+            {
+                Vector3 pos = entry.Key.transform.position;
+                addOutput($"PREFAB name={CleanPrefabName(entry.Key.name)} distance={entry.Value:F1} pos={pos.x:F1},{pos.y:F1},{pos.z:F1}");
+            }
+
+            addOutput($"OK: NEARBY_PREFABS radius={radius:F1} count={found.Count}");
+        }
+
+        private static string CleanPrefabName(string name)
+        {
+            int cloneIndex = name.IndexOf("(Clone)", StringComparison.Ordinal);
+            return cloneIndex >= 0 ? name.Substring(0, cloneIndex) : name;
         }
 
         public static void DestroyNearbyCharacters(string requestedName, float radius, Action<string> addOutput)
@@ -2301,6 +2390,33 @@ namespace valheimCLI
             addOutput($"OK: Queued fire currentWeapon='{weapon.m_shared.m_name}' holdSeconds={holdSeconds:F2} waitLoadedSeconds={waitLoadedSeconds:F1}");
         }
 
+        public static void HoldAttack(float seconds, Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+
+            ItemDrop.ItemData weapon = player.GetCurrentWeapon();
+            if (weapon == null)
+            {
+                addOutput("ERROR: No current weapon equipped");
+                return;
+            }
+
+            if (valheimCLIPlugin.Instance == null)
+            {
+                addOutput("ERROR: valheimCLI plugin instance is not available");
+                return;
+            }
+
+            seconds = Mathf.Clamp(seconds, 0.2f, 15f);
+            valheimCLIPlugin.Instance.StartCoroutine(HoldAttackRoutine(seconds));
+            addOutput($"OK: Queued hold attack currentWeapon='{weapon.m_shared.m_name}' seconds={seconds:F1}");
+        }
+
         private static void SpawnPrefabAt(GameObject prefab, string resolvedName, Vector3 basePosition, int count, int level, float radius, string positionLabel, Action<string> addOutput)
         {
             List<string> zdoIds = new();
@@ -2308,7 +2424,12 @@ namespace valheimCLI
             {
                 Vector3 offset = count == 1 ? Vector3.zero : UnityEngine.Random.insideUnitSphere * Math.Min(radius, 10f);
                 offset.y = 0f;
-                GameObject spawned = UnityEngine.Object.Instantiate(prefab, basePosition + offset, Quaternion.identity);
+                Vector3 spawnPosition = basePosition + offset;
+                if (prefab.GetComponent<Character>() != null && ZoneSystem.instance != null && ZoneSystem.instance.GetGroundHeight(spawnPosition, out float groundY))
+                {
+                    spawnPosition.y = groundY;
+                }
+                GameObject spawned = UnityEngine.Object.Instantiate(prefab, spawnPosition, Quaternion.identity);
 
                 if (level > 1)
                 {
@@ -3950,6 +4071,58 @@ namespace valheimCLI
 
             player.AttackTowardsPlayerLookDir = true;
             player.FaceLookDirection();
+
+            if (weapon.m_shared.m_attack.m_bowDraw)
+            {
+                // Bows fire on attackHold release with the accumulated draw percentage
+                // (Player.UpdateAttackBowDraw). Calling StartAttack directly fires at 0%
+                // draw, which spawns the projectile at minimum velocity. Drive the draw
+                // through SetControls until fully drawn, then release. The vanilla
+                // PlayerController writes SetControls from real input every FixedUpdate
+                // and must be disabled while the scripted draw runs.
+                PlayerController controller = player.GetComponent<PlayerController>();
+                bool controllerWasEnabled = controller != null && controller.enabled;
+                if (controller != null)
+                {
+                    controller.enabled = false;
+                }
+
+                float drawTimeout = Time.time + Mathf.Max(holdSeconds, 6f);
+                while (player.GetAttackDrawPercentage() < 1f && Time.time < drawTimeout)
+                {
+                    player.FaceLookDirection();
+                    player.SetControls(Vector3.zero, false, true, false, false, false, false, false, false, false, false);
+                    yield return new WaitForFixedUpdate();
+
+                    if (Player.m_localPlayer != player || player.GetCurrentWeapon() != weapon)
+                    {
+                        if (controller != null)
+                        {
+                            controller.enabled = controllerWasEnabled;
+                        }
+                        yield break;
+                    }
+                }
+
+                // Release: attackHold going false triggers StartAttack with the full draw.
+                player.SetControls(Vector3.zero, false, false, false, false, false, false, false, false, false, false);
+                yield return new WaitForFixedUpdate();
+
+                // The projectile spawns on a later animation event that samples the look
+                // direction at that moment — hold the aim for a few more ticks.
+                for (int i = 0; i < 20; i++)
+                {
+                    player.FaceLookDirection();
+                    yield return new WaitForFixedUpdate();
+                }
+
+                if (controller != null)
+                {
+                    controller.enabled = controllerWasEnabled;
+                }
+                yield break;
+            }
+
             if (!player.StartAttack(null, false))
             {
                 yield break;
@@ -3959,6 +4132,53 @@ namespace valheimCLI
             while (Time.time < endTime)
             {
                 yield return new WaitForFixedUpdate();
+            }
+        }
+
+        private static IEnumerator HoldAttackRoutine(float seconds)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                yield break;
+            }
+
+            // Melee combo chains advance when the attack input is held, exactly like a
+            // player holding the mouse button. The vanilla PlayerController overwrites
+            // SetControls from real input every FixedUpdate and must be disabled while
+            // the scripted hold runs (same pattern as the bow draw path above).
+            PlayerController controller = player.GetComponent<PlayerController>();
+            bool controllerWasEnabled = controller != null && controller.enabled;
+            if (controller != null)
+            {
+                controller.enabled = false;
+            }
+
+            player.AttackTowardsPlayerLookDir = true;
+
+            float end = Time.time + seconds;
+            bool first = true;
+            while (Time.time < end)
+            {
+                if (Player.m_localPlayer != player)
+                {
+                    break;
+                }
+
+                player.FaceLookDirection();
+                player.SetControls(Vector3.zero, first, true, false, false, false, false, false, false, false, false);
+                first = false;
+                yield return new WaitForFixedUpdate();
+            }
+
+            if (Player.m_localPlayer == player)
+            {
+                player.SetControls(Vector3.zero, false, false, false, false, false, false, false, false, false, false);
+            }
+
+            if (controller != null)
+            {
+                controller.enabled = controllerWasEnabled;
             }
         }
 
