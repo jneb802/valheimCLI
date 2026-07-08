@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Globalization;
 using System.Reflection;
 using BepInEx.Logging;
@@ -17,6 +18,14 @@ namespace valheimCLI
     public class GameStateTracker
     {
         private static readonly FieldInfo? GameRespawnWaitField = typeof(Game).GetField("m_respawnWait", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly MethodInfo? ZNetInConnectingScreenMethod = typeof(ZNet).GetMethod("InConnectingScreen", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        private static readonly PropertyInfo? ZoneSystemLocationsGeneratedProperty = typeof(ZoneSystem).GetProperty("LocationsGenerated", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        private static readonly FieldInfo? ZoneSystemLocationsGeneratedField = typeof(ZoneSystem).GetField("m_locationsGenerated", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        private static readonly PropertyInfo? ZoneSystemGenerateLocationsProgressProperty = typeof(ZoneSystem).GetProperty("GenerateLocationsProgress", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        private static readonly FieldInfo? ZoneSystemGenerateLocationsProgressField = typeof(ZoneSystem).GetField("m_generateLocationsProgress", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        private static readonly MethodInfo? ZoneSystemEstimatedLocationSecondsMethod = typeof(ZoneSystem).GetMethod("GetEstimatedGenerationCompletionTimeFromNow", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        private static readonly MethodInfo? ZoneSystemGetLocationListMethod = typeof(ZoneSystem).GetMethod("GetLocationList", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        private static readonly MethodInfo? ZoneSystemIsActiveAreaLoadedMethod = typeof(ZoneSystem).GetMethod("IsActiveAreaLoaded", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
 
         private readonly ManualLogSource _logger;
         private GameState _currentState = GameState.Unknown;
@@ -64,7 +73,7 @@ namespace valheimCLI
             if (Game.instance != null)
             {
                 // Check if ZNet is connecting
-                if (ZNet.instance != null && ZNet.instance.InConnectingScreen())
+                if (IsZNetConnecting())
                 {
                     return GameState.Loading;
                 }
@@ -80,7 +89,7 @@ namespace valheimCLI
             }
 
             // During initial load or transition
-            if (ZNet.instance != null && ZNet.instance.InConnectingScreen())
+            if (IsZNetConnecting())
             {
                 return GameState.Loading;
             }
@@ -97,19 +106,19 @@ namespace valheimCLI
             ZNet? znet = ZNet.instance;
             ZoneSystem? zoneSystem = ZoneSystem.instance;
             bool znetPresent = znet != null;
-            bool znetConnecting = znet != null && znet.InConnectingScreen();
+            bool znetConnecting = IsZNetConnecting();
             bool zoneSystemPresent = zoneSystem != null;
             bool znetScenePresent = ZNetScene.instance != null;
-            bool locationsGenerated = zoneSystem != null && zoneSystem.LocationsGenerated;
-            float locationProgress = zoneSystem != null ? zoneSystem.GenerateLocationsProgress : 0f;
-            float estimatedLocationSeconds = zoneSystem != null ? NormalizeEstimatedSeconds(zoneSystem.GetEstimatedGenerationCompletionTimeFromNow()) : -1f;
-            int locationCount = zoneSystem != null ? zoneSystem.GetLocationList().Count : 0;
+            bool locationsGenerated = IsLocationsGenerated(zoneSystem);
+            float locationProgress = GetLocationProgress(zoneSystem);
+            float estimatedLocationSeconds = NormalizeEstimatedSeconds(GetEstimatedLocationSeconds(zoneSystem));
+            int locationCount = GetLocationCount(zoneSystem);
             bool activeAreaLoaded = false;
             if (zoneSystem != null && znet != null)
             {
                 try
                 {
-                    activeAreaLoaded = zoneSystem.IsActiveAreaLoaded();
+                    activeAreaLoaded = IsActiveAreaLoaded(zoneSystem);
                 }
                 catch
                 {
@@ -156,14 +165,14 @@ namespace valheimCLI
                 return "ready";
             }
 
-            if (ZNet.instance != null && ZNet.instance.InConnectingScreen())
+            if (IsZNetConnecting())
             {
                 return "connecting_screen";
             }
 
             if (Game.instance != null && Player.m_localPlayer == null)
             {
-                if (ZoneSystem.instance != null && !ZoneSystem.instance.LocationsGenerated)
+                if (ZoneSystem.instance != null && !IsLocationsGenerated(ZoneSystem.instance))
                 {
                     return "generating_locations";
                 }
@@ -172,7 +181,7 @@ namespace valheimCLI
                 {
                     try
                     {
-                        if (!ZoneSystem.instance.IsActiveAreaLoaded())
+                        if (!IsActiveAreaLoaded(ZoneSystem.instance))
                         {
                             return "loading_active_area";
                         }
@@ -202,6 +211,108 @@ namespace valheimCLI
             }
 
             return seconds;
+        }
+
+        public static bool IsZNetConnecting()
+        {
+            if (ZNet.instance == null || ZNetInConnectingScreenMethod == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                return ZNetInConnectingScreenMethod.Invoke(ZNet.instance, null) is bool isConnecting && isConnecting;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool IsLocationsGenerated(ZoneSystem? zoneSystem)
+        {
+            object? value = GetMemberValue(zoneSystem, ZoneSystemLocationsGeneratedProperty, ZoneSystemLocationsGeneratedField);
+            return value is bool generated && generated;
+        }
+
+        private static float GetLocationProgress(ZoneSystem? zoneSystem)
+        {
+            object? value = GetMemberValue(zoneSystem, ZoneSystemGenerateLocationsProgressProperty, ZoneSystemGenerateLocationsProgressField);
+            return value is float progress ? progress : 0f;
+        }
+
+        private static float GetEstimatedLocationSeconds(ZoneSystem? zoneSystem)
+        {
+            if (zoneSystem == null || ZoneSystemEstimatedLocationSecondsMethod == null)
+            {
+                return -1f;
+            }
+
+            try
+            {
+                return ZoneSystemEstimatedLocationSecondsMethod.Invoke(zoneSystem, null) is float seconds ? seconds : -1f;
+            }
+            catch
+            {
+                return -1f;
+            }
+        }
+
+        private static int GetLocationCount(ZoneSystem? zoneSystem)
+        {
+            if (zoneSystem == null || ZoneSystemGetLocationListMethod == null)
+            {
+                return 0;
+            }
+
+            try
+            {
+                return ZoneSystemGetLocationListMethod.Invoke(zoneSystem, null) is ICollection locations ? locations.Count : 0;
+            }
+            catch
+            {
+                return 0;
+            }
+        }
+
+        private static bool IsActiveAreaLoaded(ZoneSystem? zoneSystem)
+        {
+            if (zoneSystem == null || ZoneSystemIsActiveAreaLoadedMethod == null)
+            {
+                return false;
+            }
+
+            try
+            {
+                return ZoneSystemIsActiveAreaLoadedMethod.Invoke(zoneSystem, null) is bool loaded && loaded;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static object? GetMemberValue(object? instance, PropertyInfo? property, FieldInfo? field)
+        {
+            if (instance == null)
+            {
+                return null;
+            }
+
+            try
+            {
+                if (property != null)
+                {
+                    return property.GetValue(instance);
+                }
+
+                return field?.GetValue(instance);
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private static string Bool(bool value)

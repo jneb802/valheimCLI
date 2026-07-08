@@ -19,6 +19,7 @@ namespace valheimCLI
         private static readonly FieldInfo? GameInIntroField = typeof(Game).GetField("m_inIntro", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo? GameRequestRespawnField = typeof(Game).GetField("m_requestRespawn", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo? StoreGuiTraderField = typeof(StoreGui).GetField("m_trader", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo? MinimapLargeZoomField = typeof(Minimap).GetField("m_largeZoom", BindingFlags.Instance | BindingFlags.NonPublic);
 
         public static void Register()
         {
@@ -670,6 +671,33 @@ namespace valheimCLI
             new Terminal.ConsoleCommand("cli_player_state", "Print current player state", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 PrintPlayerState(args.Context.AddString);
+            });
+
+            new Terminal.ConsoleCommand("cli_open_map", "Open the large map", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                OpenMap(args.Context.AddString);
+            });
+
+            new Terminal.ConsoleCommand("cli_map_zoom", "Set large map zoom: cli_map_zoom <0.01-1>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2 || !float.TryParse(args[1], out float zoom))
+                {
+                    args.Context.AddString("Usage: cli_map_zoom <0.01-1>");
+                    return;
+                }
+
+                SetMapZoom(zoom, args.Context.AddString);
+            });
+
+            new Terminal.ConsoleCommand("cli_map_center", "Center large map on world coordinates: cli_map_center <x> <z>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 3 || !float.TryParse(args[1], out float x) || !float.TryParse(args[2], out float z))
+                {
+                    args.Context.AddString("Usage: cli_map_center <x> <z>");
+                    return;
+                }
+
+                CenterMap(x, z, args.Context.AddString);
             });
 
             new Terminal.ConsoleCommand("cli_set_tod", "Set local debug time of day: cli_set_tod <0-1|-1>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
@@ -3850,6 +3878,57 @@ namespace valheimCLI
             addOutput($"OK: connectionStatus={status}, gameState={GameStateTracker.StateToString(state)}, server={server}");
         }
 
+        private static void OpenMap(Action<string> addOutput)
+        {
+            if (Minimap.instance == null)
+            {
+                addOutput("ERROR: Minimap is not available");
+                return;
+            }
+
+            Minimap.instance.SetMapMode(Minimap.MapMode.Large);
+            addOutput("OK: Large map opened");
+        }
+
+        private static void SetMapZoom(float zoom, Action<string> addOutput)
+        {
+            if (Minimap.instance == null)
+            {
+                addOutput("ERROR: Minimap is not available");
+                return;
+            }
+
+            if (MinimapLargeZoomField == null)
+            {
+                addOutput("ERROR: Minimap zoom field is not available");
+                return;
+            }
+
+            float clampedZoom = Mathf.Clamp(zoom, Minimap.instance.m_minZoom, Minimap.instance.m_maxZoom);
+            Minimap.instance.SetMapMode(Minimap.MapMode.Large);
+            MinimapLargeZoomField.SetValue(Minimap.instance, clampedZoom);
+            addOutput($"OK: Large map zoom set to {clampedZoom:0.###}");
+        }
+
+        private static void CenterMap(float x, float z, Action<string> addOutput)
+        {
+            if (Minimap.instance == null)
+            {
+                addOutput("ERROR: Minimap is not available");
+                return;
+            }
+
+            if (Player.m_localPlayer == null)
+            {
+                addOutput("ERROR: Local player is not available");
+                return;
+            }
+
+            Vector3 point = new Vector3(x, Player.m_localPlayer.transform.position.y, z);
+            Minimap.instance.ShowPointOnMap(point);
+            addOutput($"OK: Large map centered on {x:0.#}, {z:0.#}");
+        }
+
         private static GameState DetectCurrentState()
         {
             if (FejdStartup.instance != null && Game.instance == null)
@@ -3859,7 +3938,7 @@ namespace valheimCLI
 
             if (Game.instance != null)
             {
-                if (ZNet.instance != null && ZNet.instance.InConnectingScreen())
+                if (GameStateTracker.IsZNetConnecting())
                 {
                     return GameState.Loading;
                 }
@@ -3867,7 +3946,7 @@ namespace valheimCLI
                 return Player.m_localPlayer != null ? GameState.InWorld : GameState.InWorldNoPlayer;
             }
 
-            if (ZNet.instance != null && ZNet.instance.InConnectingScreen())
+            if (GameStateTracker.IsZNetConnecting())
             {
                 return GameState.Loading;
             }
