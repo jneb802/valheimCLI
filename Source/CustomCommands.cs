@@ -4005,15 +4005,7 @@ namespace valheimCLI
 
         private static string BuildBetterContinentsScreenshotPath()
         {
-            string worldName = WorldGenerator.instance != null && WorldGenerator.instance.m_world != null
-                ? WorldGenerator.instance.m_world.m_name
-                : "unknown-world";
-            string screenshotDir = Path.Combine(
-                Utils.GetSaveDataPath(FileHelpers.FileSource.Local),
-                "BetterContinents",
-                worldName);
-            string filename = DateTime.Now.ToString("yyyy-dd-M-HH-mm-ss") + ".png";
-            return Path.Combine(screenshotDir, filename);
+            return BuildMapExportPath(".png");
         }
 
         private static void SaveBiomeMap(int resolution, string? path, float radius, Action<string> addOutput)
@@ -4086,6 +4078,11 @@ namespace valheimCLI
 
         private static string BuildBiomeMapPath()
         {
+            return BuildMapExportPath("-biomemap.png");
+        }
+
+        private static string BuildMapExportPath(string suffix)
+        {
             string worldName = WorldGenerator.instance != null && WorldGenerator.instance.m_world != null
                 ? WorldGenerator.instance.m_world.m_name
                 : "unknown-world";
@@ -4093,7 +4090,7 @@ namespace valheimCLI
                 Utils.GetSaveDataPath(FileHelpers.FileSource.Local),
                 "BetterContinents",
                 worldName);
-            string filename = DateTime.Now.ToString("yyyy-dd-M-HH-mm-ss") + "-biomemap.png";
+            string filename = DateTime.Now.ToString("yyyy-dd-M-HH-mm-ss") + suffix;
             return Path.Combine(screenshotDir, filename);
         }
 
