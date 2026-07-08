@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using UnityEngine;
@@ -698,6 +699,24 @@ namespace valheimCLI
                 }
 
                 CenterMap(x, z, args.Context.AddString);
+            });
+
+            new Terminal.ConsoleCommand("cli_explore_map", "Reveal the full local minimap", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                ExploreMap(args.Context.AddString);
+            });
+
+            new Terminal.ConsoleCommand("cli_bc_screenshot", "Save a Better Continents minimap screenshot: cli_bc_screenshot [resolution] [path]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                int resolution = 2048;
+                if (args.Length >= 2 && !int.TryParse(args[1], out resolution))
+                {
+                    args.Context.AddString("Usage: cli_bc_screenshot [resolution] [path]");
+                    return;
+                }
+
+                string? path = args.Length >= 3 ? args[2] : null;
+                SaveBetterContinentsScreenshot(Math.Max(256, resolution), path, args.Context.AddString);
             });
 
             new Terminal.ConsoleCommand("cli_set_tod", "Set local debug time of day: cli_set_tod <0-1|-1>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
@@ -3927,6 +3946,54 @@ namespace valheimCLI
             Vector3 point = new Vector3(x, Player.m_localPlayer.transform.position.y, z);
             Minimap.instance.ShowPointOnMap(point);
             addOutput($"OK: Large map centered on {x:0.#}, {z:0.#}");
+        }
+
+        private static void ExploreMap(Action<string> addOutput)
+        {
+            if (Minimap.instance == null)
+            {
+                addOutput("ERROR: Minimap is not available");
+                return;
+            }
+
+            Minimap.instance.ExploreAll();
+            Minimap.instance.SetMapMode(Minimap.MapMode.Large);
+            addOutput("OK: Full minimap explored");
+        }
+
+        private static void SaveBetterContinentsScreenshot(int resolution, string? path, Action<string> addOutput)
+        {
+            if (Minimap.instance == null)
+            {
+                addOutput("ERROR: Minimap is not available");
+                return;
+            }
+
+            Type? gameUtilsType = Type.GetType("BetterContinents.GameUtils, BetterContinents");
+            MethodInfo? saveMinimapMethod = gameUtilsType?.GetMethod("SaveMinimap", BindingFlags.Public | BindingFlags.Static);
+            if (saveMinimapMethod == null)
+            {
+                addOutput("ERROR: Better Continents SaveMinimap method is not available");
+                return;
+            }
+
+            string outputPath = string.IsNullOrEmpty(path) ? BuildBetterContinentsScreenshotPath() : path!;
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? ".");
+            saveMinimapMethod.Invoke(null, new object[] { outputPath, resolution });
+            addOutput($"OK: Better Continents minimap screenshot queued path={outputPath} size={resolution}x{resolution}");
+        }
+
+        private static string BuildBetterContinentsScreenshotPath()
+        {
+            string worldName = WorldGenerator.instance != null && WorldGenerator.instance.m_world != null
+                ? WorldGenerator.instance.m_world.m_name
+                : "unknown-world";
+            string screenshotDir = Path.Combine(
+                Utils.GetSaveDataPath(FileHelpers.FileSource.Local),
+                "BetterContinents",
+                worldName);
+            string filename = DateTime.Now.ToString("yyyy-dd-M-HH-mm-ss") + ".png";
+            return Path.Combine(screenshotDir, filename);
         }
 
         private static GameState DetectCurrentState()
