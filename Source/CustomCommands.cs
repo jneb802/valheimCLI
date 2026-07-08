@@ -418,6 +418,25 @@ namespace valheimCLI
                 PrintWeaponState(args.Context.AddString);
             }, isCheat: true);
 
+            new Terminal.ConsoleCommand("cli_set_tutorials", "Enable or disable Hugin tutorial ravens: cli_set_tutorials <true|false>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2 || !bool.TryParse(args[1], out bool enabled))
+                {
+                    args.Context.AddString("Usage: cli_set_tutorials <true|false>");
+                    return;
+                }
+
+                Raven.m_tutorialsEnabled = enabled;
+                bool dismissed = false;
+                if (!enabled && Raven.m_instance != null && Raven.m_instance.IsSpawned())
+                {
+                    Raven.m_instance.FlyAway(forceTeleport: true);
+                    dismissed = true;
+                }
+
+                args.Context.AddString($"OK: tutorialsEnabled={enabled} dismissedActiveRaven={dismissed}");
+            }, isCheat: true);
+
             new Terminal.ConsoleCommand("cli_set_player_safety", "Set local player god and ghost modes: cli_set_player_safety <true|false>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length < 2 || !bool.TryParse(args[1], out bool enabled))
