@@ -719,6 +719,26 @@ namespace valheimCLI
                 SaveBetterContinentsScreenshot(Math.Max(256, resolution), path, args.Context.AddString);
             });
 
+            new Terminal.ConsoleCommand("cli_biome_map", "Export generated biome colors: cli_biome_map [resolution] [path] [radius]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                int resolution = 4096;
+                if (args.Length >= 2 && !int.TryParse(args[1], out resolution))
+                {
+                    args.Context.AddString("Usage: cli_biome_map [resolution] [path] [radius]");
+                    return;
+                }
+
+                string? path = args.Length >= 3 ? args[2] : null;
+                float radius = 10000f;
+                if (args.Length >= 4 && !float.TryParse(args[3], out radius))
+                {
+                    args.Context.AddString("Usage: cli_biome_map [resolution] [path] [radius]");
+                    return;
+                }
+
+                SaveBiomeMap(Mathf.Clamp(resolution, 256, 8192), path, Mathf.Clamp(radius, 1000f, 12000f), args.Context.AddString);
+            });
+
             new Terminal.ConsoleCommand("cli_set_tod", "Set local debug time of day: cli_set_tod <0-1|-1>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length < 2 || !float.TryParse(args[1], out float dayFraction))
@@ -3993,6 +4013,87 @@ namespace valheimCLI
                 "BetterContinents",
                 worldName);
             string filename = DateTime.Now.ToString("yyyy-dd-M-HH-mm-ss") + ".png";
+            return Path.Combine(screenshotDir, filename);
+        }
+
+        private static void SaveBiomeMap(int resolution, string? path, float radius, Action<string> addOutput)
+        {
+            if (WorldGenerator.instance == null)
+            {
+                addOutput("ERROR: WorldGenerator is not available");
+                return;
+            }
+
+            string outputPath = string.IsNullOrEmpty(path) ? BuildBiomeMapPath() : path!;
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? ".");
+
+            Texture2D texture = new Texture2D(resolution, resolution, TextureFormat.RGBA32, false, true);
+            Color32[] pixels = new Color32[resolution * resolution];
+            float maxDistanceSquared = radius * radius;
+            float denominator = resolution > 1 ? resolution - 1 : 1;
+
+            for (int y = 0; y < resolution; y++)
+            {
+                float z = Mathf.Lerp(-radius, radius, y / denominator);
+                int rowOffset = y * resolution;
+                for (int x = 0; x < resolution; x++)
+                {
+                    float worldX = Mathf.Lerp(-radius, radius, x / denominator);
+                    if (worldX * worldX + z * z > maxDistanceSquared)
+                    {
+                        pixels[rowOffset + x] = BiomeColor(Heightmap.Biome.None);
+                        continue;
+                    }
+
+                    Heightmap.Biome biome = WorldGenerator.instance.GetBiome(worldX, z);
+                    pixels[rowOffset + x] = BiomeColor(biome);
+                }
+            }
+
+            texture.SetPixels32(pixels);
+            texture.Apply(false, false);
+            File.WriteAllBytes(outputPath, texture.EncodeToPNG());
+            UnityEngine.Object.Destroy(texture);
+            addOutput($"OK: Biome map exported path={outputPath} size={resolution}x{resolution} radius={radius:0.#}");
+        }
+
+        private static Color32 BiomeColor(Heightmap.Biome biome)
+        {
+            switch (biome)
+            {
+                case Heightmap.Biome.Ocean:
+                    return new Color32(0x00, 0x00, 0xFF, 0xFF);
+                case Heightmap.Biome.Meadows:
+                    return new Color32(0x00, 0xFF, 0x00, 0xFF);
+                case Heightmap.Biome.BlackForest:
+                    return new Color32(0x00, 0x7F, 0x00, 0xFF);
+                case Heightmap.Biome.Swamp:
+                    return new Color32(0x7F, 0x7F, 0x00, 0xFF);
+                case Heightmap.Biome.Mountain:
+                    return new Color32(0xFF, 0xFF, 0xFF, 0xFF);
+                case Heightmap.Biome.Plains:
+                    return new Color32(0xFF, 0xFF, 0x00, 0xFF);
+                case Heightmap.Biome.Mistlands:
+                    return new Color32(0x7F, 0x7F, 0x7F, 0xFF);
+                case Heightmap.Biome.DeepNorth:
+                    return new Color32(0x00, 0xFF, 0xFF, 0xFF);
+                case Heightmap.Biome.AshLands:
+                    return new Color32(0xFF, 0x00, 0x00, 0xFF);
+                default:
+                    return new Color32(0x00, 0x00, 0x00, 0xFF);
+            }
+        }
+
+        private static string BuildBiomeMapPath()
+        {
+            string worldName = WorldGenerator.instance != null && WorldGenerator.instance.m_world != null
+                ? WorldGenerator.instance.m_world.m_name
+                : "unknown-world";
+            string screenshotDir = Path.Combine(
+                Utils.GetSaveDataPath(FileHelpers.FileSource.Local),
+                "BetterContinents",
+                worldName);
+            string filename = DateTime.Now.ToString("yyyy-dd-M-HH-mm-ss") + "-biomemap.png";
             return Path.Combine(screenshotDir, filename);
         }
 
