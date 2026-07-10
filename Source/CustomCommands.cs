@@ -920,6 +920,28 @@ namespace valheimCLI
                 StartDedicatedServerJoin(host, port, args.Context.AddString);
             });
 
+            new Terminal.ConsoleCommand("cli_connect_steam_user", "Join a hosted Steam game: cli_connect_steam_user <steamId> [password]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2 || !ulong.TryParse(args[1], out ulong steamId))
+                {
+                    args.Context.AddString("Usage: cli_connect_steam_user <steamId> [password]");
+                    return;
+                }
+
+                StartSteamUserJoin(steamId, args.Length >= 3 ? args[2] : null, args.Context.AddString);
+            });
+
+            new Terminal.ConsoleCommand("cli_connect_playfab_user", "Join a hosted PlayFab game: cli_connect_playfab_user <remotePlayerId> [password]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2 || string.IsNullOrWhiteSpace(args[1]))
+                {
+                    args.Context.AddString("Usage: cli_connect_playfab_user <remotePlayerId> [password]");
+                    return;
+                }
+
+                StartPlayFabUserJoin(args[1], args.Length >= 3 ? args[2] : null, args.Context.AddString);
+            });
+
             new Terminal.ConsoleCommand("cli_connection_status", "Print the current Valheim network connection status", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 PrintConnectionStatus(args.Context.AddString);
@@ -934,6 +956,28 @@ namespace valheimCLI
                 }
 
                 StartLocalWorld(args[1], args.Context.AddString);
+            });
+
+            new Terminal.ConsoleCommand("cli_start_host_world", "Create/select and host a local world: cli_start_host_world <worldName> [--password <password>] [--public true|false] [--crossplay true|false]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                string[] parts = new string[args.Length];
+                for (int i = 0; i < args.Length; i++)
+                {
+                    parts[i] = args[i];
+                }
+
+                if (!TryParseHostedWorldOptions(parts, 1, out string worldName, out bool publicServer, out bool crossplay, out string? password, out string error))
+                {
+                    args.Context.AddString(error);
+                    return;
+                }
+
+                StartHostedWorld(worldName, publicServer, crossplay, password, args.Context.AddString);
+            });
+
+            new Terminal.ConsoleCommand("cli_multiplayer_identity", "Print Steam/PlayFab multiplayer identity and host state", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                PrintMultiplayerIdentity(args.Context.AddString);
             });
 
             new Terminal.ConsoleCommand("cli_check_intro_complete", "Check that the first-spawn Valkyrie intro state is cleared", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
@@ -3810,17 +3854,72 @@ namespace valheimCLI
             addOutput($"OK: Dedicated server join started for {dedicated} using {profileDescription}");
         }
 
-        public static void StartLocalWorld(string worldName, Action<string> addOutput)
+        public static void StartSteamUserJoin(ulong steamId, string? password, Action<string> addOutput)
         {
-            if (worldName.Length < 3)
+            FejdStartup fejd = FejdStartup.instance;
+            if (fejd == null)
             {
-                addOutput("ERROR: World name must be at least 3 characters");
+                addOutput("ERROR: Main menu is not available");
                 return;
             }
 
-            if (worldName.IndexOfAny(System.IO.Path.GetInvalidFileNameChars()) >= 0)
+            if (!TrySelectCurrentProfile(fejd, out string profileDescription, out string profileError))
             {
-                addOutput("ERROR: World name contains invalid filename characters");
+                addOutput(profileError);
+                return;
+            }
+
+            ServerJoinDataSteamUser steamUser = new ServerJoinDataSteamUser(steamId);
+            if (!steamUser.IsValid)
+            {
+                addOutput($"ERROR: Invalid Steam user ID '{steamId}'");
+                return;
+            }
+
+            ApplyJoinPassword(password);
+
+            ServerJoinData joinData = new ServerJoinData(steamUser);
+            fejd.SetServerToJoin(joinData);
+            fejd.JoinServer();
+            addOutput($"OK: Steam user join started for {steamId} using {profileDescription}");
+        }
+
+        public static void StartPlayFabUserJoin(string remotePlayerId, string? password, Action<string> addOutput)
+        {
+            if (string.IsNullOrWhiteSpace(remotePlayerId))
+            {
+                addOutput("ERROR: PlayFab remote player ID is required");
+                return;
+            }
+
+            FejdStartup fejd = FejdStartup.instance;
+            if (fejd == null)
+            {
+                addOutput("ERROR: Main menu is not available");
+                return;
+            }
+
+            if (!TrySelectCurrentProfile(fejd, out string profileDescription, out string profileError))
+            {
+                addOutput(profileError);
+                return;
+            }
+
+            ApplyJoinPassword(password);
+
+            string normalizedRemotePlayerId = remotePlayerId.Trim();
+            ServerJoinDataPlayFabUser playFabUser = new ServerJoinDataPlayFabUser(normalizedRemotePlayerId);
+            ServerJoinData joinData = new ServerJoinData(playFabUser);
+            fejd.SetServerToJoin(joinData);
+            fejd.JoinServer();
+            addOutput($"OK: PlayFab user join started for {normalizedRemotePlayerId} using {profileDescription}");
+        }
+
+        public static void StartLocalWorld(string worldName, Action<string> addOutput)
+        {
+            if (!ValidateWorldName(worldName, out string validationError))
+            {
+                addOutput(validationError);
                 return;
             }
 
@@ -3843,6 +3942,58 @@ namespace valheimCLI
             SaveSystem.InvalidateCache();
 
             addOutput($"OK: Starting local world '{world.m_name}' using {profileDescription}");
+            fejd.OnWorldStart();
+        }
+
+        public static void StartHostedWorld(string worldName, bool publicServer, bool crossplay, string? password, Action<string> addOutput)
+        {
+            if (!ValidateWorldName(worldName, out string validationError))
+            {
+                addOutput(validationError);
+                return;
+            }
+
+            FejdStartup fejd = FejdStartup.instance;
+            if (fejd == null)
+            {
+                addOutput("ERROR: Main menu is not available");
+                return;
+            }
+
+            if (!TrySelectCurrentProfile(fejd, out string profileDescription, out string profileError))
+            {
+                addOutput(profileError);
+                return;
+            }
+
+            World world = World.GetCreateWorld(worldName, FileHelpers.FileSource.Local);
+            world.m_fileSource = FileHelpers.FileSource.Local;
+            WorldField?.SetValue(fejd, world);
+            SaveSystem.InvalidateCache();
+
+            string normalizedPassword = password ?? "";
+            if (fejd.m_openServerToggle != null)
+            {
+                fejd.m_openServerToggle.isOn = true;
+            }
+
+            if (fejd.m_publicServerToggle != null)
+            {
+                fejd.m_publicServerToggle.isOn = publicServer;
+            }
+
+            if (fejd.m_crossplayServerToggle != null)
+            {
+                fejd.m_crossplayServerToggle.isOn = crossplay;
+            }
+
+            if (fejd.m_serverPassword != null)
+            {
+                fejd.m_serverPassword.text = normalizedPassword;
+            }
+
+            string backend = crossplay ? OnlineBackendType.PlayFab.ToString() : OnlineBackendType.Steamworks.ToString();
+            addOutput($"OK: Starting hosted world '{world.m_name}' using {profileDescription}; open=true, public={publicServer}, crossplay={crossplay}, backend={backend}, passwordSet={!string.IsNullOrEmpty(normalizedPassword)}");
             fejd.OnWorldStart();
         }
 
@@ -3915,6 +4066,20 @@ namespace valheimCLI
             string server = ZNet.GetServerString();
             GameState state = DetectCurrentState();
             addOutput($"OK: connectionStatus={status}, gameState={GameStateTracker.StateToString(state)}, server={server}");
+        }
+
+        public static void PrintMultiplayerIdentity(Action<string> addOutput)
+        {
+            string steamId = TryGetSteamId();
+            string playFabLoginState = GetPlayFabLoginState();
+            string playFabId = TryGetPlayFabId();
+            GameState state = DetectCurrentState();
+            ZNet.ConnectionStatus status = ZNet.GetConnectionStatus();
+            bool isServer = ZNet.instance != null && ZNet.instance.IsServer();
+            bool isOpenServer = ZNet.instance != null && ZNet.IsOpenServer();
+            string server = ZNet.GetServerString();
+
+            addOutput($"OK: steamId={steamId}, playFabLoginState={playFabLoginState}, playFabId={playFabId}, backend={ZNet.m_onlineBackend}, gameState={GameStateTracker.StateToString(state)}, connectionStatus={status}, isServer={isServer}, isOpenServer={isOpenServer}, server={server}");
         }
 
         private static void OpenMap(Action<string> addOutput)
@@ -4139,6 +4304,214 @@ namespace valheimCLI
             }
 
             return !string.IsNullOrWhiteSpace(host);
+        }
+
+        public static bool TryParseHostedWorldOptions(string[] parts, int worldNameIndex, out string worldName, out bool publicServer, out bool crossplay, out string? password, out string error)
+        {
+            worldName = "";
+            publicServer = false;
+            crossplay = false;
+            password = null;
+            error = "";
+
+            if (parts.Length <= worldNameIndex)
+            {
+                error = "Usage: cli_start_host_world <worldName> [--password <password>] [--public true|false] [--crossplay true|false]";
+                return false;
+            }
+
+            worldName = parts[worldNameIndex];
+
+            for (int i = worldNameIndex + 1; i < parts.Length; i++)
+            {
+                string option = parts[i];
+                if (TryReadOptionValue(option, "--password", out string inlinePassword))
+                {
+                    password = inlinePassword;
+                    continue;
+                }
+
+                if (option.Equals("--password", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (i + 1 >= parts.Length)
+                    {
+                        error = "ERROR: --password requires a value";
+                        return false;
+                    }
+
+                    password = parts[++i];
+                    continue;
+                }
+
+                if (TryReadOptionValue(option, "--public", out string inlinePublic))
+                {
+                    if (!TryParseBooleanOption(inlinePublic, out publicServer))
+                    {
+                        error = $"ERROR: Invalid --public value '{inlinePublic}'";
+                        return false;
+                    }
+
+                    continue;
+                }
+
+                if (option.Equals("--public", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (i + 1 >= parts.Length || !TryParseBooleanOption(parts[i + 1], out publicServer))
+                    {
+                        error = "ERROR: --public requires true or false";
+                        return false;
+                    }
+
+                    i++;
+                    continue;
+                }
+
+                if (TryReadOptionValue(option, "--crossplay", out string inlineCrossplay))
+                {
+                    if (!TryParseBooleanOption(inlineCrossplay, out crossplay))
+                    {
+                        error = $"ERROR: Invalid --crossplay value '{inlineCrossplay}'";
+                        return false;
+                    }
+
+                    continue;
+                }
+
+                if (option.Equals("--crossplay", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (i + 1 >= parts.Length || !TryParseBooleanOption(parts[i + 1], out crossplay))
+                    {
+                        error = "ERROR: --crossplay requires true or false";
+                        return false;
+                    }
+
+                    i++;
+                    continue;
+                }
+
+                error = $"ERROR: Unknown option '{option}'";
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool TryReadOptionValue(string option, string name, out string value)
+        {
+            string prefix = name + "=";
+            if (option.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                value = option.Substring(prefix.Length);
+                return true;
+            }
+
+            value = "";
+            return false;
+        }
+
+        private static bool TryParseBooleanOption(string value, out bool result)
+        {
+            if (bool.TryParse(value, out result))
+            {
+                return true;
+            }
+
+            if (value.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+                value.Equals("yes", StringComparison.OrdinalIgnoreCase) ||
+                value.Equals("on", StringComparison.OrdinalIgnoreCase))
+            {
+                result = true;
+                return true;
+            }
+
+            if (value.Equals("0", StringComparison.OrdinalIgnoreCase) ||
+                value.Equals("no", StringComparison.OrdinalIgnoreCase) ||
+                value.Equals("off", StringComparison.OrdinalIgnoreCase))
+            {
+                result = false;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool ValidateWorldName(string worldName, out string error)
+        {
+            error = "";
+            if (worldName.Length < 3)
+            {
+                error = "ERROR: World name must be at least 3 characters";
+                return false;
+            }
+
+            if (worldName.IndexOfAny(System.IO.Path.GetInvalidFileNameChars()) >= 0)
+            {
+                error = "ERROR: World name contains invalid filename characters";
+                return false;
+            }
+
+            return true;
+        }
+
+        private static void ApplyJoinPassword(string? password)
+        {
+            SetServerPassword(password ?? "");
+        }
+
+        private static string TryGetSteamId()
+        {
+            try
+            {
+                Assembly? steamAssembly = AppDomain.CurrentDomain.GetAssemblies()
+                    .FirstOrDefault(assembly => assembly.GetType("Steamworks.SteamUser", throwOnError: false) != null);
+                Type? steamUserType = steamAssembly?.GetType("Steamworks.SteamUser", throwOnError: false);
+                MethodInfo? getSteamId = steamUserType?.GetMethod("GetSteamID", BindingFlags.Static | BindingFlags.Public);
+                object? steamId = getSteamId?.Invoke(null, null);
+                return steamId?.ToString() ?? "unavailable";
+            }
+            catch (Exception ex)
+            {
+                return $"unavailable({ex.GetType().Name})";
+            }
+        }
+
+        private static string GetPlayFabLoginState()
+        {
+            try
+            {
+                return PlayFabManager.CurrentLoginState.ToString();
+            }
+            catch (Exception ex)
+            {
+                return $"unavailable({ex.GetType().Name})";
+            }
+        }
+
+        private static string TryGetPlayFabId()
+        {
+            try
+            {
+                object? manager = PlayFabManager.instance;
+                if (manager == null)
+                {
+                    return "unavailable";
+                }
+
+                PropertyInfo? entityProperty = manager.GetType().GetProperty("Entity", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                object? entity = entityProperty?.GetValue(manager);
+                if (entity == null)
+                {
+                    return "unavailable";
+                }
+
+                PropertyInfo? idProperty = entity.GetType().GetProperty("Id", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                object? id = idProperty?.GetValue(entity);
+                return id?.ToString() ?? "unavailable";
+            }
+            catch (Exception ex)
+            {
+                return $"unavailable({ex.GetType().Name})";
+            }
         }
 
         private static bool GetBoolField(FieldInfo? field, object instance, bool fallback)

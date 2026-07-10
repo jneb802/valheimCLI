@@ -86,6 +86,14 @@
             <HintPath>$(VALHEIM_MANAGED)/Unity.TextMeshPro.dll</HintPath>
             <Private>false</Private>
         </Reference>
+        <Reference Include="com.rlabrecque.steamworks.net">
+            <HintPath>$(VALHEIM_MANAGED)/com.rlabrecque.steamworks.net.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
+        <Reference Include="gui_framework">
+            <HintPath>$(VALHEIM_MANAGED)/gui_framework.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
     </ItemGroup>
 
     <!-- Valheim Game Assemblies (publicized) -->

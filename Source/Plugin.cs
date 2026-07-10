@@ -187,9 +187,51 @@ namespace valheimCLI
                 return true;
             }
 
+            if (parts[0].Equals("cli_connect_steam_user", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2 || !ulong.TryParse(parts[1], out ulong steamId))
+                {
+                    _commandServer?.SendOutput("Usage: cli_connect_steam_user <steamId> [password]");
+                    return true;
+                }
+
+                CustomCommands.StartSteamUserJoin(steamId, parts.Length >= 3 ? parts[2] : null, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_connect_playfab_user", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2 || string.IsNullOrWhiteSpace(parts[1]))
+                {
+                    _commandServer?.SendOutput("Usage: cli_connect_playfab_user <remotePlayerId> [password]");
+                    return true;
+                }
+
+                CustomCommands.StartPlayFabUserJoin(parts[1], parts.Length >= 3 ? parts[2] : null, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
             if (parts[0].Equals("cli_connection_status", StringComparison.OrdinalIgnoreCase))
             {
                 _commandServer?.SendOutput($"OK: connectionStatus={ZNet.GetConnectionStatus()}, server={ZNet.GetServerString()}");
+                return true;
+            }
+
+            if (parts[0].Equals("cli_multiplayer_identity", StringComparison.OrdinalIgnoreCase))
+            {
+                CustomCommands.PrintMultiplayerIdentity(line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_start_host_world", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!CustomCommands.TryParseHostedWorldOptions(parts, 1, out string worldName, out bool publicServer, out bool crossplay, out string? password, out string error))
+                {
+                    _commandServer?.SendOutput(error);
+                    return true;
+                }
+
+                CustomCommands.StartHostedWorld(worldName, publicServer, crossplay, password, line => _commandServer?.SendOutput(line));
                 return true;
             }
 
