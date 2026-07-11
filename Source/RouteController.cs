@@ -30,7 +30,7 @@ namespace valheimCLI
 
         private const float ArrivalRadius = 1.3f;
         private const float RouteLookAheadDistance = 7f;
-        private const float BlockedWaypointSkipRadius = 35f;
+        private const float BlockedWaypointSkipRadius = 60f;
         private const float FinalWaypointCompletionRadius = 5f;
         private const float WalkTurnRateDegreesPerSecond = 80f;
         private const float RunTurnRateDegreesPerSecond = 140f;
