@@ -30,6 +30,8 @@ namespace valheimCLI
 
         private const float ArrivalRadius = 1.3f;
         private const float RouteLookAheadDistance = 7f;
+        private const float BlockedWaypointSkipRadius = 35f;
+        private const float FinalWaypointCompletionRadius = 5f;
         private const float WalkTurnRateDegreesPerSecond = 80f;
         private const float RunTurnRateDegreesPerSecond = 140f;
         private const float SprintTurnRateDegreesPerSecond = 190f;
@@ -219,11 +221,13 @@ namespace valheimCLI
                     break;
                 }
 
-                // Generous deadline scaled to leg length and gait so a blocked
-                // path fails loudly instead of steering into a wall forever.
                 float legDistance = HorizontalDistance(startPlayer.transform.position, wp.Position);
                 float assumedSpeed = wp.Gait == Gait.Walk ? 1.0f : 2.0f;
-                float deadline = Time.time + Mathf.Max(10f, legDistance / assumedSpeed * 2f + 5f);
+                float deadline = Time.time + Mathf.Max(30f, legDistance / assumedSpeed * 5f + 10f);
+                float bestDistance = legDistance;
+                float lastProgressTime = Time.time;
+                float stallSeconds = wp.Gait == Gait.Walk ? 25f : 15f;
+                float skipStallSeconds = wp.Gait == Gait.Walk ? 5f : 3f;
 
                 while (true)
                 {
@@ -236,12 +240,27 @@ namespace valheimCLI
                         yield break;
                     }
 
-                    if (HorizontalDistance(player.transform.position, wp.Position) <= ArrivalRadius)
+                    float distanceToWaypoint = HorizontalDistance(player.transform.position, wp.Position);
+                    if (distanceToWaypoint <= ArrivalRadius)
                     {
                         break;
                     }
 
-                    if (Time.time > deadline)
+                    if (distanceToWaypoint < bestDistance - 0.25f)
+                    {
+                        bestDistance = distanceToWaypoint;
+                        lastProgressTime = Time.time;
+                    }
+
+                    float secondsSinceProgress = Time.time - lastProgressTime;
+                    if (secondsSinceProgress > skipStallSeconds &&
+                        ((i < Route.Count - 1 && distanceToWaypoint <= BlockedWaypointSkipRadius) ||
+                         (i == Route.Count - 1 && distanceToWaypoint <= FinalWaypointCompletionRadius)))
+                    {
+                        break;
+                    }
+
+                    if (Time.time > deadline && secondsSinceProgress > stallSeconds)
                     {
                         _lastResult = $"stuck at waypoint {i}";
                         ReleaseControls();
