@@ -101,6 +101,23 @@ namespace valheimCLI
 
         private bool TryExecuteBuiltInCommand(string command)
         {
+            const string trustedPrefix = "cli_run_trusted";
+            if (command.Equals(trustedPrefix, StringComparison.OrdinalIgnoreCase) ||
+                command.StartsWith(trustedPrefix + " ", StringComparison.OrdinalIgnoreCase))
+            {
+                string trustedCommand = command.Length > trustedPrefix.Length
+                    ? command.Substring(trustedPrefix.Length).Trim()
+                    : string.Empty;
+                if (string.IsNullOrEmpty(trustedCommand))
+                {
+                    _commandServer?.SendOutput("Usage: cli_run_trusted <console command>");
+                    return true;
+                }
+
+                ExecuteCommand(trustedCommand, skipAllowedCheck: true);
+                return true;
+            }
+
             string[] parts = command.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
             if (parts.Length == 0)
             {
@@ -170,9 +187,51 @@ namespace valheimCLI
                 return true;
             }
 
+            if (parts[0].Equals("cli_connect_steam_user", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2 || !ulong.TryParse(parts[1], out ulong steamId))
+                {
+                    _commandServer?.SendOutput("Usage: cli_connect_steam_user <steamId> [password]");
+                    return true;
+                }
+
+                CustomCommands.StartSteamUserJoin(steamId, parts.Length >= 3 ? parts[2] : null, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_connect_playfab_user", StringComparison.OrdinalIgnoreCase))
+            {
+                if (parts.Length < 2 || string.IsNullOrWhiteSpace(parts[1]))
+                {
+                    _commandServer?.SendOutput("Usage: cli_connect_playfab_user <remotePlayerId> [password]");
+                    return true;
+                }
+
+                CustomCommands.StartPlayFabUserJoin(parts[1], parts.Length >= 3 ? parts[2] : null, line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
             if (parts[0].Equals("cli_connection_status", StringComparison.OrdinalIgnoreCase))
             {
                 _commandServer?.SendOutput($"OK: connectionStatus={ZNet.GetConnectionStatus()}, server={ZNet.GetServerString()}");
+                return true;
+            }
+
+            if (parts[0].Equals("cli_multiplayer_identity", StringComparison.OrdinalIgnoreCase))
+            {
+                CustomCommands.PrintMultiplayerIdentity(line => _commandServer?.SendOutput(line));
+                return true;
+            }
+
+            if (parts[0].Equals("cli_start_host_world", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!CustomCommands.TryParseHostedWorldOptions(parts, 1, out string worldName, out bool publicServer, out bool crossplay, out string? password, out string error))
+                {
+                    _commandServer?.SendOutput(error);
+                    return true;
+                }
+
+                CustomCommands.StartHostedWorld(worldName, publicServer, crossplay, password, line => _commandServer?.SendOutput(line));
                 return true;
             }
 
@@ -652,7 +711,7 @@ namespace valheimCLI
             return true;
         }
 
-        private void ExecuteCommand(string command)
+        private void ExecuteCommand(string command, bool skipAllowedCheck = false)
         {
             if (Console.instance == null)
             {
@@ -666,7 +725,7 @@ namespace valheimCLI
             try
             {
                 // Execute the command
-                Console.instance.TryRunCommand(command, silentFail: false, skipAllowedCheck: false);
+                Console.instance.TryRunCommand(command, silentFail: false, skipAllowedCheck: skipAllowedCheck);
 
                 // Give a moment for output to be generated
                 System.Threading.Thread.Sleep(100);

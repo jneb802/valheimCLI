@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Reflection;
 using UnityEngine;
@@ -19,6 +20,7 @@ namespace valheimCLI
         private static readonly FieldInfo? GameInIntroField = typeof(Game).GetField("m_inIntro", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo? GameRequestRespawnField = typeof(Game).GetField("m_requestRespawn", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo? StoreGuiTraderField = typeof(StoreGui).GetField("m_trader", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly FieldInfo? MinimapLargeZoomField = typeof(Minimap).GetField("m_largeZoom", BindingFlags.Instance | BindingFlags.NonPublic);
 
         public static void Register()
         {
@@ -672,6 +674,71 @@ namespace valheimCLI
                 PrintPlayerState(args.Context.AddString);
             });
 
+            new Terminal.ConsoleCommand("cli_open_map", "Open the large map", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                OpenMap(args.Context.AddString);
+            });
+
+            new Terminal.ConsoleCommand("cli_map_zoom", "Set large map zoom: cli_map_zoom <0.01-1>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2 || !float.TryParse(args[1], out float zoom))
+                {
+                    args.Context.AddString("Usage: cli_map_zoom <0.01-1>");
+                    return;
+                }
+
+                SetMapZoom(zoom, args.Context.AddString);
+            });
+
+            new Terminal.ConsoleCommand("cli_map_center", "Center large map on world coordinates: cli_map_center <x> <z>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 3 || !float.TryParse(args[1], out float x) || !float.TryParse(args[2], out float z))
+                {
+                    args.Context.AddString("Usage: cli_map_center <x> <z>");
+                    return;
+                }
+
+                CenterMap(x, z, args.Context.AddString);
+            });
+
+            new Terminal.ConsoleCommand("cli_explore_map", "Reveal the full local minimap", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                ExploreMap(args.Context.AddString);
+            });
+
+            new Terminal.ConsoleCommand("cli_bc_screenshot", "Save a Better Continents minimap screenshot: cli_bc_screenshot [resolution] [path]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                int resolution = 2048;
+                if (args.Length >= 2 && !int.TryParse(args[1], out resolution))
+                {
+                    args.Context.AddString("Usage: cli_bc_screenshot [resolution] [path]");
+                    return;
+                }
+
+                string? path = args.Length >= 3 ? args[2] : null;
+                SaveBetterContinentsScreenshot(Math.Max(256, resolution), path, args.Context.AddString);
+            });
+
+            new Terminal.ConsoleCommand("cli_biome_map", "Export generated biome colors: cli_biome_map [resolution] [path] [radius]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                int resolution = 4096;
+                if (args.Length >= 2 && !int.TryParse(args[1], out resolution))
+                {
+                    args.Context.AddString("Usage: cli_biome_map [resolution] [path] [radius]");
+                    return;
+                }
+
+                string? path = args.Length >= 3 ? args[2] : null;
+                float radius = 10000f;
+                if (args.Length >= 4 && !float.TryParse(args[3], out radius))
+                {
+                    args.Context.AddString("Usage: cli_biome_map [resolution] [path] [radius]");
+                    return;
+                }
+
+                SaveBiomeMap(Mathf.Clamp(resolution, 256, 8192), path, Mathf.Clamp(radius, 1000f, 12000f), args.Context.AddString);
+            });
+
             new Terminal.ConsoleCommand("cli_set_tod", "Set local debug time of day: cli_set_tod <0-1|-1>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length < 2 || !float.TryParse(args[1], out float dayFraction))
@@ -853,6 +920,28 @@ namespace valheimCLI
                 StartDedicatedServerJoin(host, port, args.Context.AddString);
             });
 
+            new Terminal.ConsoleCommand("cli_connect_steam_user", "Join a hosted Steam game: cli_connect_steam_user <steamId> [password]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2 || !ulong.TryParse(args[1], out ulong steamId))
+                {
+                    args.Context.AddString("Usage: cli_connect_steam_user <steamId> [password]");
+                    return;
+                }
+
+                StartSteamUserJoin(steamId, args.Length >= 3 ? args[2] : null, args.Context.AddString);
+            });
+
+            new Terminal.ConsoleCommand("cli_connect_playfab_user", "Join a hosted PlayFab game: cli_connect_playfab_user <remotePlayerId> [password]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2 || string.IsNullOrWhiteSpace(args[1]))
+                {
+                    args.Context.AddString("Usage: cli_connect_playfab_user <remotePlayerId> [password]");
+                    return;
+                }
+
+                StartPlayFabUserJoin(args[1], args.Length >= 3 ? args[2] : null, args.Context.AddString);
+            });
+
             new Terminal.ConsoleCommand("cli_connection_status", "Print the current Valheim network connection status", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 PrintConnectionStatus(args.Context.AddString);
@@ -867,6 +956,28 @@ namespace valheimCLI
                 }
 
                 StartLocalWorld(args[1], args.Context.AddString);
+            });
+
+            new Terminal.ConsoleCommand("cli_start_host_world", "Create/select and host a local world: cli_start_host_world <worldName> [--password <password>] [--public true|false] [--crossplay true|false]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                string[] parts = new string[args.Length];
+                for (int i = 0; i < args.Length; i++)
+                {
+                    parts[i] = args[i];
+                }
+
+                if (!TryParseHostedWorldOptions(parts, 1, out string worldName, out bool publicServer, out bool crossplay, out string? password, out string error))
+                {
+                    args.Context.AddString(error);
+                    return;
+                }
+
+                StartHostedWorld(worldName, publicServer, crossplay, password, args.Context.AddString);
+            });
+
+            new Terminal.ConsoleCommand("cli_multiplayer_identity", "Print Steam/PlayFab multiplayer identity and host state", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                PrintMultiplayerIdentity(args.Context.AddString);
             });
 
             new Terminal.ConsoleCommand("cli_check_intro_complete", "Check that the first-spawn Valkyrie intro state is cleared", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
@@ -3743,17 +3854,72 @@ namespace valheimCLI
             addOutput($"OK: Dedicated server join started for {dedicated} using {profileDescription}");
         }
 
-        public static void StartLocalWorld(string worldName, Action<string> addOutput)
+        public static void StartSteamUserJoin(ulong steamId, string? password, Action<string> addOutput)
         {
-            if (worldName.Length < 3)
+            FejdStartup fejd = FejdStartup.instance;
+            if (fejd == null)
             {
-                addOutput("ERROR: World name must be at least 3 characters");
+                addOutput("ERROR: Main menu is not available");
                 return;
             }
 
-            if (worldName.IndexOfAny(System.IO.Path.GetInvalidFileNameChars()) >= 0)
+            if (!TrySelectCurrentProfile(fejd, out string profileDescription, out string profileError))
             {
-                addOutput("ERROR: World name contains invalid filename characters");
+                addOutput(profileError);
+                return;
+            }
+
+            ServerJoinDataSteamUser steamUser = new ServerJoinDataSteamUser(steamId);
+            if (!steamUser.IsValid)
+            {
+                addOutput($"ERROR: Invalid Steam user ID '{steamId}'");
+                return;
+            }
+
+            ApplyJoinPassword(password);
+
+            ServerJoinData joinData = new ServerJoinData(steamUser);
+            fejd.SetServerToJoin(joinData);
+            fejd.JoinServer();
+            addOutput($"OK: Steam user join started for {steamId} using {profileDescription}");
+        }
+
+        public static void StartPlayFabUserJoin(string remotePlayerId, string? password, Action<string> addOutput)
+        {
+            if (string.IsNullOrWhiteSpace(remotePlayerId))
+            {
+                addOutput("ERROR: PlayFab remote player ID is required");
+                return;
+            }
+
+            FejdStartup fejd = FejdStartup.instance;
+            if (fejd == null)
+            {
+                addOutput("ERROR: Main menu is not available");
+                return;
+            }
+
+            if (!TrySelectCurrentProfile(fejd, out string profileDescription, out string profileError))
+            {
+                addOutput(profileError);
+                return;
+            }
+
+            ApplyJoinPassword(password);
+
+            string normalizedRemotePlayerId = remotePlayerId.Trim();
+            ServerJoinDataPlayFabUser playFabUser = new ServerJoinDataPlayFabUser(normalizedRemotePlayerId);
+            ServerJoinData joinData = new ServerJoinData(playFabUser);
+            fejd.SetServerToJoin(joinData);
+            fejd.JoinServer();
+            addOutput($"OK: PlayFab user join started for {normalizedRemotePlayerId} using {profileDescription}");
+        }
+
+        public static void StartLocalWorld(string worldName, Action<string> addOutput)
+        {
+            if (!ValidateWorldName(worldName, out string validationError))
+            {
+                addOutput(validationError);
                 return;
             }
 
@@ -3776,6 +3942,58 @@ namespace valheimCLI
             SaveSystem.InvalidateCache();
 
             addOutput($"OK: Starting local world '{world.m_name}' using {profileDescription}");
+            fejd.OnWorldStart();
+        }
+
+        public static void StartHostedWorld(string worldName, bool publicServer, bool crossplay, string? password, Action<string> addOutput)
+        {
+            if (!ValidateWorldName(worldName, out string validationError))
+            {
+                addOutput(validationError);
+                return;
+            }
+
+            FejdStartup fejd = FejdStartup.instance;
+            if (fejd == null)
+            {
+                addOutput("ERROR: Main menu is not available");
+                return;
+            }
+
+            if (!TrySelectCurrentProfile(fejd, out string profileDescription, out string profileError))
+            {
+                addOutput(profileError);
+                return;
+            }
+
+            World world = World.GetCreateWorld(worldName, FileHelpers.FileSource.Local);
+            world.m_fileSource = FileHelpers.FileSource.Local;
+            WorldField?.SetValue(fejd, world);
+            SaveSystem.InvalidateCache();
+
+            string normalizedPassword = password ?? "";
+            if (fejd.m_openServerToggle != null)
+            {
+                fejd.m_openServerToggle.isOn = true;
+            }
+
+            if (fejd.m_publicServerToggle != null)
+            {
+                fejd.m_publicServerToggle.isOn = publicServer;
+            }
+
+            if (fejd.m_crossplayServerToggle != null)
+            {
+                fejd.m_crossplayServerToggle.isOn = crossplay;
+            }
+
+            if (fejd.m_serverPassword != null)
+            {
+                fejd.m_serverPassword.text = normalizedPassword;
+            }
+
+            string backend = crossplay ? OnlineBackendType.PlayFab.ToString() : OnlineBackendType.Steamworks.ToString();
+            addOutput($"OK: Starting hosted world '{world.m_name}' using {profileDescription}; open=true, public={publicServer}, crossplay={crossplay}, backend={backend}, passwordSet={!string.IsNullOrEmpty(normalizedPassword)}");
             fejd.OnWorldStart();
         }
 
@@ -3850,6 +4068,197 @@ namespace valheimCLI
             addOutput($"OK: connectionStatus={status}, gameState={GameStateTracker.StateToString(state)}, server={server}");
         }
 
+        public static void PrintMultiplayerIdentity(Action<string> addOutput)
+        {
+            string steamId = TryGetSteamId();
+            string playFabLoginState = GetPlayFabLoginState();
+            string playFabId = TryGetPlayFabId();
+            GameState state = DetectCurrentState();
+            ZNet.ConnectionStatus status = ZNet.GetConnectionStatus();
+            bool isServer = ZNet.instance != null && ZNet.instance.IsServer();
+            bool isOpenServer = ZNet.instance != null && ZNet.IsOpenServer();
+            string server = ZNet.GetServerString();
+
+            addOutput($"OK: steamId={steamId}, playFabLoginState={playFabLoginState}, playFabId={playFabId}, backend={ZNet.m_onlineBackend}, gameState={GameStateTracker.StateToString(state)}, connectionStatus={status}, isServer={isServer}, isOpenServer={isOpenServer}, server={server}");
+        }
+
+        private static void OpenMap(Action<string> addOutput)
+        {
+            if (Minimap.instance == null)
+            {
+                addOutput("ERROR: Minimap is not available");
+                return;
+            }
+
+            Minimap.instance.SetMapMode(Minimap.MapMode.Large);
+            addOutput("OK: Large map opened");
+        }
+
+        private static void SetMapZoom(float zoom, Action<string> addOutput)
+        {
+            if (Minimap.instance == null)
+            {
+                addOutput("ERROR: Minimap is not available");
+                return;
+            }
+
+            if (MinimapLargeZoomField == null)
+            {
+                addOutput("ERROR: Minimap zoom field is not available");
+                return;
+            }
+
+            float clampedZoom = Mathf.Clamp(zoom, Minimap.instance.m_minZoom, Minimap.instance.m_maxZoom);
+            Minimap.instance.SetMapMode(Minimap.MapMode.Large);
+            MinimapLargeZoomField.SetValue(Minimap.instance, clampedZoom);
+            addOutput($"OK: Large map zoom set to {clampedZoom:0.###}");
+        }
+
+        private static void CenterMap(float x, float z, Action<string> addOutput)
+        {
+            if (Minimap.instance == null)
+            {
+                addOutput("ERROR: Minimap is not available");
+                return;
+            }
+
+            if (Player.m_localPlayer == null)
+            {
+                addOutput("ERROR: Local player is not available");
+                return;
+            }
+
+            Vector3 point = new Vector3(x, Player.m_localPlayer.transform.position.y, z);
+            Minimap.instance.ShowPointOnMap(point);
+            addOutput($"OK: Large map centered on {x:0.#}, {z:0.#}");
+        }
+
+        private static void ExploreMap(Action<string> addOutput)
+        {
+            if (Minimap.instance == null)
+            {
+                addOutput("ERROR: Minimap is not available");
+                return;
+            }
+
+            Minimap.instance.ExploreAll();
+            Minimap.instance.SetMapMode(Minimap.MapMode.Large);
+            addOutput("OK: Full minimap explored");
+        }
+
+        private static void SaveBetterContinentsScreenshot(int resolution, string? path, Action<string> addOutput)
+        {
+            if (Minimap.instance == null)
+            {
+                addOutput("ERROR: Minimap is not available");
+                return;
+            }
+
+            Type? gameUtilsType = Type.GetType("BetterContinents.GameUtils, BetterContinents");
+            MethodInfo? saveMinimapMethod = gameUtilsType?.GetMethod("SaveMinimap", BindingFlags.Public | BindingFlags.Static);
+            if (saveMinimapMethod == null)
+            {
+                addOutput("ERROR: Better Continents SaveMinimap method is not available");
+                return;
+            }
+
+            string outputPath = string.IsNullOrEmpty(path) ? BuildBetterContinentsScreenshotPath() : path!;
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? ".");
+            saveMinimapMethod.Invoke(null, new object[] { outputPath, resolution });
+            addOutput($"OK: Better Continents minimap screenshot queued path={outputPath} size={resolution}x{resolution}");
+        }
+
+        private static string BuildBetterContinentsScreenshotPath()
+        {
+            return BuildMapExportPath(".png");
+        }
+
+        private static void SaveBiomeMap(int resolution, string? path, float radius, Action<string> addOutput)
+        {
+            if (WorldGenerator.instance == null)
+            {
+                addOutput("ERROR: WorldGenerator is not available");
+                return;
+            }
+
+            string outputPath = string.IsNullOrEmpty(path) ? BuildBiomeMapPath() : path!;
+            Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? ".");
+
+            Texture2D texture = new Texture2D(resolution, resolution, TextureFormat.RGBA32, false, true);
+            Color32[] pixels = new Color32[resolution * resolution];
+            float maxDistanceSquared = radius * radius;
+            float denominator = resolution > 1 ? resolution - 1 : 1;
+
+            for (int y = 0; y < resolution; y++)
+            {
+                float z = Mathf.Lerp(-radius, radius, y / denominator);
+                int rowOffset = y * resolution;
+                for (int x = 0; x < resolution; x++)
+                {
+                    float worldX = Mathf.Lerp(-radius, radius, x / denominator);
+                    if (worldX * worldX + z * z > maxDistanceSquared)
+                    {
+                        pixels[rowOffset + x] = BiomeColor(Heightmap.Biome.None);
+                        continue;
+                    }
+
+                    Heightmap.Biome biome = WorldGenerator.instance.GetBiome(worldX, z);
+                    pixels[rowOffset + x] = BiomeColor(biome);
+                }
+            }
+
+            texture.SetPixels32(pixels);
+            texture.Apply(false, false);
+            File.WriteAllBytes(outputPath, texture.EncodeToPNG());
+            UnityEngine.Object.Destroy(texture);
+            addOutput($"OK: Biome map exported path={outputPath} size={resolution}x{resolution} radius={radius:0.#}");
+        }
+
+        private static Color32 BiomeColor(Heightmap.Biome biome)
+        {
+            switch (biome)
+            {
+                case Heightmap.Biome.Ocean:
+                    return new Color32(0x00, 0x00, 0xFF, 0xFF);
+                case Heightmap.Biome.Meadows:
+                    return new Color32(0x00, 0xFF, 0x00, 0xFF);
+                case Heightmap.Biome.BlackForest:
+                    return new Color32(0x00, 0x7F, 0x00, 0xFF);
+                case Heightmap.Biome.Swamp:
+                    return new Color32(0x7F, 0x7F, 0x00, 0xFF);
+                case Heightmap.Biome.Mountain:
+                    return new Color32(0xFF, 0xFF, 0xFF, 0xFF);
+                case Heightmap.Biome.Plains:
+                    return new Color32(0xFF, 0xFF, 0x00, 0xFF);
+                case Heightmap.Biome.Mistlands:
+                    return new Color32(0x7F, 0x7F, 0x7F, 0xFF);
+                case Heightmap.Biome.DeepNorth:
+                    return new Color32(0x00, 0xFF, 0xFF, 0xFF);
+                case Heightmap.Biome.AshLands:
+                    return new Color32(0xFF, 0x00, 0x00, 0xFF);
+                default:
+                    return new Color32(0x00, 0x00, 0x00, 0xFF);
+            }
+        }
+
+        private static string BuildBiomeMapPath()
+        {
+            return BuildMapExportPath("-biomemap.png");
+        }
+
+        private static string BuildMapExportPath(string suffix)
+        {
+            string worldName = WorldGenerator.instance != null && WorldGenerator.instance.m_world != null
+                ? WorldGenerator.instance.m_world.m_name
+                : "unknown-world";
+            string screenshotDir = Path.Combine(
+                Utils.GetSaveDataPath(FileHelpers.FileSource.Local),
+                "BetterContinents",
+                worldName);
+            string filename = DateTime.Now.ToString("yyyy-dd-M-HH-mm-ss") + suffix;
+            return Path.Combine(screenshotDir, filename);
+        }
+
         private static GameState DetectCurrentState()
         {
             if (FejdStartup.instance != null && Game.instance == null)
@@ -3859,7 +4268,7 @@ namespace valheimCLI
 
             if (Game.instance != null)
             {
-                if (ZNet.instance != null && ZNet.instance.InConnectingScreen())
+                if (GameStateTracker.IsZNetConnecting())
                 {
                     return GameState.Loading;
                 }
@@ -3867,7 +4276,7 @@ namespace valheimCLI
                 return Player.m_localPlayer != null ? GameState.InWorld : GameState.InWorldNoPlayer;
             }
 
-            if (ZNet.instance != null && ZNet.instance.InConnectingScreen())
+            if (GameStateTracker.IsZNetConnecting())
             {
                 return GameState.Loading;
             }
@@ -3895,6 +4304,214 @@ namespace valheimCLI
             }
 
             return !string.IsNullOrWhiteSpace(host);
+        }
+
+        public static bool TryParseHostedWorldOptions(string[] parts, int worldNameIndex, out string worldName, out bool publicServer, out bool crossplay, out string? password, out string error)
+        {
+            worldName = "";
+            publicServer = false;
+            crossplay = false;
+            password = null;
+            error = "";
+
+            if (parts.Length <= worldNameIndex)
+            {
+                error = "Usage: cli_start_host_world <worldName> [--password <password>] [--public true|false] [--crossplay true|false]";
+                return false;
+            }
+
+            worldName = parts[worldNameIndex];
+
+            for (int i = worldNameIndex + 1; i < parts.Length; i++)
+            {
+                string option = parts[i];
+                if (TryReadOptionValue(option, "--password", out string inlinePassword))
+                {
+                    password = inlinePassword;
+                    continue;
+                }
+
+                if (option.Equals("--password", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (i + 1 >= parts.Length)
+                    {
+                        error = "ERROR: --password requires a value";
+                        return false;
+                    }
+
+                    password = parts[++i];
+                    continue;
+                }
+
+                if (TryReadOptionValue(option, "--public", out string inlinePublic))
+                {
+                    if (!TryParseBooleanOption(inlinePublic, out publicServer))
+                    {
+                        error = $"ERROR: Invalid --public value '{inlinePublic}'";
+                        return false;
+                    }
+
+                    continue;
+                }
+
+                if (option.Equals("--public", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (i + 1 >= parts.Length || !TryParseBooleanOption(parts[i + 1], out publicServer))
+                    {
+                        error = "ERROR: --public requires true or false";
+                        return false;
+                    }
+
+                    i++;
+                    continue;
+                }
+
+                if (TryReadOptionValue(option, "--crossplay", out string inlineCrossplay))
+                {
+                    if (!TryParseBooleanOption(inlineCrossplay, out crossplay))
+                    {
+                        error = $"ERROR: Invalid --crossplay value '{inlineCrossplay}'";
+                        return false;
+                    }
+
+                    continue;
+                }
+
+                if (option.Equals("--crossplay", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (i + 1 >= parts.Length || !TryParseBooleanOption(parts[i + 1], out crossplay))
+                    {
+                        error = "ERROR: --crossplay requires true or false";
+                        return false;
+                    }
+
+                    i++;
+                    continue;
+                }
+
+                error = $"ERROR: Unknown option '{option}'";
+                return false;
+            }
+
+            return true;
+        }
+
+        private static bool TryReadOptionValue(string option, string name, out string value)
+        {
+            string prefix = name + "=";
+            if (option.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                value = option.Substring(prefix.Length);
+                return true;
+            }
+
+            value = "";
+            return false;
+        }
+
+        private static bool TryParseBooleanOption(string value, out bool result)
+        {
+            if (bool.TryParse(value, out result))
+            {
+                return true;
+            }
+
+            if (value.Equals("1", StringComparison.OrdinalIgnoreCase) ||
+                value.Equals("yes", StringComparison.OrdinalIgnoreCase) ||
+                value.Equals("on", StringComparison.OrdinalIgnoreCase))
+            {
+                result = true;
+                return true;
+            }
+
+            if (value.Equals("0", StringComparison.OrdinalIgnoreCase) ||
+                value.Equals("no", StringComparison.OrdinalIgnoreCase) ||
+                value.Equals("off", StringComparison.OrdinalIgnoreCase))
+            {
+                result = false;
+                return true;
+            }
+
+            return false;
+        }
+
+        private static bool ValidateWorldName(string worldName, out string error)
+        {
+            error = "";
+            if (worldName.Length < 3)
+            {
+                error = "ERROR: World name must be at least 3 characters";
+                return false;
+            }
+
+            if (worldName.IndexOfAny(System.IO.Path.GetInvalidFileNameChars()) >= 0)
+            {
+                error = "ERROR: World name contains invalid filename characters";
+                return false;
+            }
+
+            return true;
+        }
+
+        private static void ApplyJoinPassword(string? password)
+        {
+            SetServerPassword(password ?? "");
+        }
+
+        private static string TryGetSteamId()
+        {
+            try
+            {
+                Assembly? steamAssembly = AppDomain.CurrentDomain.GetAssemblies()
+                    .FirstOrDefault(assembly => assembly.GetType("Steamworks.SteamUser", throwOnError: false) != null);
+                Type? steamUserType = steamAssembly?.GetType("Steamworks.SteamUser", throwOnError: false);
+                MethodInfo? getSteamId = steamUserType?.GetMethod("GetSteamID", BindingFlags.Static | BindingFlags.Public);
+                object? steamId = getSteamId?.Invoke(null, null);
+                return steamId?.ToString() ?? "unavailable";
+            }
+            catch (Exception ex)
+            {
+                return $"unavailable({ex.GetType().Name})";
+            }
+        }
+
+        private static string GetPlayFabLoginState()
+        {
+            try
+            {
+                return PlayFabManager.CurrentLoginState.ToString();
+            }
+            catch (Exception ex)
+            {
+                return $"unavailable({ex.GetType().Name})";
+            }
+        }
+
+        private static string TryGetPlayFabId()
+        {
+            try
+            {
+                object? manager = PlayFabManager.instance;
+                if (manager == null)
+                {
+                    return "unavailable";
+                }
+
+                PropertyInfo? entityProperty = manager.GetType().GetProperty("Entity", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                object? entity = entityProperty?.GetValue(manager);
+                if (entity == null)
+                {
+                    return "unavailable";
+                }
+
+                PropertyInfo? idProperty = entity.GetType().GetProperty("Id", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                object? id = idProperty?.GetValue(entity);
+                return id?.ToString() ?? "unavailable";
+            }
+            catch (Exception ex)
+            {
+                return $"unavailable({ex.GetType().Name})";
+            }
         }
 
         private static bool GetBoolField(FieldInfo? field, object instance, bool fallback)
