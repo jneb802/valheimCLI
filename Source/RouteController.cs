@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Reflection;
 using System.Text;
 using UnityEngine;
 
@@ -28,12 +29,22 @@ namespace valheimCLI
         }
 
         private const float ArrivalRadius = 1.3f;
+        private const float RouteLookAheadDistance = 7f;
+        private const float BlockedWaypointSkipRadius = 60f;
+        private const float FinalWaypointCompletionRadius = 5f;
+        private const float AssistedWalkSpeed = 1.65f;
+        private const float AssistedRunSpeed = 2.8f;
+        private const float AssistedSprintSpeed = 4.2f;
+        private const float WalkTurnRateDegreesPerSecond = 80f;
+        private const float RunTurnRateDegreesPerSecond = 140f;
+        private const float SprintTurnRateDegreesPerSecond = 190f;
 
         private static readonly List<Waypoint> Route = new();
         private static Coroutine? _active;
         private static int _currentIndex = -1;
         private static string _lastResult = "idle";
         private static PlayerController? _disabledController;
+        private static bool _assistedMovement;
 
         public static bool IsRunning => _active != null;
 
@@ -88,9 +99,13 @@ namespace valheimCLI
                 args.Context.AddString(sb.ToString());
             }, isCheat: true);
 
-            _ = new Terminal.ConsoleCommand("cli_route_start", "Follow the planned route: cli_route_start", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            _ = new Terminal.ConsoleCommand("cli_route_start", "Follow the planned route: cli_route_start [assisted]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
-                Start(args.Context.AddString);
+                bool assisted = args.Length >= 2 &&
+                    (args[1].Equals("assisted", StringComparison.OrdinalIgnoreCase) ||
+                     args[1].Equals("assist", StringComparison.OrdinalIgnoreCase) ||
+                     args[1].Equals("cinematic", StringComparison.OrdinalIgnoreCase));
+                Start(args.Context.AddString, assisted);
             }, isCheat: true);
 
             _ = new Terminal.ConsoleCommand("cli_route_stop", "Stop following the route", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
@@ -102,9 +117,29 @@ namespace valheimCLI
             {
                 Status(args.Context.AddString);
             }, isCheat: true);
+
+            _ = new Terminal.ConsoleCommand("cli_route_from_road", "Load a ProceduralRoads route: cli_route_from_road <index|nearest> [spacing=6] [walk|run|sprint] [reverse] [radius=<m>]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                LoadFromProceduralRoads(args);
+            }, isCheat: true);
         }
 
-        public static void Start(Action<string> addOutput)
+        public static int ReplaceRoute(IEnumerable<Vector3> positions, Gait gait)
+        {
+            Stop(_ => { });
+            Route.Clear();
+
+            foreach (Vector3 position in positions)
+            {
+                Route.Add(new Waypoint { Position = position, Gait = gait });
+            }
+
+            _lastResult = "idle";
+            _currentIndex = -1;
+            return Route.Count;
+        }
+
+        public static void Start(Action<string> addOutput, bool assisted = false)
         {
             if (Route.Count == 0)
             {
@@ -131,8 +166,10 @@ namespace valheimCLI
             }
 
             _lastResult = "running";
+            _assistedMovement = assisted;
             _active = valheimCLIPlugin.Instance.StartCoroutine(FollowRoutine());
-            addOutput($"OK: route started with {Route.Count} waypoint(s)");
+            string mode = assisted ? " assisted" : "";
+            addOutput($"OK: route started with {Route.Count} waypoint(s){mode}");
         }
 
         public static void Stop(Action<string> addOutput)
@@ -166,13 +203,22 @@ namespace valheimCLI
             // Vanilla PlayerController re-issues SetControls from real input every
             // physics tick, zeroing scripted steering. Disable it for the duration.
             Player routePlayer = Player.m_localPlayer;
-            _disabledController = routePlayer != null ? routePlayer.GetComponent<PlayerController>() : null;
+            if (routePlayer == null)
+            {
+                _lastResult = "aborted: player lost";
+                _active = null;
+                yield break;
+            }
+
+            _disabledController = routePlayer.GetComponent<PlayerController>();
             if (_disabledController != null)
             {
                 _disabledController.enabled = false;
             }
 
             WaitForFixedUpdate wait = new();
+            Vector3 steeringDirection = InitialSteeringDirection(routePlayer);
+            Vector3 assistedPosition = routePlayer.transform.position;
 
             for (int i = 0; i < Route.Count; i++)
             {
@@ -186,11 +232,13 @@ namespace valheimCLI
                     break;
                 }
 
-                // Generous deadline scaled to leg length and gait so a blocked
-                // path fails loudly instead of steering into a wall forever.
                 float legDistance = HorizontalDistance(startPlayer.transform.position, wp.Position);
                 float assumedSpeed = wp.Gait == Gait.Walk ? 1.0f : 2.0f;
-                float deadline = Time.time + Mathf.Max(10f, legDistance / assumedSpeed * 2f + 5f);
+                float deadline = Time.time + Mathf.Max(30f, legDistance / assumedSpeed * 5f + 10f);
+                float bestDistance = legDistance;
+                float lastProgressTime = Time.time;
+                float stallSeconds = wp.Gait == Gait.Walk ? 25f : 15f;
+                float skipStallSeconds = wp.Gait == Gait.Walk ? 5f : 3f;
 
                 while (true)
                 {
@@ -203,12 +251,29 @@ namespace valheimCLI
                         yield break;
                     }
 
-                    if (HorizontalDistance(player.transform.position, wp.Position) <= ArrivalRadius)
+                    Vector3 routePosition = _assistedMovement ? assistedPosition : player.transform.position;
+                    float distanceToWaypoint = HorizontalDistance(routePosition, wp.Position);
+                    if (distanceToWaypoint <= ArrivalRadius)
                     {
                         break;
                     }
 
-                    if (Time.time > deadline)
+                    if (distanceToWaypoint < bestDistance - 0.25f)
+                    {
+                        bestDistance = distanceToWaypoint;
+                        lastProgressTime = Time.time;
+                    }
+
+                    float secondsSinceProgress = Time.time - lastProgressTime;
+                    if (secondsSinceProgress > skipStallSeconds &&
+                        !_assistedMovement &&
+                        ((i < Route.Count - 1 && distanceToWaypoint <= BlockedWaypointSkipRadius) ||
+                         (i == Route.Count - 1 && distanceToWaypoint <= FinalWaypointCompletionRadius)))
+                    {
+                        break;
+                    }
+
+                    if (Time.time > deadline && secondsSinceProgress > stallSeconds)
                     {
                         _lastResult = $"stuck at waypoint {i}";
                         ReleaseControls();
@@ -216,18 +281,43 @@ namespace valheimCLI
                         yield break;
                     }
 
-                    Vector3 direction = wp.Position - player.transform.position;
+                    Vector3 direction = wp.Position - routePosition;
                     direction.y = 0f;
                     if (direction.sqrMagnitude < 0.0001f)
                     {
                         break;
                     }
 
+                    Vector3 targetDirection = GetSteeringDirection(routePosition, i);
+                    if (targetDirection.sqrMagnitude < 0.0001f)
+                    {
+                        targetDirection = direction.normalized;
+                    }
+
+                    float turnRate = TurnRateDegreesPerSecond(wp.Gait) * Mathf.Deg2Rad;
+                    steeringDirection = Vector3.RotateTowards(
+                        steeringDirection,
+                        targetDirection.normalized,
+                        turnRate * Time.fixedDeltaTime,
+                        0f);
+
+                    if (steeringDirection.sqrMagnitude < 0.0001f)
+                    {
+                        steeringDirection = targetDirection.normalized;
+                    }
+
+                    steeringDirection.Normalize();
+
                     // SetControls' movedir is look-relative (z = along look direction),
-                    // so face the waypoint and push forward.
-                    player.SetLookDir(direction.normalized);
+                    // so rotate smoothly toward the route and push forward.
+                    player.SetLookDir(steeringDirection);
                     player.SetWalk(wp.Gait == Gait.Walk);
                     player.SetControls(Vector3.forward, false, false, false, false, false, false, false, false, wp.Gait == Gait.Sprint, false);
+                    if (_assistedMovement)
+                    {
+                        assistedPosition = ApplyAssistedMovement(player, assistedPosition, wp.Position, steeringDirection, wp.Gait);
+                    }
+
                     yield return wait;
                 }
             }
@@ -240,6 +330,127 @@ namespace valheimCLI
             ReleaseControls();
             _active = null;
             _currentIndex = -1;
+            _assistedMovement = false;
+        }
+
+        private static Vector3 InitialSteeringDirection(Player player)
+        {
+            Vector3 forward = player.transform.forward;
+            forward.y = 0f;
+            if (forward.sqrMagnitude >= 0.0001f)
+            {
+                return forward.normalized;
+            }
+
+            if (Route.Count > 0)
+            {
+                Vector3 routeDirection = Route[0].Position - player.transform.position;
+                routeDirection.y = 0f;
+                if (routeDirection.sqrMagnitude >= 0.0001f)
+                {
+                    return routeDirection.normalized;
+                }
+            }
+
+            return Vector3.forward;
+        }
+
+        private static Vector3 GetSteeringDirection(Vector3 position, int routeIndex)
+        {
+            Vector3 target = GetLookAheadTarget(position, routeIndex);
+            Vector3 direction = target - position;
+            direction.y = 0f;
+            return direction;
+        }
+
+        private static Vector3 GetLookAheadTarget(Vector3 position, int routeIndex)
+        {
+            if (Route.Count == 0)
+            {
+                return position;
+            }
+
+            int index = Mathf.Clamp(routeIndex, 0, Route.Count - 1);
+            Vector3 target = Route[index].Position;
+            float distanceBudget = RouteLookAheadDistance;
+            Vector3 from = position;
+
+            while (index < Route.Count - 1)
+            {
+                float distanceToTarget = HorizontalDistance(from, target);
+                if (distanceToTarget >= distanceBudget)
+                {
+                    return target;
+                }
+
+                distanceBudget -= distanceToTarget;
+                index++;
+                from = target;
+                target = Route[index].Position;
+            }
+
+            return target;
+        }
+
+        private static float TurnRateDegreesPerSecond(Gait gait)
+        {
+            switch (gait)
+            {
+                case Gait.Walk:
+                    return WalkTurnRateDegreesPerSecond;
+                case Gait.Sprint:
+                    return SprintTurnRateDegreesPerSecond;
+                default:
+                    return RunTurnRateDegreesPerSecond;
+            }
+        }
+
+        private static Vector3 ApplyAssistedMovement(Player player, Vector3 current, Vector3 target, Vector3 steeringDirection, Gait gait)
+        {
+            Vector3 flatTarget = new Vector3(target.x, current.y, target.z);
+            float step = AssistedSpeed(gait) * Time.fixedDeltaTime;
+            Vector3 next = Vector3.MoveTowards(current, flatTarget, step);
+            next.y = ResolveRouteHeight(next, target.y);
+
+            Quaternion rotation = steeringDirection.sqrMagnitude >= 0.0001f
+                ? Quaternion.LookRotation(steeringDirection.normalized, Vector3.up)
+                : player.transform.rotation;
+
+            Rigidbody body = player.GetComponent<Rigidbody>();
+            if (body != null)
+            {
+                body.linearVelocity = Vector3.zero;
+                body.angularVelocity = Vector3.zero;
+                body.position = next;
+                body.rotation = rotation;
+            }
+
+            player.transform.SetPositionAndRotation(next, rotation);
+            player.TeleportTo(next, rotation, distantTeleport: false);
+            return next;
+        }
+
+        private static float AssistedSpeed(Gait gait)
+        {
+            switch (gait)
+            {
+                case Gait.Walk:
+                    return AssistedWalkSpeed;
+                case Gait.Sprint:
+                    return AssistedSprintSpeed;
+                default:
+                    return AssistedRunSpeed;
+            }
+        }
+
+        private static float ResolveRouteHeight(Vector3 position, float fallbackHeight)
+        {
+            if (ZoneSystem.instance != null && ZoneSystem.instance.GetGroundHeight(position, out float groundHeight))
+            {
+                return groundHeight + 0.05f;
+            }
+
+            return fallbackHeight;
         }
 
         private static void ReleaseControls()
@@ -256,6 +467,8 @@ namespace valheimCLI
                 _disabledController.enabled = true;
                 _disabledController = null;
             }
+
+            _assistedMovement = false;
         }
 
         private static float HorizontalDistance(Vector3 a, Vector3 b)
@@ -265,7 +478,7 @@ namespace valheimCLI
             return Mathf.Sqrt(dx * dx + dz * dz);
         }
 
-        private static bool TryParseGait(string value, out Gait gait)
+        public static bool TryParseGait(string value, out Gait gait)
         {
             switch (value.ToLowerInvariant())
             {
@@ -287,6 +500,162 @@ namespace valheimCLI
         private static bool TryParseFloat(string value, out float parsed)
         {
             return float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out parsed) || float.TryParse(value, out parsed);
+        }
+
+        private static void LoadFromProceduralRoads(Terminal.ConsoleEventArgs args)
+        {
+            if (args.Length < 2)
+            {
+                args.Context.AddString("Usage: cli_route_from_road <index|nearest> [spacing=6] [walk|run|sprint] [reverse] [radius=<m>]");
+                return;
+            }
+
+            float spacing = 6f;
+            float nearestRadius = 200f;
+            bool reverse = false;
+            Gait gait = Gait.Walk;
+            bool spacingParsed = false;
+
+            for (int i = 2; i < args.Length; i++)
+            {
+                string option = args[i].Trim();
+                string lower = option.ToLowerInvariant();
+
+                if (lower == "reverse")
+                {
+                    reverse = true;
+                }
+                else if (lower.StartsWith("radius=", StringComparison.OrdinalIgnoreCase))
+                {
+                    string value = option.Substring("radius=".Length);
+                    if (!TryParseFloat(value, out nearestRadius))
+                    {
+                        args.Context.AddString($"ERROR: Invalid radius '{value}'");
+                        return;
+                    }
+                }
+                else if (TryParseGait(lower, out Gait parsedGait))
+                {
+                    gait = parsedGait;
+                }
+                else if (!spacingParsed && TryParseFloat(option, out float parsedSpacing))
+                {
+                    spacing = parsedSpacing;
+                    spacingParsed = true;
+                }
+                else
+                {
+                    args.Context.AddString($"ERROR: Unknown option '{option}'");
+                    return;
+                }
+            }
+
+            Assembly? assembly = FindProceduralRoadsAssembly();
+            if (assembly == null)
+            {
+                args.Context.AddString("ERROR: ProceduralRoads assembly is not loaded");
+                return;
+            }
+
+            Type? generatorType = assembly.GetType("ProceduralRoads.RoadNetworkGenerator");
+            if (generatorType == null)
+            {
+                args.Context.AddString("ERROR: ProceduralRoads.RoadNetworkGenerator was not found");
+                return;
+            }
+
+            int routeIndex;
+            if (args[1].Equals("nearest", StringComparison.OrdinalIgnoreCase))
+            {
+                Player player = Player.m_localPlayer;
+                if (player == null)
+                {
+                    args.Context.AddString("ERROR: No local player found");
+                    return;
+                }
+
+                MethodInfo? nearestMethod = generatorType.GetMethod("FindNearestRoadRouteIndex", BindingFlags.Public | BindingFlags.Static);
+                if (nearestMethod == null)
+                {
+                    args.Context.AddString("ERROR: ProceduralRoads does not expose FindNearestRoadRouteIndex");
+                    return;
+                }
+
+                object? nearestResult = nearestMethod.Invoke(null, new object[] { player.transform.position, nearestRadius });
+                routeIndex = nearestResult is int index ? index : -1;
+                if (routeIndex < 0)
+                {
+                    args.Context.AddString($"ERROR: No ProceduralRoads route found within {nearestRadius.ToString("F1", CultureInfo.InvariantCulture)}m");
+                    return;
+                }
+            }
+            else if (!int.TryParse(args[1], out routeIndex))
+            {
+                args.Context.AddString($"ERROR: Route selector '{args[1]}' is not an index or nearest");
+                return;
+            }
+
+            MethodInfo? waypointsMethod = generatorType.GetMethod("GetRoadRouteWaypoints", BindingFlags.Public | BindingFlags.Static);
+            if (waypointsMethod == null)
+            {
+                args.Context.AddString("ERROR: ProceduralRoads does not expose GetRoadRouteWaypoints");
+                return;
+            }
+
+            object? waypointsResult = waypointsMethod.Invoke(null, new object[] { routeIndex, spacing, reverse });
+            IEnumerable? waypointEnumerable = waypointsResult as IEnumerable;
+            if (waypointEnumerable == null)
+            {
+                args.Context.AddString("ERROR: ProceduralRoads returned no waypoint collection");
+                return;
+            }
+
+            List<Vector3> waypoints = new List<Vector3>();
+            foreach (object waypointObject in waypointEnumerable)
+            {
+                if (waypointObject is Vector3 waypoint)
+                {
+                    waypoints.Add(waypoint);
+                }
+            }
+
+            if (waypoints.Count == 0)
+            {
+                args.Context.AddString($"ERROR: ProceduralRoads route {routeIndex} has no exported waypoints");
+                return;
+            }
+
+            int count = ReplaceRoute(waypoints, gait);
+            string label = GetProceduralRoadsRouteLabel(generatorType, routeIndex);
+            args.Context.AddString(
+                $"OK: loaded ProceduralRoads route={routeIndex} label=\"{label}\" waypoints={count} spacing={spacing.ToString("F1", CultureInfo.InvariantCulture)} gait={gait.ToString().ToLowerInvariant()} reverse={reverse}");
+        }
+
+        private static Assembly? FindProceduralRoadsAssembly()
+        {
+            Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
+            for (int i = 0; i < assemblies.Length; i++)
+            {
+                Assembly assembly = assemblies[i];
+                if (assembly.GetName().Name == "ProceduralRoads")
+                {
+                    return assembly;
+                }
+            }
+
+            return null;
+        }
+
+        private static string GetProceduralRoadsRouteLabel(Type generatorType, int routeIndex)
+        {
+            MethodInfo? labelMethod = generatorType.GetMethod("GetRoadRouteLabel", BindingFlags.Public | BindingFlags.Static);
+            if (labelMethod == null)
+            {
+                return "";
+            }
+
+            object? labelResult = labelMethod.Invoke(null, new object[] { routeIndex });
+            return labelResult as string ?? "";
         }
     }
 }
