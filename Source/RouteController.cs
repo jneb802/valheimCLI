@@ -32,6 +32,9 @@ namespace valheimCLI
         private const float RouteLookAheadDistance = 7f;
         private const float BlockedWaypointSkipRadius = 60f;
         private const float FinalWaypointCompletionRadius = 5f;
+        private const float AssistedWalkSpeed = 1.65f;
+        private const float AssistedRunSpeed = 2.8f;
+        private const float AssistedSprintSpeed = 4.2f;
         private const float WalkTurnRateDegreesPerSecond = 80f;
         private const float RunTurnRateDegreesPerSecond = 140f;
         private const float SprintTurnRateDegreesPerSecond = 190f;
@@ -41,6 +44,7 @@ namespace valheimCLI
         private static int _currentIndex = -1;
         private static string _lastResult = "idle";
         private static PlayerController? _disabledController;
+        private static bool _assistedMovement;
 
         public static bool IsRunning => _active != null;
 
@@ -95,9 +99,13 @@ namespace valheimCLI
                 args.Context.AddString(sb.ToString());
             }, isCheat: true);
 
-            _ = new Terminal.ConsoleCommand("cli_route_start", "Follow the planned route: cli_route_start", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            _ = new Terminal.ConsoleCommand("cli_route_start", "Follow the planned route: cli_route_start [assisted]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
-                Start(args.Context.AddString);
+                bool assisted = args.Length >= 2 &&
+                    (args[1].Equals("assisted", StringComparison.OrdinalIgnoreCase) ||
+                     args[1].Equals("assist", StringComparison.OrdinalIgnoreCase) ||
+                     args[1].Equals("cinematic", StringComparison.OrdinalIgnoreCase));
+                Start(args.Context.AddString, assisted);
             }, isCheat: true);
 
             _ = new Terminal.ConsoleCommand("cli_route_stop", "Stop following the route", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
@@ -131,7 +139,7 @@ namespace valheimCLI
             return Route.Count;
         }
 
-        public static void Start(Action<string> addOutput)
+        public static void Start(Action<string> addOutput, bool assisted = false)
         {
             if (Route.Count == 0)
             {
@@ -158,8 +166,10 @@ namespace valheimCLI
             }
 
             _lastResult = "running";
+            _assistedMovement = assisted;
             _active = valheimCLIPlugin.Instance.StartCoroutine(FollowRoutine());
-            addOutput($"OK: route started with {Route.Count} waypoint(s)");
+            string mode = assisted ? " assisted" : "";
+            addOutput($"OK: route started with {Route.Count} waypoint(s){mode}");
         }
 
         public static void Stop(Action<string> addOutput)
@@ -208,6 +218,7 @@ namespace valheimCLI
 
             WaitForFixedUpdate wait = new();
             Vector3 steeringDirection = InitialSteeringDirection(routePlayer);
+            Vector3 assistedPosition = routePlayer.transform.position;
 
             for (int i = 0; i < Route.Count; i++)
             {
@@ -240,7 +251,8 @@ namespace valheimCLI
                         yield break;
                     }
 
-                    float distanceToWaypoint = HorizontalDistance(player.transform.position, wp.Position);
+                    Vector3 routePosition = _assistedMovement ? assistedPosition : player.transform.position;
+                    float distanceToWaypoint = HorizontalDistance(routePosition, wp.Position);
                     if (distanceToWaypoint <= ArrivalRadius)
                     {
                         break;
@@ -254,6 +266,7 @@ namespace valheimCLI
 
                     float secondsSinceProgress = Time.time - lastProgressTime;
                     if (secondsSinceProgress > skipStallSeconds &&
+                        !_assistedMovement &&
                         ((i < Route.Count - 1 && distanceToWaypoint <= BlockedWaypointSkipRadius) ||
                          (i == Route.Count - 1 && distanceToWaypoint <= FinalWaypointCompletionRadius)))
                     {
@@ -268,14 +281,14 @@ namespace valheimCLI
                         yield break;
                     }
 
-                    Vector3 direction = wp.Position - player.transform.position;
+                    Vector3 direction = wp.Position - routePosition;
                     direction.y = 0f;
                     if (direction.sqrMagnitude < 0.0001f)
                     {
                         break;
                     }
 
-                    Vector3 targetDirection = GetSteeringDirection(player.transform.position, i);
+                    Vector3 targetDirection = GetSteeringDirection(routePosition, i);
                     if (targetDirection.sqrMagnitude < 0.0001f)
                     {
                         targetDirection = direction.normalized;
@@ -300,6 +313,11 @@ namespace valheimCLI
                     player.SetLookDir(steeringDirection);
                     player.SetWalk(wp.Gait == Gait.Walk);
                     player.SetControls(Vector3.forward, false, false, false, false, false, false, false, false, wp.Gait == Gait.Sprint, false);
+                    if (_assistedMovement)
+                    {
+                        assistedPosition = ApplyAssistedMovement(player, assistedPosition, wp.Position, steeringDirection, wp.Gait);
+                    }
+
                     yield return wait;
                 }
             }
@@ -312,6 +330,7 @@ namespace valheimCLI
             ReleaseControls();
             _active = null;
             _currentIndex = -1;
+            _assistedMovement = false;
         }
 
         private static Vector3 InitialSteeringDirection(Player player)
@@ -386,6 +405,54 @@ namespace valheimCLI
             }
         }
 
+        private static Vector3 ApplyAssistedMovement(Player player, Vector3 current, Vector3 target, Vector3 steeringDirection, Gait gait)
+        {
+            Vector3 flatTarget = new Vector3(target.x, current.y, target.z);
+            float step = AssistedSpeed(gait) * Time.fixedDeltaTime;
+            Vector3 next = Vector3.MoveTowards(current, flatTarget, step);
+            next.y = ResolveRouteHeight(next, target.y);
+
+            Quaternion rotation = steeringDirection.sqrMagnitude >= 0.0001f
+                ? Quaternion.LookRotation(steeringDirection.normalized, Vector3.up)
+                : player.transform.rotation;
+
+            Rigidbody body = player.GetComponent<Rigidbody>();
+            if (body != null)
+            {
+                body.linearVelocity = Vector3.zero;
+                body.angularVelocity = Vector3.zero;
+                body.position = next;
+                body.rotation = rotation;
+            }
+
+            player.transform.SetPositionAndRotation(next, rotation);
+            player.TeleportTo(next, rotation, distantTeleport: false);
+            return next;
+        }
+
+        private static float AssistedSpeed(Gait gait)
+        {
+            switch (gait)
+            {
+                case Gait.Walk:
+                    return AssistedWalkSpeed;
+                case Gait.Sprint:
+                    return AssistedSprintSpeed;
+                default:
+                    return AssistedRunSpeed;
+            }
+        }
+
+        private static float ResolveRouteHeight(Vector3 position, float fallbackHeight)
+        {
+            if (ZoneSystem.instance != null && ZoneSystem.instance.GetGroundHeight(position, out float groundHeight))
+            {
+                return groundHeight + 0.05f;
+            }
+
+            return fallbackHeight;
+        }
+
         private static void ReleaseControls()
         {
             Player player = Player.m_localPlayer;
@@ -400,6 +467,8 @@ namespace valheimCLI
                 _disabledController.enabled = true;
                 _disabledController = null;
             }
+
+            _assistedMovement = false;
         }
 
         private static float HorizontalDistance(Vector3 a, Vector3 b)
