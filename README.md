@@ -146,6 +146,23 @@ Exit codes:
 - `4`: bad input
 - `5`: game not ready
 
+## Terrain Persistence Diagnostics
+
+`cli_terrain_snapshot <x> <z>` reads the current ground height, generated base
+height, and nearby terrain records known to this process. Each record includes
+its ID, revision, data size, and SHA-256 hash. An unloaded heightmap is reported
+as `height=unloaded`. A client can retain records after an area unloads, so this
+output does not by itself prove that the server saved them.
+
+Compare snapshots before and after leaving an area, reconnecting, or restarting
+a test server. Snow and paint changes can change the data hash without changing
+ground height. The command does not create terrain objects or modify terrain.
+
+`cli_terrain_trace true` logs terrain object creation and explicit destruction,
+including the destruction call stack. It is off by default. Use
+`cli_terrain_trace false` when the test ends. Normal area unloading is not an
+explicit destruction event.
+
 ## Test Layout And Artifacts
 
 `CLI/tests/` contains generic, reusable sample plans only. Put local/private plans in `CLI/local-tests/`; that folder is ignored by git.
