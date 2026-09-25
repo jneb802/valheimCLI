@@ -24,9 +24,10 @@ namespace valheimCLI
     ///                                                        env transition, render two frames, capture to a request-specific file,
     ///                                                        verify the PNG, move it into place
     ///   cli_until   <timeout> <needle> <command...>          re-run a console command until a line contains needle
+    ///   cli_skip_intro [timeout=60]                          end the first-spawn intro as the menu's Skip does, wait for the respawn
     ///   cli_clear_view is the verified clear (CustomCommands): destroy, recount next frame, repeat up to three passes
     ///
-    /// Arrive, env, capture and clear share the player and the camera, so they
+    /// Arrive, env, capture, clear and skip_intro share the player and the camera, so they
     /// run one at a time through an OperationGate: a second one waits its turn.
     /// When a request times out the server abandons it; the coroutine then
     /// issues no further actions, lets an effect it already started settle
@@ -52,7 +53,7 @@ namespace valheimCLI
 
         public static void Register()
         {
-            new Terminal.ConsoleCommand("cli_arrive", "Teleport and wait until the player has landed and every zone within radius is loaded: cli_arrive <x> <y> <z> [radius=64] [timeout=30]. A bounced landing is re-issued (up to three times).", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            new Terminal.ConsoleCommand("cli_arrive", "Teleport and wait until the player has landed and every zone within radius is loaded: cli_arrive <x> <y> <z> [radius=64] [timeout=30]. A teleport the game refuses (one in progress, or its 2 s cooldown) is offered again until accepted; one that cannot stick (intro, attached, dead) is refused; a landing must hold for 1 s; a bounced or undone landing is re-issued (up to three times).", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length < 4 || !TryF(args[1], out float x) || !TryF(args[2], out float y) || !TryF(args[3], out float z))
                 {
@@ -92,6 +93,17 @@ namespace valheimCLI
                 float timeout = args.Length >= 10 && TryF(args[9], out float t) ? t : 20f;
                 Start("capture", args.Context.AddString, ctx => Capture(ctx, args[1], new Vector3(cx, cy, cz), new Vector3(lx, ly, lz), supersize, timeout), gated: true);
             }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_skip_intro", "End the new-character intro (the valkyrie ride) as the menu's Skip button does, or stop it before it starts, and wait until the player has respawned on the ground: cli_skip_intro [timeout=60]. Reports skipped=false when there was no intro.", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                float timeout = 60f;
+                if (args.Length > 2 || (args.Length == 2 && (!TryF(args[1], out timeout) || timeout <= 0f)))
+                {
+                    args.Context.AddString("Usage: cli_skip_intro [timeout=60]");
+                    return;
+                }
+                Start("skip_intro", args.Context.AddString, ctx => SkipIntro(ctx, timeout), gated: true);
+            });
 
             new Terminal.ConsoleCommand("cli_until", "Re-run a console command every 250 ms until one of its output lines contains the needle, then return that output: cli_until <timeout> <needle> <command...>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
@@ -190,6 +202,92 @@ namespace valheimCLI
             ctx.Output($"CANCELLED: {ctx.Name} {settled}");
         }
 
+        private static readonly System.Reflection.FieldInfo? MaxAirAltitudeField =
+            typeof(Character).GetField("m_maxAirAltitude", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+
+        /// <summary>
+        /// Put a player more than 1 m above the ground down on it, at rest,
+        /// and reset the height the game measures a fall from, so the
+        /// set-down itself is not a fall. False when there was nothing to do.
+        /// </summary>
+        private static bool SetDownOnGround(Player player)
+        {
+            Vector3 p = player.transform.position;
+            if (ZoneSystem.instance == null || !ZoneSystem.instance.GetGroundHeight(p, out float ground) || p.y - ground <= 1f)
+                return false;
+            // The rigidbody carries the character: moving only the transform
+            // was undone by the body on the next physics step, the player fell
+            // from where it was, and the jump back up read as an undone landing.
+            Vector3 down = new Vector3(p.x, ground + 0.3f, p.z);
+            player.transform.position = down;
+            if (player.m_body != null)
+            {
+                player.m_body.position = down;
+                player.m_body.linearVelocity = Vector3.zero;
+            }
+            MaxAirAltitudeField?.SetValue(player, down.y);
+            return true;
+        }
+
+        // ---- cli_skip_intro ----
+        private static IEnumerator SkipIntro(Context ctx, float timeout)
+        {
+            Game game = Game.instance;
+            PlayerProfile? profile = game != null ? game.GetPlayerProfile() : null;
+            if (game == null || profile == null)
+            {
+                ctx.Output("ERROR: code=no_world message=no game or player profile; join or start a world first");
+                yield break;
+            }
+            Stopwatch clock = Stopwatch.StartNew();
+            // Cleared first, so an intro not yet queued (the game queues it
+            // when the world starts) never starts, and the respawn below does
+            // not bring a valkyrie. The game clears it after the first spawn
+            // anyway; it is saved with the character.
+            bool firstSpawn = profile.m_firstSpawn;
+            profile.m_firstSpawn = false;
+            Player before = Player.m_localPlayer;
+            bool active = IntroActive(game);
+            if (active)
+            {
+                // What the menu's Skip button calls: drops the valkyrie, hides
+                // the intro text and respawns the player at the start.
+                game.SkipIntro();
+            }
+            string pending = "";
+            while (clock.Elapsed.TotalSeconds < timeout && !ctx.Cancelled)
+            {
+                Player player = Player.m_localPlayer;
+                bool spawned = player != null;
+                bool respawned = !active || (spawned && player != before);
+                bool introActive = IntroActive(game);
+                bool waiting = game.WaitingForRespawn();
+                if (PlayerModes.IntroSkipSettled(spawned, respawned, waiting, introActive))
+                {
+                    Vector3 p = player!.transform.position;
+                    ctx.Output($"OK: skipped={active} profileFirstSpawn={firstSpawn} position={p.x:F1},{p.y:F1},{p.z:F1} ms={clock.ElapsedMilliseconds}");
+                    yield break;
+                }
+                pending = PlayerModes.IntroSkipPending(spawned, respawned, waiting, introActive);
+                yield return null;
+            }
+            if (ctx.Cancelled)
+            {
+                Cancelled(ctx, "the respawn it asked for completes on its own");
+                yield break;
+            }
+            ctx.Output($"ERROR: code=skip_intro_timeout pending={pending} skipped={active} ms={clock.ElapsedMilliseconds}");
+        }
+
+        private static bool IntroActive(Game game)
+        {
+            Player player = Player.m_localPlayer;
+            Valkyrie valkyrie = Valkyrie.m_instance;
+            return PlayerModes.IntroActive(game.InIntro(includeQueued: true) && !game.InIntro(), game.InIntro(),
+                valkyrie != null && valkyrie.enabled && !valkyrie.m_droppedPlayer,
+                player != null && player.InIntro());
+        }
+
         // ---- cli_arrive ----
         private static IEnumerator Arrive(Context ctx, Vector3 target, float radius, float timeout)
         {
@@ -201,50 +299,139 @@ namespace valheimCLI
             }
             Stopwatch clock = Stopwatch.StartNew();
             int retries = 0;
-            CustomCommands.TeleportPlayer(target, _ => { }, distant: false);
-            string pending = "";
+            bool grounded = false;
+            // The game refuses a teleport while one is running and for 2 s after
+            // one finishes. A refused teleport is offered again every frame until
+            // the game takes it; only one the game accepted can bounce.
+            TeleportAnswer answer = CustomCommands.RequestTeleport(player, target, distant: false);
+            bool accepted = answer == TeleportAnswer.Accepted;
+            long acceptedMs = accepted ? 0 : -1;
+            string pending = accepted ? "" : "teleport refused: " + PlayerModes.DescribeRefusal(answer);
             while (clock.Elapsed.TotalSeconds < timeout && !ctx.Cancelled)
             {
+                if (!accepted && !PlayerModes.WorthRetrying(answer))
+                {
+                    ctx.Output($"ERROR: code=teleport_refused reason={PlayerModes.DescribeRefusal(answer)} {CustomCommands.TeleportStateFields(player)}");
+                    yield break;
+                }
                 yield return null;
                 Vector3 p = player.transform.position;
                 float dx = p.x - target.x, dz = p.z - target.z;
                 bool atTarget = dx * dx + dz * dz <= 4f;
-                if (player.IsTeleporting())
+                TeleportBlock block = CustomCommands.TeleportBlocker(player);
+                ArriveStep step = PlayerModes.NextArriveStep(block, accepted, player.IsTeleporting(), atTarget);
+                if (step == ArriveStep.Blocked)
+                {
+                    // Refused rather than waited out: the intro only moves on
+                    // when a person dismisses its text, and an attachment ends
+                    // only when someone leaves it.
+                    ctx.Output($"ERROR: code=teleport_refused reason={PlayerModes.DescribeRefusal(PlayerModes.BlockAnswer(block))} {CustomCommands.TeleportStateFields(player)}");
+                    yield break;
+                }
+                if (step == ArriveStep.Offer)
+                {
+                    answer = CustomCommands.RequestTeleport(player, target, distant: false);
+                    accepted = answer == TeleportAnswer.Accepted;
+                    if (accepted)
+                    {
+                        acceptedMs = clock.ElapsedMilliseconds;
+                    }
+                    pending = accepted ? "" : "teleport refused: " + PlayerModes.DescribeRefusal(answer);
+                    continue;
+                }
+                if (step == ArriveStep.InFlight)
                 {
                     pending = $"teleporting, player at {p.x:F1},{p.y:F1},{p.z:F1}";
                     continue;
                 }
-                if (!atTarget)
+                if (step == ArriveStep.Bounced)
                 {
                     // A non-distant teleport lands 2 s in, and if no floor answers the
                     // raycast yet (the zone's terrain collider is a frame behind its
                     // spawn) the game bounces the player back ("portal blocked"). The
-                    // zones are loaded by then, so the next attempt lands.
+                    // zones are loaded by then, so the next attempt lands. The game's
+                    // cooldown refuses it for 2 s; the Offer step waits that out.
                     pending = $"bounced back to {p.x:F1},{p.y:F1},{p.z:F1}";
                     if (retries >= 3)
                         break;
                     retries++;
-                    CustomCommands.TeleportPlayer(target, _ => { }, distant: false);
+                    accepted = false;
+                    answer = TeleportAnswer.Cooldown;
                     continue;
+                }
+                // A target given well above the ground (site files use y=60) would drop the
+                // player: fall damage, a red flash over the next capture, seconds of falling.
+                // The teleport finishes only once the game finds a floor there, so set the
+                // player down on the first landed frame, and forget the height it fell from.
+                if (SetDownOnGround(player))
+                {
+                    grounded = true;
+                    p = player.transform.position;
                 }
                 string zoneLine = "";
                 CustomCommands.ZoneReady(target.x, target.z, radius, line => zoneLine = line);
                 if (zoneLine.Contains("ready=true"))
                 {
-                    // A target given well above the ground (site files use y=60) would drop the
-                    // player: fall damage, a red flash over the next capture, seconds of falling.
-                    // Set the player down once the ground is there.
-                    bool grounded = false;
-                    if (ZoneSystem.instance != null && ZoneSystem.instance.GetGroundHeight(p, out float ground) && p.y - ground > 1f)
+                    // A landing counts only if it holds: whatever holds the
+                    // player (the intro valkyrie, an attachment) moves it back
+                    // within a frame or two, and the position read at the
+                    // landing would report a place the player no longer is.
+                    // A straight drop is the landing settling: the hold starts
+                    // again from wherever the player comes to rest.
+                    Vector3 landed = p;
+                    Stopwatch settle = Stopwatch.StartNew();
+                    bool held = true;
+                    while (settle.Elapsed.TotalSeconds < PlayerModes.LandingSettleSeconds && !ctx.Cancelled && clock.Elapsed.TotalSeconds < timeout)
                     {
-                        player.transform.position = new Vector3(p.x, ground + 0.3f, p.z);
-                        if (player.m_body != null)
-                            player.m_body.linearVelocity = Vector3.zero;
-                        p = player.transform.position;
-                        grounded = true;
+                        yield return null;
+                        Vector3 now = player.transform.position;
+                        float driftX = now.x - landed.x, driftZ = now.z - landed.z;
+                        LandingCheck check = PlayerModes.CheckLanding(CustomCommands.TeleportBlocker(player), player.IsTeleporting(),
+                            Mathf.Sqrt(driftX * driftX + driftZ * driftZ), now.y - landed.y);
+                        if (check == LandingCheck.Falling)
+                        {
+                            if (SetDownOnGround(player))
+                                grounded = true;
+                            landed = player.transform.position;
+                            settle.Restart();
+                            continue;
+                        }
+                        if (check == LandingCheck.Undone)
+                        {
+                            held = false;
+                            break;
+                        }
                     }
-                    ctx.Output($"OK: ARRIVE position={p.x:F1},{p.y:F1},{p.z:F1} grounded={grounded} retries={retries} ms={clock.ElapsedMilliseconds} {zoneLine}");
-                    yield break;
+                    if (held && settle.Elapsed.TotalSeconds < PlayerModes.LandingSettleSeconds && !ctx.Cancelled)
+                    {
+                        pending = "landing still settling";
+                        break;
+                    }
+                    if (ctx.Cancelled)
+                        break;
+                    if (held)
+                    {
+                        p = player.transform.position;
+                        ctx.Output($"OK: ARRIVE position={p.x:F1},{p.y:F1},{p.z:F1} grounded={grounded} retries={retries} acceptedMs={acceptedMs} heldMs={settle.ElapsedMilliseconds} ms={clock.ElapsedMilliseconds} {zoneLine}");
+                        yield break;
+                    }
+
+                    TeleportBlock after = CustomCommands.TeleportBlocker(player);
+                    if (after != TeleportBlock.None)
+                    {
+                        ctx.Output($"ERROR: code=teleport_refused reason=landing undone: {PlayerModes.DescribeRefusal(PlayerModes.BlockAnswer(after))} {CustomCommands.TeleportStateFields(player)}");
+                        yield break;
+                    }
+                    // Undone by something that does not persist: offer the
+                    // teleport again, as for a bounce.
+                    Vector3 moved = player.transform.position;
+                    pending = $"landing undone, player moved to {moved.x:F1},{moved.y:F1},{moved.z:F1}";
+                    if (retries >= 3)
+                        break;
+                    retries++;
+                    accepted = false;
+                    answer = TeleportAnswer.Cooldown;
+                    continue;
                 }
                 pending = zoneLine;
             }
@@ -259,7 +446,7 @@ namespace valheimCLI
                 Cancelled(ctx, $"teleport settled after {settle.ElapsedMilliseconds} ms, player at {p.x:F1},{p.y:F1},{p.z:F1}");
                 yield break;
             }
-            ctx.Output($"ERROR: code=arrive_timeout retries={retries} ms={clock.ElapsedMilliseconds} pending={pending}");
+            ctx.Output($"ERROR: code={PlayerModes.ArriveTimeoutCode(acceptedMs >= 0)} retries={retries} ms={clock.ElapsedMilliseconds} {CustomCommands.TeleportStateFields(player)} pending={pending}");
         }
 
         // ---- cli_env ----

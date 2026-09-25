@@ -36,6 +36,21 @@ public static class CommandMetadata
             return "plugin-server";
         }
 
+        if (name is "cli_peers" or "cli_zdos_at" or "cli_containers_at" or "cli_teleport_peer")
+        {
+            return "server-world";
+        }
+
+        if (name is "cli_ground_height" or "cli_surface_at" or "cli_paint_at" or "cli_piece_geometry" or "cli_prefabs_at" or "cli_terrain_ops" or "cli_terrain_edit" or "cli_spawn_piece" or "cli_clutter" or "cli_build_snap_points" or "cli_piece_support_settle" or "cli_skip_intro")
+        {
+            return "loaded-world";
+        }
+
+        if (name is "cli_nearby_prefabs" or "cli_cart" or "cli_build_rotate" or "cli_build_place_at" or "cli_build_place_snapped" or "cli_fly")
+        {
+            return "local-player";
+        }
+
         if (name.StartsWith("ct_"))
         {
             return "terminal";

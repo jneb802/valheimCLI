@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using UnityEngine;
@@ -26,27 +27,30 @@ namespace valheimCLI
         {
             RouteController.Register();
             BuildCommands.Register();
+            CartCommands.Register();
             AsyncCommands.Register();
 
-            new Terminal.ConsoleCommand("cli_create_character", "Create and select a local character: cli_create_character <name> [--replace] [--local]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            new Terminal.ConsoleCommand("cli_create_character", "Create and select a local character: cli_create_character <name> [--replace] [--local] [--skip-intro]. --skip-intro saves it as already spawned once, so it lands at the start without the valkyrie intro", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length < 2)
                 {
-                    args.Context.AddString("Usage: cli_create_character <name> [--replace] [--local]");
+                    args.Context.AddString("Usage: cli_create_character <name> [--replace] [--local] [--skip-intro]");
                     return;
                 }
 
                 string characterName = args[1].Trim();
                 bool replace = false;
                 bool forceLocal = false;
+                bool skipIntro = false;
                 for (int i = 2; i < args.Length; i++)
                 {
                     replace |= args[i].Equals("--replace", StringComparison.OrdinalIgnoreCase);
                     forceLocal |= args[i].Equals("--local", StringComparison.OrdinalIgnoreCase);
+                    skipIntro |= args[i].Equals("--skip-intro", StringComparison.OrdinalIgnoreCase);
                 }
 
                 forceLocal |= replace;
-                CreateCharacter(characterName, replace, forceLocal, args.Context.AddString);
+                CreateCharacter(characterName, replace, forceLocal, skipIntro, args.Context.AddString);
             });
 
             new Terminal.ConsoleCommand("cli_select_character", "Select an existing character: cli_select_character <name-or-filename>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
@@ -271,23 +275,27 @@ namespace valheimCLI
                 SpawnFrozenNear(args[1], count, level, distance, spacing, args.Context.AddString);
             }, isCheat: true);
 
-            new Terminal.ConsoleCommand("cli_nearby_prefabs", "List prefab objects within a radius of the local player: cli_nearby_prefabs [radius]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            new Terminal.ConsoleCommand("cli_nearby_prefabs", "List prefab objects within a radius of the local player, with each one's ZDO id and owner: cli_nearby_prefabs [radius]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 float radius = 2f;
                 if (args.Length >= 2)
                 {
-                    float.TryParse(args[1], out radius);
+                    if (!CommandArguments.TryRadius(args[1], out radius))
+                    {
+                        args.Context.AddString("ERROR: radius must be finite, greater than zero and at most 1024");
+                        return;
+                    }
                 }
 
                 ListNearbyPrefabs(radius, args.Context.AddString);
             }, isCheat: true);
 
-            new Terminal.ConsoleCommand("cli_prefabs_at", "List prefab objects near a world coordinate, independent of where the player stands: cli_prefabs_at <x> <y> <z> [radius=30]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            new Terminal.ConsoleCommand("cli_prefabs_at", "List prefab objects near a world coordinate, independent of where the player stands, with each one's ZDO id and owner: cli_prefabs_at <x> <y> <z> [radius=30]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length < 4 ||
-                    !float.TryParse(args[1], out float atX) ||
-                    !float.TryParse(args[2], out float atY) ||
-                    !float.TryParse(args[3], out float atZ))
+                    !CommandArguments.TryFiniteFloat(args[1], out float atX) ||
+                    !CommandArguments.TryFiniteFloat(args[2], out float atY) ||
+                    !CommandArguments.TryFiniteFloat(args[3], out float atZ))
                 {
                     args.Context.AddString("Usage: cli_prefabs_at <x> <y> <z> [radius=30]");
                     return;
@@ -296,7 +304,11 @@ namespace valheimCLI
                 float atRadius = 30f;
                 if (args.Length >= 5)
                 {
-                    float.TryParse(args[4], out atRadius);
+                    if (!CommandArguments.TryRadius(args[4], out atRadius))
+                    {
+                        args.Context.AddString("ERROR: radius must be finite, greater than zero and at most 1024");
+                        return;
+                    }
                 }
 
                 ListPrefabsAt(new Vector3(atX, atY, atZ), Mathf.Clamp(atRadius, 0.5f, 60f), args.Context.AddString);
@@ -623,7 +635,7 @@ namespace valheimCLI
                 args.Context.AddString($"OK: tutorialsEnabled={enabled} dismissedActiveRaven={dismissed}");
             }, isCheat: true);
 
-            new Terminal.ConsoleCommand("cli_set_player_safety", "Set local player god and ghost modes: cli_set_player_safety <true|false>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            new Terminal.ConsoleCommand("cli_set_player_safety", "Set local player god, ghost and debug modes (true also turns cheats on) and report each: cli_set_player_safety <true|false>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length < 2 || !bool.TryParse(args[1], out bool enabled))
                 {
@@ -632,6 +644,31 @@ namespace valheimCLI
                 }
 
                 SetPlayerSafety(enabled, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_fly", "Report, set or toggle the local player's debug fly without the Z key, which needs cheats in effect and so never works on a client joined to a dedicated server: cli_fly [on|off|toggle]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                Player player = Player.m_localPlayer;
+                if (player == null)
+                {
+                    args.Context.AddString("ERROR: No local player found");
+                    return;
+                }
+
+                bool current = player.InDebugFlyMode();
+                if (!PlayerModes.TryFlyTarget(args.Args, current, out bool target, out _, out string error))
+                {
+                    args.Context.AddString(error);
+                    return;
+                }
+
+                // ToggleDebugFly flips the flag, so it is called only when the state differs.
+                if (target != current)
+                {
+                    player.ToggleDebugFly();
+                }
+                bool fly = player.InDebugFlyMode();
+                args.Context.AddString(PlayerModes.FlyLine(fly, fly != current));
             }, isCheat: true);
 
             new Terminal.ConsoleCommand("cli_give_item", "Add an item directly to the local player inventory: cli_give_item <prefab> [count] [quality]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
@@ -1407,8 +1444,54 @@ namespace valheimCLI
                 return;
             }
 
-            player.TeleportTo(position, player.transform.rotation, distantTeleport: distant);
+            TeleportAnswer answer = RequestTeleport(player, position, distant);
+            if (answer != TeleportAnswer.Accepted)
+            {
+                addOutput($"ERROR: code=teleport_refused reason={PlayerModes.DescribeRefusal(answer)} {TeleportStateFields(player)}");
+                return;
+            }
             addOutput($"OK: Teleported to {position.x:F1}, {position.y:F1}, {position.z:F1} distant={distant}");
+        }
+
+        /// <summary>
+        /// Ask the game to teleport the local player and say what it answered.
+        /// Player.TeleportTo returns false, and does nothing, while a teleport
+        /// is running and for 2 s after one finishes; the return value is the
+        /// only sign of that.
+        /// </summary>
+        public static TeleportAnswer RequestTeleport(Player player, Vector3 position, bool distant)
+        {
+            return PlayerModes.RequestTeleport(TeleportBlocker(player),
+                () => player.TeleportTo(position, player.transform.rotation, distantTeleport: distant),
+                () => player.m_nview != null && player.m_nview.IsOwner(),
+                player.IsTeleporting);
+        }
+
+        /// <summary>
+        /// What would undo a teleport right now. TeleportTo itself accepts in
+        /// these states: during the first-spawn intro the valkyrie sets the
+        /// player's position every frame until it drops them, and an
+        /// attachment (seat, bed, helm, saddle) does the same from its attach
+        /// point.
+        /// </summary>
+        public static TeleportBlock TeleportBlocker(Player player)
+        {
+            return PlayerModes.Blocker(player.InIntro(), ValkyrieCarriesPlayer(), player.IsAttached(), player.IsDead());
+        }
+
+        private static bool ValkyrieCarriesPlayer()
+        {
+            Valkyrie valkyrie = Valkyrie.m_instance;
+            return valkyrie != null && valkyrie.enabled && !valkyrie.m_droppedPlayer;
+        }
+
+        /// <summary>The player-state fields a refused or failed teleport reports, named as cli_player_state names them.</summary>
+        public static string TeleportStateFields(Player player)
+        {
+            Vector3 p = player.transform.position;
+            return string.Format(CultureInfo.InvariantCulture,
+                "inIntro={0} valkyrieCarrying={1} attached={2} dead={3} teleporting={4} position={5:F1},{6:F1},{7:F1}",
+                player.InIntro(), ValkyrieCarriesPlayer(), player.IsAttached(), player.IsDead(), player.IsTeleporting(), p.x, p.y, p.z);
         }
 
         public static void GotoLocation(string locationNameOrGroup, Action<string> addOutput)
@@ -2258,7 +2341,7 @@ namespace valheimCLI
             return itemData;
         }
 
-        public static void CreateCharacter(string characterName, bool replace, bool forceLocal, Action<string> addOutput)
+        public static void CreateCharacter(string characterName, bool replace, bool forceLocal, bool skipIntro, Action<string> addOutput)
         {
             if (characterName.Length < 3)
             {
@@ -2307,6 +2390,17 @@ namespace valheimCLI
                 profile.m_fileSource = FileHelpers.FileSource.Local;
             }
 
+            // A new profile is marked for the first-spawn intro: the game
+            // queues it when the world starts and spawns the player on a
+            // valkyrie that holds it (and refuses teleports) until someone
+            // dismisses the text. Saved as already spawned once, the character
+            // lands at the start like a returning one; the game clears this
+            // flag itself after the first spawn.
+            if (skipIntro)
+            {
+                profile.m_firstSpawn = false;
+            }
+
             previewPlayer.GiveDefaultItems();
             profile.SetName(characterName);
             profile.SavePlayerData(previewPlayer);
@@ -2322,7 +2416,7 @@ namespace valheimCLI
             PlatformPrefs.SetString("profile", filename);
             Game.SetProfile(filename, profile.m_fileSource);
 
-            addOutput($"OK: Created and selected character '{characterName}' ({profile.m_fileSource})");
+            addOutput($"OK: Created and selected character '{characterName}' ({profile.m_fileSource}) intro={(profile.m_firstSpawn ? "on" : "skipped")}");
         }
 
         public static void SelectCharacter(string characterNameOrFilename, Action<string> addOutput)
@@ -2526,6 +2620,7 @@ namespace valheimCLI
         {
             Collider[] colliders = Physics.OverlapSphere(playerPos, radius);
             Dictionary<GameObject, float> found = new();
+            Dictionary<GameObject, ZNetView> views = new();
             foreach (Collider collider in colliders)
             {
                 if (collider.GetComponentInParent<Player>() != null)
@@ -2540,18 +2635,68 @@ namespace valheimCLI
                 {
                     found[root] = distance;
                 }
+
+                if (nview != null && !views.ContainsKey(root))
+                {
+                    views[root] = nview;
+                }
             }
 
             foreach (KeyValuePair<GameObject, float> entry in found.OrderBy(item => item.Value))
             {
                 Vector3 pos = entry.Key.transform.position;
-                addOutput($"PREFAB name={CleanPrefabName(entry.Key.name)} distance={entry.Value:F1} pos={pos.x:F1},{pos.y:F1},{pos.z:F1}");
+                // Positions to the millimetre, not the decimetre. At F1 the
+                // rounding error is 5 cm per axis, which on a crossing at 45
+                // degrees projects to 7 cm along it -- enough to make pieces on
+                // an exact 2 m grid look 6 cm off it. The census is used to
+                // check geometry, so it has to be finer than what it measures.
+                // Rotation as well as position: a piece can be exactly where
+                // it belongs and still be one no player could place, because
+                // the vanilla hammer builds every ghost at Euler(0, yaw, 0)
+                // with yaw a multiple of Player.m_placeRotationDegrees. Euler
+                // angles come back in [0,360); pitch and roll are reported
+                // signed about zero, which is how "level" reads.
+                Vector3 euler = entry.Key.transform.rotation.eulerAngles;
+                float pitch = Mathf.DeltaAngle(0f, euler.x);
+                float roll = Mathf.DeltaAngle(0f, euler.z);
+                addOutput(FormattableString.Invariant($"PREFAB name={CleanPrefabName(entry.Key.name)} distance={entry.Value:F2} pos={pos.x:F3},{pos.y:F3},{pos.z:F3} rot={pitch:F3},{euler.y:F3},{roll:F3} {DescribeNetIdentity(entry.Key, views)}"));
             }
 
-            addOutput($"OK: NEARBY_PREFABS radius={radius:F1} count={found.Count}");
+            addOutput(FormattableString.Invariant($"OK: NEARBY_PREFABS radius={radius:F1} count={found.Count}"));
         }
 
-        private static string CleanPrefabName(string name)
+        /// <summary>
+        /// The networked identity of a listed object, so two clients can be
+        /// compared by WHICH pieces they see rather than by how many.
+        ///
+        /// zdo is ZDOID.ToString() = "userID:id". The userID half is the
+        /// SESSION id of whoever created the object, so a ZDOID is only
+        /// comparable within one server session: after a server restart the
+        /// same piece comes back under a different id and must be matched on
+        /// name+position instead. owner is the peer currently simulating it,
+        /// and 0 means nobody claims it.
+        ///
+        /// An object with no ZNetView is purely local (client-side scenery),
+        /// which is itself worth seeing in a two-client comparison, so it is
+        /// reported as zdo=local rather than dropped.
+        /// </summary>
+        private static string DescribeNetIdentity(GameObject root, Dictionary<GameObject, ZNetView> views)
+        {
+            if (!views.TryGetValue(root, out ZNetView nview) || nview == null)
+            {
+                return "zdo=local owner=none";
+            }
+
+            if (!nview.IsValid())
+            {
+                return "zdo=invalid owner=none";
+            }
+
+            ZDO zdo = nview.GetZDO();
+            return $"zdo={zdo.m_uid} owner={zdo.GetOwner()}";
+        }
+
+        internal static string CleanPrefabName(string name)
         {
             int cloneIndex = name.IndexOf("(Clone)", StringComparison.Ordinal);
             return cloneIndex >= 0 ? name.Substring(0, cloneIndex) : name;
@@ -4091,17 +4236,45 @@ namespace valheimCLI
                 return;
             }
 
-            ItemDrop.ItemData? item = FindInventoryItem(player.GetInventory(), requestedName);
-            if (item == null)
+            // An equipped match is preferred, so a second copy of the item
+            // in hand is never swapped in (see ItemSelection).
+            List<ItemDrop.ItemData> items = player.GetInventory().GetAllItems();
+            string requested = requestedName.Trim();
+            List<ItemMatch> matches = items.Select(candidate => MatchItem(candidate, requested)).ToList();
+            List<bool> equippedFlags = items.Select(candidate => player.IsItemEquiped(candidate)).ToList();
+            int index = ItemSelection.Choose(matches, equippedFlags);
+            if (index < 0)
             {
                 addOutput($"ERROR: No inventory item matching '{requestedName}'");
                 return;
             }
 
-            bool equipped = player.EquipItem(item);
-            addOutput(equipped
-                ? $"OK: equipped item prefab={GetItemPrefabName(item)} name={item.m_shared.m_name} type={item.m_shared.m_itemType}"
-                : $"ERROR: Equip failed prefab={GetItemPrefabName(item)} name={item.m_shared.m_name} type={item.m_shared.m_itemType}");
+            ItemDrop.ItemData item = items[index];
+            // Humanoid.EquipItem returns false for an item already equipped;
+            // that is the state asked for, so it is reported, not toggled.
+            bool already = equippedFlags[index];
+            bool accepted = !already && player.EquipItem(item);
+            addOutput($"{ItemSelection.ReplyPrefix(already, accepted)} prefab={GetItemPrefabName(item)} name={item.m_shared.m_name} type={item.m_shared.m_itemType} already={already}");
+        }
+
+        private static ItemMatch MatchItem(ItemDrop.ItemData item, string requested)
+        {
+            string prefabName = GetItemPrefabName(item);
+            string token = item.m_shared.m_name;
+            string display = Localization.instance.Localize(token);
+            if (prefabName.Equals(requested, StringComparison.OrdinalIgnoreCase) ||
+                token.Equals(requested, StringComparison.OrdinalIgnoreCase) ||
+                display.Equals(requested, StringComparison.OrdinalIgnoreCase))
+            {
+                return ItemMatch.Exact;
+            }
+            if (prefabName.IndexOf(requested, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                token.IndexOf(requested, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                display.IndexOf(requested, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return ItemMatch.Partial;
+            }
+            return ItemMatch.None;
         }
 
         public static void ApplyMagicEffect(string requestedItemName, string effectType, string rarityName, float effectValue, Action<string> addOutput)
@@ -4219,7 +4392,21 @@ namespace valheimCLI
 
             player.SetGodMode(enabled);
             player.SetGhostMode(enabled);
-            addOutput($"OK: playerSafety enabled={enabled} god={player.InGodMode()} ghost={player.InGhostMode()}");
+            // Debug mode (fly on Z, no-cost building on B) is set, never
+            // toggled: the vanilla debugmode command flips it, so running that
+            // blind is as likely to turn it off as on.
+            Player.m_debugMode = enabled;
+            // Debug mode's keys only work with cheats on, which the game starts
+            // with off. Cheats are switched on here and never off: turning them
+            // off could undo a devcommands the user ran on purpose. A client
+            // joined to a dedicated server never has cheats in effect whatever
+            // this flag says; cli_fly works there.
+            if (enabled && !Terminal.m_cheat)
+            {
+                Terminal.m_cheat = true;
+                Console.instance?.updateCommandList();
+            }
+            addOutput(PlayerModes.SafetyLine(enabled, player.InGodMode(), player.InGhostMode(), Player.m_debugMode, Terminal.m_cheat));
         }
 
         private static bool TryGetLocalInventory(Action<string> addOutput, out Inventory inventory)
