@@ -89,6 +89,14 @@ namespace valheimCLI
         public void Stop()
         {
             _running = false;
+            // Answer every open request with an explicit error before the sockets
+            // close, and give the socket threads (they poll every 20 ms) up to half a
+            // second to write those replies. This runs on the game thread when the
+            // plugin unloads; without it a pending async command could come back empty.
+            _broker.Shutdown(RequestBroker.UnloadedLine);
+            System.Diagnostics.Stopwatch delivery = System.Diagnostics.Stopwatch.StartNew();
+            while (_broker.OpenCount > 0 && delivery.ElapsedMilliseconds < 500)
+                Thread.Sleep(10);
             _listener?.Stop();
 
             lock (_clientsLock)
@@ -107,8 +115,27 @@ namespace valheimCLI
         {
             try
             {
-                _listener = new TcpListener(IPAddress.Loopback, _port);
-                _listener.Start();
+                // A live reload starts this server a frame after the old instance
+                // closed its listener; the port can take a moment to come free.
+                for (int attempt = 1; ; attempt++)
+                {
+                    try
+                    {
+                        _listener = new TcpListener(IPAddress.Loopback, _port);
+                        _listener.Start();
+                        break;
+                    }
+                    catch (SocketException ex) when (LiveReload.ShouldRetryPortBind(attempt, _running))
+                    {
+                        _logger.LogWarning($"Port {_port} busy ({ex.SocketErrorCode}), retrying ({attempt}/{LiveReload.PortBindAttempts})");
+                        Thread.Sleep(LiveReload.PortBindRetryMs);
+                    }
+                }
+                if (!_running)
+                {
+                    _listener.Stop();
+                    return;
+                }
                 _logger.LogInfo($"Command server listening on 127.0.0.1:{_port}");
 
                 while (_running)
@@ -256,9 +283,7 @@ namespace valheimCLI
                                 int colon = rest.IndexOf(':');
                                 if (colon <= 0 || !double.TryParse(rest.Substring(0, colon), System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out timeoutSeconds))
                                 {
-                                    writer.WriteLine("OUTPUT:1");
-                                    writer.WriteLine("ERROR: code=bad_request message=expected CMDT:<seconds>:<command>");
-                                    writer.WriteLine("END_OUTPUT");
+                                    CommandResponse.Write(writer, new[] { "ERROR: code=bad_request message=expected CMDT:<seconds>:<command>" });
                                     continue;
                                 }
                                 command = rest.Substring(colon + 1).Trim();
@@ -276,12 +301,7 @@ namespace valheimCLI
                             if (!response.Completed)
                                 _logger.LogWarning($"CLI command #{request.Id} timed out after {timeoutSeconds:F0}s: {command}");
 
-                            writer.WriteLine($"OUTPUT:{response.Lines.Count}");
-                            foreach (string outputLine in response.Lines)
-                            {
-                                writer.WriteLine(outputLine);
-                            }
-                            writer.WriteLine("END_OUTPUT");
+                            CommandResponse.Write(writer, response.Lines);
                         }
                     }
                     catch (IOException)
@@ -351,6 +371,8 @@ namespace valheimCLI
 
         public void Dispose()
         {
+            if (_stateTracker != null)
+                _stateTracker.OnStateChanged -= OnGameStateChanged;
             Stop();
         }
     }

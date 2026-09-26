@@ -1,4 +1,5 @@
 using YamlDotNet.Serialization;
+using YamlDotNet.Serialization.NamingConventions;
 
 namespace valheim_cli.Testing;
 
@@ -24,6 +25,16 @@ public class TestPlan
 
     [YamlMember(Alias = "cleanup")]
     public List<string> Cleanup { get; set; } = new();
+
+    public static TestPlan Parse(string yaml)
+    {
+        IDeserializer deserializer = new DeserializerBuilder()
+            .WithNamingConvention(CamelCaseNamingConvention.Instance)
+            .IgnoreUnmatchedProperties()
+            .Build();
+
+        return deserializer.Deserialize<TestPlan>(yaml);
+    }
 }
 
 public class GameSettings
@@ -36,6 +47,17 @@ public class GameSettings
 
     [YamlMember(Alias = "stopAfter")]
     public bool StopAfter { get; set; } = false;
+
+    /// <summary>
+    /// An expectations file (docs/expectations.md) the game must match before the
+    /// first step, relative to the plan file. --expect and --expect-strict override it.
+    /// </summary>
+    [YamlMember(Alias = "expect")]
+    public string Expect { get; set; } = "";
+
+    /// <summary>Check <see cref="Expect"/> in strict mode.</summary>
+    [YamlMember(Alias = "expectStrict")]
+    public bool ExpectStrict { get; set; } = false;
 
     public TimeSpan GetLaunchTimeoutSpan()
     {
@@ -138,6 +160,14 @@ public class WaitCondition
     [YamlMember(Alias = "event")]
     public string Event { get; set; } = "";
 
+    /// <summary>End the wait when nothing the game reports changes for this long ("0" never); empty uses --stall or the default.</summary>
+    [YamlMember(Alias = "stall")]
+    public string Stall { get; set; } = "";
+
+    /// <summary>Keep waiting in a state that needs an action, for a step where someone takes it.</summary>
+    [YamlMember(Alias = "allowUnreachable")]
+    public bool AllowUnreachable { get; set; } = false;
+
     public TimeSpan GetTimeoutSpan()
     {
         return TestSettings.ParseDuration(Timeout);
@@ -187,6 +217,9 @@ public class TestPlanResult
     public DateTime EndTime { get; set; }
     public string ArtifactDirectory { get; set; } = "";
     public List<TestCaseResult> TestResults { get; set; } = new();
+
+    /// <summary>The expectations check made before the first step; null when none was asked for.</summary>
+    public ExpectationCheck? Expectations { get; set; }
 
     public int Passed => TestResults.Count(r => r.Result == TestResult.Passed);
     public int Failed => TestResults.Count(r => r.Result == TestResult.Failed);

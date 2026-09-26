@@ -2,7 +2,9 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using UnityEngine;
@@ -26,27 +28,36 @@ namespace valheimCLI
         {
             RouteController.Register();
             BuildCommands.Register();
+            CartCommands.Register();
             AsyncCommands.Register();
+            ManifestCommands.Register();
+            ReloadCommands.Register();
+            // A mismatched build must still be replaceable and identifiable.
+            foreach (string name in new[] { "cli_build", "cli_self_unload", "cli_await_plugin" })
+                StandingExpectations.AllowWhileMismatched(name);
+            CallCommands.Register();
 
-            new Terminal.ConsoleCommand("cli_create_character", "Create and select a local character: cli_create_character <name> [--replace] [--local]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            new Terminal.ConsoleCommand("cli_create_character", "Create and select a local character: cli_create_character <name> [--replace] [--local] [--skip-intro]. --skip-intro saves it as already spawned once, so it lands at the start without the valkyrie intro", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length < 2)
                 {
-                    args.Context.AddString("Usage: cli_create_character <name> [--replace] [--local]");
+                    args.Context.AddString("Usage: cli_create_character <name> [--replace] [--local] [--skip-intro]");
                     return;
                 }
 
                 string characterName = args[1].Trim();
                 bool replace = false;
                 bool forceLocal = false;
+                bool skipIntro = false;
                 for (int i = 2; i < args.Length; i++)
                 {
                     replace |= args[i].Equals("--replace", StringComparison.OrdinalIgnoreCase);
                     forceLocal |= args[i].Equals("--local", StringComparison.OrdinalIgnoreCase);
+                    skipIntro |= args[i].Equals("--skip-intro", StringComparison.OrdinalIgnoreCase);
                 }
 
                 forceLocal |= replace;
-                CreateCharacter(characterName, replace, forceLocal, args.Context.AddString);
+                CreateCharacter(characterName, replace, forceLocal, skipIntro, args.Context.AddString);
             });
 
             new Terminal.ConsoleCommand("cli_select_character", "Select an existing character: cli_select_character <name-or-filename>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
@@ -271,23 +282,27 @@ namespace valheimCLI
                 SpawnFrozenNear(args[1], count, level, distance, spacing, args.Context.AddString);
             }, isCheat: true);
 
-            new Terminal.ConsoleCommand("cli_nearby_prefabs", "List prefab objects within a radius of the local player: cli_nearby_prefabs [radius]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            new Terminal.ConsoleCommand("cli_nearby_prefabs", "List prefab objects within a radius of the local player, with each one's ZDO id and owner: cli_nearby_prefabs [radius]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 float radius = 2f;
                 if (args.Length >= 2)
                 {
-                    float.TryParse(args[1], out radius);
+                    if (!CommandArguments.TryRadius(args[1], out radius))
+                    {
+                        args.Context.AddString("ERROR: radius must be finite, greater than zero and at most 1024");
+                        return;
+                    }
                 }
 
                 ListNearbyPrefabs(radius, args.Context.AddString);
             }, isCheat: true);
 
-            new Terminal.ConsoleCommand("cli_prefabs_at", "List prefab objects near a world coordinate, independent of where the player stands: cli_prefabs_at <x> <y> <z> [radius=30]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            new Terminal.ConsoleCommand("cli_prefabs_at", "List prefab objects near a world coordinate, independent of where the player stands, with each one's ZDO id and owner: cli_prefabs_at <x> <y> <z> [radius=30]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length < 4 ||
-                    !float.TryParse(args[1], out float atX) ||
-                    !float.TryParse(args[2], out float atY) ||
-                    !float.TryParse(args[3], out float atZ))
+                    !CommandArguments.TryFiniteFloat(args[1], out float atX) ||
+                    !CommandArguments.TryFiniteFloat(args[2], out float atY) ||
+                    !CommandArguments.TryFiniteFloat(args[3], out float atZ))
                 {
                     args.Context.AddString("Usage: cli_prefabs_at <x> <y> <z> [radius=30]");
                     return;
@@ -296,7 +311,11 @@ namespace valheimCLI
                 float atRadius = 30f;
                 if (args.Length >= 5)
                 {
-                    float.TryParse(args[4], out atRadius);
+                    if (!CommandArguments.TryRadius(args[4], out atRadius))
+                    {
+                        args.Context.AddString("ERROR: radius must be finite, greater than zero and at most 1024");
+                        return;
+                    }
                 }
 
                 ListPrefabsAt(new Vector3(atX, atY, atZ), Mathf.Clamp(atRadius, 0.5f, 60f), args.Context.AddString);
@@ -504,17 +523,66 @@ namespace valheimCLI
                 args.Context.AddString($"OK: screenshot queued path={path} size={Screen.width * supersize}x{Screen.height * supersize}");
             }, isCheat: true);
 
-            new Terminal.ConsoleCommand("cli_world_dump", "Sample the world generator to CSV for offline analysis: cli_world_dump [step=50] [dir]. Writes world.csv (x,z,height,biome,river) over the full map and locations.csv (name,x,z,radius)", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            new Terminal.ConsoleCommand("cli_world_dump", "Sample the world generator to CSV for offline analysis: cli_world_dump [step=50] [dir] [--window cx,cz,half]. Writes world.csv (x,z,height,biome,river,river_width,base_height) over the full map plus locations.csv (name,x,z,radius); with --window it writes one window file and no locations. Samples sit on the world lattice (-10000 + i*step), so step 8 lands on the pathfinding cells and step 128 on the island grid", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
+                const string usage = "Usage: cli_world_dump [step=50] [dir] [--window cx,cz,half]";
                 int step = 50;
-                if (args.Length >= 2 && !int.TryParse(args[1], out step))
+                string? dir = null;
+                float? centerX = null, centerZ = null, half = null;
+                int positional = 0;
+
+                for (int i = 1; i < args.Length; i++)
                 {
-                    args.Context.AddString("Usage: cli_world_dump [step=50] [dir]");
+                    string arg = args[i];
+                    if (arg.Equals("--window", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (i + 1 >= args.Length || centerX.HasValue)
+                        {
+                            args.Context.AddString(usage);
+                            return;
+                        }
+
+                        if (!WorldDumpGrid.TryParseWindow(args[++i], out float cx, out float cz, out float halfSize))
+                        {
+                            args.Context.AddString(usage);
+                            return;
+                        }
+
+                        centerX = cx;
+                        centerZ = cz;
+                        half = halfSize;
+                        continue;
+                    }
+
+                    if (positional == 0)
+                    {
+                        if (!int.TryParse(arg, out step))
+                        {
+                            args.Context.AddString(usage);
+                            return;
+                        }
+
+                        positional++;
+                        continue;
+                    }
+
+                    if (positional == 1)
+                    {
+                        dir = arg;
+                        positional++;
+                        continue;
+                    }
+
+                    args.Context.AddString(usage);
                     return;
                 }
 
-                string? dir = args.Length >= 3 ? args[2] : null;
-                WorldDump(Mathf.Clamp(step, 5, 1000), dir, args.Context.AddString);
+                if (step < 5 || step > 1000)
+                {
+                    args.Context.AddString("ERROR: step must be between 5 and 1000 metres");
+                    return;
+                }
+                WorldDump(step, dir, args.Context.AddString, centerX, centerZ, half);
             }, isCheat: true);
 
             new Terminal.ConsoleCommand("cli_zone_ready", "Report whether every zone within a radius of a point is loaded, for scripts that poll after a teleport instead of sleeping: cli_zone_ready <x> <z> [radius=32]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
@@ -623,7 +691,7 @@ namespace valheimCLI
                 args.Context.AddString($"OK: tutorialsEnabled={enabled} dismissedActiveRaven={dismissed}");
             }, isCheat: true);
 
-            new Terminal.ConsoleCommand("cli_set_player_safety", "Set local player god and ghost modes: cli_set_player_safety <true|false>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            new Terminal.ConsoleCommand("cli_set_player_safety", "Set local player god, ghost and debug modes (true also turns cheats on) and report each: cli_set_player_safety <true|false>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length < 2 || !bool.TryParse(args[1], out bool enabled))
                 {
@@ -632,6 +700,31 @@ namespace valheimCLI
                 }
 
                 SetPlayerSafety(enabled, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_fly", "Report, set or toggle the local player's debug fly without the Z key, which needs cheats in effect and so never works on a client joined to a dedicated server: cli_fly [on|off|toggle]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                Player player = Player.m_localPlayer;
+                if (player == null)
+                {
+                    args.Context.AddString("ERROR: No local player found");
+                    return;
+                }
+
+                bool current = player.InDebugFlyMode();
+                if (!PlayerModes.TryFlyTarget(args.Args, current, out bool target, out _, out string error))
+                {
+                    args.Context.AddString(error);
+                    return;
+                }
+
+                // ToggleDebugFly flips the flag, so it is called only when the state differs.
+                if (target != current)
+                {
+                    player.ToggleDebugFly();
+                }
+                bool fly = player.InDebugFlyMode();
+                args.Context.AddString(PlayerModes.FlyLine(fly, fly != current));
             }, isCheat: true);
 
             new Terminal.ConsoleCommand("cli_give_item", "Add an item directly to the local player inventory: cli_give_item <prefab> [count] [quality]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
@@ -1131,6 +1224,31 @@ namespace valheimCLI
                 PrintConnectionStatus(args.Context.AddString);
             });
 
+            new Terminal.ConsoleCommand("cli_create_world", "Create a local world with a KNOWN seed, so a terrain report can be reproduced: cli_create_world <worldName> <seed> [--overwrite]. Writes the world metadata and stops; start it with cli_start_local_world. Runs at the main menu, like the other world commands, so it is not cheat-gated", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 3)
+                {
+                    args.Context.AddString("Usage: cli_create_world <worldName> <seed> [--overwrite]");
+                    return;
+                }
+
+                bool overwrite = false;
+                for (int i = 3; i < args.Length; i++)
+                {
+                    if (args[i].Equals("--overwrite", StringComparison.OrdinalIgnoreCase) && !overwrite)
+                    {
+                        overwrite = true;
+                    }
+                    else
+                    {
+                        args.Context.AddString("Usage: cli_create_world <worldName> <seed> [--overwrite]");
+                        return;
+                    }
+                }
+
+                CreateWorldWithSeed(args[1], args[2], overwrite, args.Context.AddString);
+            });
+
             new Terminal.ConsoleCommand("cli_start_local_world", "Create/select and start a local world: cli_start_local_world <worldName>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length < 2)
@@ -1407,8 +1525,54 @@ namespace valheimCLI
                 return;
             }
 
-            player.TeleportTo(position, player.transform.rotation, distantTeleport: distant);
+            TeleportAnswer answer = RequestTeleport(player, position, distant);
+            if (answer != TeleportAnswer.Accepted)
+            {
+                addOutput($"ERROR: code=teleport_refused reason={PlayerModes.DescribeRefusal(answer)} {TeleportStateFields(player)}");
+                return;
+            }
             addOutput($"OK: Teleported to {position.x:F1}, {position.y:F1}, {position.z:F1} distant={distant}");
+        }
+
+        /// <summary>
+        /// Ask the game to teleport the local player and say what it answered.
+        /// Player.TeleportTo returns false, and does nothing, while a teleport
+        /// is running and for 2 s after one finishes; the return value is the
+        /// only sign of that.
+        /// </summary>
+        public static TeleportAnswer RequestTeleport(Player player, Vector3 position, bool distant)
+        {
+            return PlayerModes.RequestTeleport(TeleportBlocker(player),
+                () => player.TeleportTo(position, player.transform.rotation, distantTeleport: distant),
+                () => player.m_nview != null && player.m_nview.IsOwner(),
+                player.IsTeleporting);
+        }
+
+        /// <summary>
+        /// What would undo a teleport right now. TeleportTo itself accepts in
+        /// these states: during the first-spawn intro the valkyrie sets the
+        /// player's position every frame until it drops them, and an
+        /// attachment (seat, bed, helm, saddle) does the same from its attach
+        /// point.
+        /// </summary>
+        public static TeleportBlock TeleportBlocker(Player player)
+        {
+            return PlayerModes.Blocker(player.InIntro(), ValkyrieCarriesPlayer(), player.IsAttached(), player.IsDead());
+        }
+
+        private static bool ValkyrieCarriesPlayer()
+        {
+            Valkyrie valkyrie = Valkyrie.m_instance;
+            return valkyrie != null && valkyrie.enabled && !valkyrie.m_droppedPlayer;
+        }
+
+        /// <summary>The player-state fields a refused or failed teleport reports, named as cli_player_state names them.</summary>
+        public static string TeleportStateFields(Player player)
+        {
+            Vector3 p = player.transform.position;
+            return string.Format(CultureInfo.InvariantCulture,
+                "inIntro={0} valkyrieCarrying={1} attached={2} dead={3} teleporting={4} position={5:F1},{6:F1},{7:F1}",
+                player.InIntro(), ValkyrieCarriesPlayer(), player.IsAttached(), player.IsDead(), player.IsTeleporting(), p.x, p.y, p.z);
         }
 
         public static void GotoLocation(string locationNameOrGroup, Action<string> addOutput)
@@ -2258,7 +2422,7 @@ namespace valheimCLI
             return itemData;
         }
 
-        public static void CreateCharacter(string characterName, bool replace, bool forceLocal, Action<string> addOutput)
+        public static void CreateCharacter(string characterName, bool replace, bool forceLocal, bool skipIntro, Action<string> addOutput)
         {
             if (characterName.Length < 3)
             {
@@ -2307,6 +2471,17 @@ namespace valheimCLI
                 profile.m_fileSource = FileHelpers.FileSource.Local;
             }
 
+            // A new profile is marked for the first-spawn intro: the game
+            // queues it when the world starts and spawns the player on a
+            // valkyrie that holds it (and refuses teleports) until someone
+            // dismisses the text. Saved as already spawned once, the character
+            // lands at the start like a returning one; the game clears this
+            // flag itself after the first spawn.
+            if (skipIntro)
+            {
+                profile.m_firstSpawn = false;
+            }
+
             previewPlayer.GiveDefaultItems();
             profile.SetName(characterName);
             profile.SavePlayerData(previewPlayer);
@@ -2322,7 +2497,7 @@ namespace valheimCLI
             PlatformPrefs.SetString("profile", filename);
             Game.SetProfile(filename, profile.m_fileSource);
 
-            addOutput($"OK: Created and selected character '{characterName}' ({profile.m_fileSource})");
+            addOutput($"OK: Created and selected character '{characterName}' ({profile.m_fileSource}) intro={(profile.m_firstSpawn ? "on" : "skipped")}");
         }
 
         public static void SelectCharacter(string characterNameOrFilename, Action<string> addOutput)
@@ -2526,6 +2701,7 @@ namespace valheimCLI
         {
             Collider[] colliders = Physics.OverlapSphere(playerPos, radius);
             Dictionary<GameObject, float> found = new();
+            Dictionary<GameObject, ZNetView> views = new();
             foreach (Collider collider in colliders)
             {
                 if (collider.GetComponentInParent<Player>() != null)
@@ -2540,18 +2716,68 @@ namespace valheimCLI
                 {
                     found[root] = distance;
                 }
+
+                if (nview != null && !views.ContainsKey(root))
+                {
+                    views[root] = nview;
+                }
             }
 
             foreach (KeyValuePair<GameObject, float> entry in found.OrderBy(item => item.Value))
             {
                 Vector3 pos = entry.Key.transform.position;
-                addOutput($"PREFAB name={CleanPrefabName(entry.Key.name)} distance={entry.Value:F1} pos={pos.x:F1},{pos.y:F1},{pos.z:F1}");
+                // Positions to the millimetre, not the decimetre. At F1 the
+                // rounding error is 5 cm per axis, which on a crossing at 45
+                // degrees projects to 7 cm along it -- enough to make pieces on
+                // an exact 2 m grid look 6 cm off it. The census is used to
+                // check geometry, so it has to be finer than what it measures.
+                // Rotation as well as position: a piece can be exactly where
+                // it belongs and still be one no player could place, because
+                // the vanilla hammer builds every ghost at Euler(0, yaw, 0)
+                // with yaw a multiple of Player.m_placeRotationDegrees. Euler
+                // angles come back in [0,360); pitch and roll are reported
+                // signed about zero, which is how "level" reads.
+                Vector3 euler = entry.Key.transform.rotation.eulerAngles;
+                float pitch = Mathf.DeltaAngle(0f, euler.x);
+                float roll = Mathf.DeltaAngle(0f, euler.z);
+                addOutput(FormattableString.Invariant($"PREFAB name={CleanPrefabName(entry.Key.name)} distance={entry.Value:F2} pos={pos.x:F3},{pos.y:F3},{pos.z:F3} rot={pitch:F3},{euler.y:F3},{roll:F3} {DescribeNetIdentity(entry.Key, views)}"));
             }
 
-            addOutput($"OK: NEARBY_PREFABS radius={radius:F1} count={found.Count}");
+            addOutput(FormattableString.Invariant($"OK: NEARBY_PREFABS radius={radius:F1} count={found.Count}"));
         }
 
-        private static string CleanPrefabName(string name)
+        /// <summary>
+        /// The networked identity of a listed object, so two clients can be
+        /// compared by WHICH pieces they see rather than by how many.
+        ///
+        /// zdo is ZDOID.ToString() = "userID:id". The userID half is the
+        /// SESSION id of whoever created the object, so a ZDOID is only
+        /// comparable within one server session: after a server restart the
+        /// same piece comes back under a different id and must be matched on
+        /// name+position instead. owner is the peer currently simulating it,
+        /// and 0 means nobody claims it.
+        ///
+        /// An object with no ZNetView is purely local (client-side scenery),
+        /// which is itself worth seeing in a two-client comparison, so it is
+        /// reported as zdo=local rather than dropped.
+        /// </summary>
+        private static string DescribeNetIdentity(GameObject root, Dictionary<GameObject, ZNetView> views)
+        {
+            if (!views.TryGetValue(root, out ZNetView nview) || nview == null)
+            {
+                return "zdo=local owner=none";
+            }
+
+            if (!nview.IsValid())
+            {
+                return "zdo=invalid owner=none";
+            }
+
+            ZDO zdo = nview.GetZDO();
+            return $"zdo={zdo.m_uid} owner={zdo.GetOwner()}";
+        }
+
+        internal static string CleanPrefabName(string name)
         {
             int cloneIndex = name.IndexOf("(Clone)", StringComparison.Ordinal);
             return cloneIndex >= 0 ? name.Substring(0, cloneIndex) : name;
@@ -2766,7 +2992,8 @@ namespace valheimCLI
             addOutput($"OK: freefly camera at {position.x:F1},{position.y:F1},{position.z:F1} yaw={yaw:F1} pitch={pitch:F1}");
         }
 
-        public static void WorldDump(int step, string? directory, Action<string> addOutput)
+        public static void WorldDump(int step, string? directory, Action<string> addOutput,
+            float? windowCenterX = null, float? windowCenterZ = null, float? windowHalf = null)
         {
             WorldGenerator world = WorldGenerator.instance;
             if (world == null)
@@ -2775,25 +3002,66 @@ namespace valheimCLI
                 return;
             }
 
+            if (step < 5 || step > 1000)
+            {
+                addOutput("ERROR: step must be between 5 and 1000 metres");
+                return;
+            }
             const float halfExtent = 10000f;
+            bool windowed = windowCenterX.HasValue && windowCenterZ.HasValue && windowHalf.HasValue;
+            bool anyWindow = windowCenterX.HasValue || windowCenterZ.HasValue || windowHalf.HasValue;
+            string windowSpec = string.Format(CultureInfo.InvariantCulture, "{0},{1},{2}", windowCenterX, windowCenterZ, windowHalf);
+            if (anyWindow && (!windowed || !WorldDumpGrid.TryParseWindow(windowSpec, out _, out _, out _)))
+            {
+                addOutput("ERROR: invalid world dump window");
+                return;
+            }
+            float x0 = windowed ? windowCenterX!.Value - windowHalf!.Value : -halfExtent;
+            float x1 = windowed ? windowCenterX!.Value + windowHalf!.Value : halfExtent;
+            float z0 = windowed ? windowCenterZ!.Value - windowHalf!.Value : -halfExtent;
+            float z1 = windowed ? windowCenterZ!.Value + windowHalf!.Value : halfExtent;
+
+            int ixFrom = Mathf.Max(WorldDumpGrid.From(x0, step), WorldDumpGrid.From(-halfExtent, step));
+            int ixTo = Mathf.Min(WorldDumpGrid.To(x1, step), WorldDumpGrid.To(halfExtent, step));
+            int izFrom = Mathf.Max(WorldDumpGrid.From(z0, step), WorldDumpGrid.From(-halfExtent, step));
+            int izTo = Mathf.Min(WorldDumpGrid.To(z1, step), WorldDumpGrid.To(halfExtent, step));
+
+            if (ixTo < ixFrom || izTo < izFrom)
+            {
+                addOutput("ERROR: WORLD_DUMP window holds no lattice sample at this step");
+                return;
+            }
+
+            if (!WorldDumpGrid.TrySampleCount(ixFrom, ixTo, izFrom, izTo, step, out long expectedSamples))
+            {
+                addOutput("ERROR: WORLD_DUMP exceeds 1000000 samples; use --window or a larger step");
+                return;
+            }
             string dir = string.IsNullOrWhiteSpace(directory) ? BuildWorldDumpDirectory() : directory!;
             Directory.CreateDirectory(dir);
-            string worldPath = Path.Combine(dir, "world.csv");
+            CultureInfo invariant = CultureInfo.InvariantCulture;
+            string worldName = windowed
+                ? string.Format(invariant, "world.win_{0:R}_{1:R}_{2:R}_s{3}.csv",
+                    windowCenterX!.Value, windowCenterZ!.Value, windowHalf!.Value, step)
+                : "world.csv";
+            string worldPath = Path.Combine(dir, worldName);
             string locationsPath = Path.Combine(dir, "locations.csv");
-            var invariant = System.Globalization.CultureInfo.InvariantCulture;
             Stopwatch stopwatch = Stopwatch.StartNew();
 
             int samples = 0;
             using (StreamWriter writer = new StreamWriter(worldPath, false, new System.Text.UTF8Encoding(false)))
             {
-                writer.WriteLine("x,z,height,biome,river");
-                for (float z = -halfExtent; z <= halfExtent; z += step)
+                writer.WriteLine("x,z,height,biome,river,river_width,base_height");
+                for (int iz = izFrom; iz <= izTo; iz++)
                 {
-                    for (float x = -halfExtent; x <= halfExtent; x += step)
+                    float z = WorldDumpGrid.At(iz, step);
+                    for (int ix = ixFrom; ix <= ixTo; ix++)
                     {
+                        float x = WorldDumpGrid.At(ix, step);
                         float height = world.GetHeight(x, z);
                         Heightmap.Biome biome = world.GetBiome(x, z);
-                        world.GetRiverWeight(x, z, out float river, out _);
+                        world.GetRiverWeight(x, z, out float river, out float riverWidth);
+                        float baseHeight = world.GetBaseHeight(x, z, menuTerrain: false);
                         writer.Write(x.ToString("F0", invariant));
                         writer.Write(',');
                         writer.Write(z.ToString("F0", invariant));
@@ -2802,10 +3070,25 @@ namespace valheimCLI
                         writer.Write(',');
                         writer.Write(biome.ToString());
                         writer.Write(',');
-                        writer.WriteLine(river.ToString("F2", invariant));
+                        writer.Write(river.ToString("F2", invariant));
+                        writer.Write(',');
+                        writer.Write(riverWidth.ToString("F1", invariant));
+                        writer.Write(',');
+                        writer.WriteLine(baseHeight.ToString("F5", invariant));
                         samples++;
                     }
                 }
+            }
+
+            if (samples != expectedSamples)
+            {
+                addOutput($"ERROR: WORLD_DUMP incomplete: expected={expectedSamples} actual={samples}");
+                return;
+            }
+            if (windowed)
+            {
+                addOutput(FormattableString.Invariant($"OK: WORLD_DUMP samples={samples} step={step} window={windowCenterX!.Value:F0},{windowCenterZ!.Value:F0},{windowHalf!.Value:F0} extent={WorldDumpGrid.At(ixFrom, step):F0},{WorldDumpGrid.At(izFrom, step):F0}..{WorldDumpGrid.At(ixTo, step):F0},{WorldDumpGrid.At(izTo, step):F0} ms={stopwatch.ElapsedMilliseconds} world={worldPath}"));
+                return;
             }
 
             int locations = 0;
@@ -4091,17 +4374,45 @@ namespace valheimCLI
                 return;
             }
 
-            ItemDrop.ItemData? item = FindInventoryItem(player.GetInventory(), requestedName);
-            if (item == null)
+            // An equipped match is preferred, so a second copy of the item
+            // in hand is never swapped in (see ItemSelection).
+            List<ItemDrop.ItemData> items = player.GetInventory().GetAllItems();
+            string requested = requestedName.Trim();
+            List<ItemMatch> matches = items.Select(candidate => MatchItem(candidate, requested)).ToList();
+            List<bool> equippedFlags = items.Select(candidate => player.IsItemEquiped(candidate)).ToList();
+            int index = ItemSelection.Choose(matches, equippedFlags);
+            if (index < 0)
             {
                 addOutput($"ERROR: No inventory item matching '{requestedName}'");
                 return;
             }
 
-            bool equipped = player.EquipItem(item);
-            addOutput(equipped
-                ? $"OK: equipped item prefab={GetItemPrefabName(item)} name={item.m_shared.m_name} type={item.m_shared.m_itemType}"
-                : $"ERROR: Equip failed prefab={GetItemPrefabName(item)} name={item.m_shared.m_name} type={item.m_shared.m_itemType}");
+            ItemDrop.ItemData item = items[index];
+            // Humanoid.EquipItem returns false for an item already equipped;
+            // that is the state asked for, so it is reported, not toggled.
+            bool already = equippedFlags[index];
+            bool accepted = !already && player.EquipItem(item);
+            addOutput($"{ItemSelection.ReplyPrefix(already, accepted)} prefab={GetItemPrefabName(item)} name={item.m_shared.m_name} type={item.m_shared.m_itemType} already={already}");
+        }
+
+        private static ItemMatch MatchItem(ItemDrop.ItemData item, string requested)
+        {
+            string prefabName = GetItemPrefabName(item);
+            string token = item.m_shared.m_name;
+            string display = Localization.instance.Localize(token);
+            if (prefabName.Equals(requested, StringComparison.OrdinalIgnoreCase) ||
+                token.Equals(requested, StringComparison.OrdinalIgnoreCase) ||
+                display.Equals(requested, StringComparison.OrdinalIgnoreCase))
+            {
+                return ItemMatch.Exact;
+            }
+            if (prefabName.IndexOf(requested, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                token.IndexOf(requested, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                display.IndexOf(requested, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return ItemMatch.Partial;
+            }
+            return ItemMatch.None;
         }
 
         public static void ApplyMagicEffect(string requestedItemName, string effectType, string rarityName, float effectValue, Action<string> addOutput)
@@ -4219,7 +4530,21 @@ namespace valheimCLI
 
             player.SetGodMode(enabled);
             player.SetGhostMode(enabled);
-            addOutput($"OK: playerSafety enabled={enabled} god={player.InGodMode()} ghost={player.InGhostMode()}");
+            // Debug mode (fly on Z, no-cost building on B) is set, never
+            // toggled: the vanilla debugmode command flips it, so running that
+            // blind is as likely to turn it off as on.
+            Player.m_debugMode = enabled;
+            // Debug mode's keys only work with cheats on, which the game starts
+            // with off. Cheats are switched on here and never off: turning them
+            // off could undo a devcommands the user ran on purpose. A client
+            // joined to a dedicated server never has cheats in effect whatever
+            // this flag says; cli_fly works there.
+            if (enabled && !Terminal.m_cheat)
+            {
+                Terminal.m_cheat = true;
+                Console.instance?.updateCommandList();
+            }
+            addOutput(PlayerModes.SafetyLine(enabled, player.InGodMode(), player.InGhostMode(), Player.m_debugMode, Terminal.m_cheat));
         }
 
         private static bool TryGetLocalInventory(Action<string> addOutput, out Inventory inventory)
@@ -5052,6 +5377,62 @@ namespace valheimCLI
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// A world with a seed the caller chose. The game's own dialog is the
+        /// only other way to set one, so a seed named in a bug report cannot
+        /// otherwise be reproduced from a script.
+        /// </summary>
+        public static void CreateWorldWithSeed(string worldName, string seed, bool overwrite, Action<string> addOutput)
+        {
+            bool atMenu = FejdStartup.instance != null && ZNet.instance == null;
+            if (!WorldFixturePolicy.CanCreate(atMenu, false, false, true, out string contextError))
+            {
+                addOutput("ERROR: " + contextError);
+                return;
+            }
+            if (!ValidateWorldName(worldName, out string validationError))
+            {
+                addOutput(validationError);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(seed))
+            {
+                addOutput("ERROR: Seed must not be empty");
+                return;
+            }
+
+            List<World> existing = SaveSystem.GetWorldList();
+            World? already = existing.Find(candidate => string.Equals(candidate.m_name, worldName, StringComparison.OrdinalIgnoreCase));
+            if (!WorldFixturePolicy.CanCreate(true, already != null, overwrite,
+                    already == null || already.m_fileSource == FileHelpers.FileSource.Local, out string refusal))
+            {
+                addOutput("ERROR: " + refusal);
+                return;
+            }
+
+            if (already != null)
+            {
+                World.RemoveWorld(already.m_name, already.m_fileSource);
+                SaveSystem.InvalidateCache();
+            }
+
+            World world = new World(worldName, seed);
+            world.m_fileSource = FileHelpers.FileSource.Local;
+            // Valheim 1.0 renamed this: the world's .fwl is "FWL data" now.
+            world.SaveWorldFWLData(DateTime.Now);
+            SaveSystem.InvalidateCache();
+
+            World? saved = SaveSystem.GetWorldList().Find(candidate => candidate.m_name == worldName
+                && candidate.m_fileSource == FileHelpers.FileSource.Local);
+            if (saved == null || saved.m_seedName != seed || saved.m_uid != world.m_uid)
+            {
+                addOutput("ERROR: saved world metadata did not verify; inspect the game log");
+                return;
+            }
+            addOutput($"OK: WORLD_CREATED name={world.m_name} seedName={world.m_seedName} seed={world.m_seed} uid={world.m_uid} worldGenVersion={world.m_worldGenVersion}");
         }
 
         private static bool ValidateWorldName(string worldName, out string error)

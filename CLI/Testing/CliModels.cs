@@ -10,7 +10,14 @@ public enum CliExitCode
     Timeout = 2,
     ConnectionFailure = 3,
     BadInput = 4,
-    GameNotReady = 5
+    GameNotReady = 5,
+    ExpectationMismatch = 6,
+
+    /// <summary>
+    /// The game exited, or its plugin stopped answering, during a wait. 7, not 6: an
+    /// expectation mismatch (a game that is not the one a test expects) is being given 6.
+    /// </summary>
+    GameLost = 7
 }
 
 public sealed class CliResponse
@@ -31,6 +38,16 @@ public sealed class CommandResult
     public string Message { get; set; } = "";
     public List<string> Output { get; set; } = new();
 
+    /// <summary>
+    /// The process exit code for this result: a connection that closed before
+    /// the answer, or a server that unloaded with the command open (the server
+    /// stopped, or a live reload replaced valheimCLI), is a connection failure,
+    /// so a script can reconnect rather than give up.
+    /// </summary>
+    public int ExitCode => Ok ? (int)CliExitCode.Success
+        : ConnectionLoss.IsConnectionLoss(ErrorCode) ? (int)CliExitCode.ConnectionFailure
+        : (int)CliExitCode.CommandFailure;
+
     public static CommandResult FromOutput(string command, List<string> output)
     {
         string message = output.Count > 0 ? output[0] : "";
@@ -47,9 +64,28 @@ public sealed class CommandResult
 
     private static string DetectErrorCode(List<string> output)
     {
+        // A command that ends its reply with its own OK: line has said that it
+        // succeeded, and the words below may then be data: a string cli_call
+        // returned, a location or item name. Only its explicit ERROR lines count.
+        bool reportedOk = ReportedOk(output);
         foreach (string line in output)
         {
             string lower = line.ToLowerInvariant();
+            if (reportedOk && !lower.StartsWith("error:") && !lower.StartsWith("error "))
+            {
+                continue;
+            }
+
+            if (lower.StartsWith("error: code=" + ConnectionLoss.ErrorCode))
+            {
+                return ConnectionLoss.ErrorCode;
+            }
+
+            if (lower.StartsWith("error: code=" + ConnectionLoss.UnloadedCode + " "))
+            {
+                return ConnectionLoss.UnloadedCode;
+            }
+
             if (lower.Contains("no local player found"))
             {
                 return "player_not_loaded";
@@ -65,7 +101,9 @@ public sealed class CommandResult
                 return "bad_input";
             }
 
-            if (lower.Contains("not a recognized command"))
+            // A client's console says "'x' is not a recognized command"; a dedicated server's says
+            // "Unknown command 'x'. Type 'help' ...". Both are a command the game does not have.
+            if (lower.Contains("not a recognized command") || lower.StartsWith("unknown command '"))
             {
                 return "unknown_command";
             }
@@ -85,6 +123,20 @@ public sealed class CommandResult
 
         return "";
     }
+
+    private static bool ReportedOk(List<string> output)
+    {
+        for (int i = output.Count - 1; i >= 0; i--)
+        {
+            string line = output[i].Trim();
+            if (line.Length > 0)
+            {
+                return line.StartsWith("OK:", StringComparison.Ordinal);
+            }
+        }
+
+        return false;
+    }
 }
 
 public sealed class LaunchPhase
@@ -101,6 +153,9 @@ public sealed class PluginLogInfo
     public bool Exists { get; set; }
     public bool PluginLoaded { get; set; }
     public int? Port { get; set; }
+
+    /// <summary>Log size in bytes when it was read; a growing log is a starting game's only sign of progress.</summary>
+    public long Length { get; set; }
 }
 
 public static class JsonOutput
@@ -113,9 +168,26 @@ public static class JsonOutput
         Converters = { new JsonStringEnumConverter() }
     };
 
+    private static readonly JsonSerializerOptions EventOptions = new()
+    {
+        WriteIndented = false,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
     public static void Write(object value)
     {
         Console.WriteLine(JsonSerializer.Serialize(value, Options));
+    }
+
+    /// <summary>
+    /// One event as a single line on stderr, so stdout keeps exactly one JSON document
+    /// (the final result) while a long operation still reports as it goes.
+    /// </summary>
+    public static void WriteEvent(object value)
+    {
+        Console.Error.WriteLine(JsonSerializer.Serialize(value, EventOptions));
     }
 }
 
@@ -127,7 +199,10 @@ public enum WaitTarget
     MainMenu,
     InWorld,
     LocalPlayer,
-    ServerConnected
+    ServerConnected,
+
+    /// <summary>A server's world is up for players: locations exist and it listens (a dedicated server, or a host that opened its world).</summary>
+    ServerReady
 }
 
 public static class WaitTargets
@@ -144,9 +219,10 @@ public static class WaitTargets
             "inworld" or "world" => WaitTarget.InWorld,
             "localplayer" or "player" => WaitTarget.LocalPlayer,
             "serverconnected" or "connected" or "connection" => WaitTarget.ServerConnected,
+            "serverready" or "dedicated" or "dedicatedserver" => WaitTarget.ServerReady,
             _ => WaitTarget.Process
         };
-        return normalized is "process" or "game" or "plugin" or "pluginserver" or "server" or "terminal" or "cli" or "mainmenu" or "menu" or "inworld" or "world" or "localplayer" or "player" or "serverconnected" or "connected" or "connection";
+        return normalized is "process" or "game" or "plugin" or "pluginserver" or "server" or "terminal" or "cli" or "mainmenu" or "menu" or "inworld" or "world" or "localplayer" or "player" or "serverconnected" or "connected" or "connection" or "serverready" or "dedicated" or "dedicatedserver";
     }
 
     public static string ToName(WaitTarget target)
@@ -160,6 +236,7 @@ public static class WaitTargets
             WaitTarget.InWorld => "in-world",
             WaitTarget.LocalPlayer => "local-player",
             WaitTarget.ServerConnected => "server-connected",
+            WaitTarget.ServerReady => "server-ready",
             _ => "process"
         };
     }
