@@ -37,6 +37,8 @@ namespace valheimCLI
         private static bool _autoStartQueuedJoinRequested;
         private static readonly FieldInfo? QueuedJoinServerField = typeof(FejdStartup).GetField("m_queuedJoinServer", BindingFlags.Instance | BindingFlags.NonPublic);
 
+        public Extensions.ExtensionRegistry? Extensions { get; private set; }
+
         public void Awake()
         {
             ManifestCommands.RecordOwnLoad(DateTime.UtcNow);
@@ -69,6 +71,9 @@ namespace valheimCLI
             // someone else registered first is still ours once we replace it.
             Dictionary<string, object> beforeRegister = SnapshotCommands();
             List<KeyValuePair<string, Terminal.ConsoleCommand>> before = new(Terminal.commands);
+            Extensions = new valheimCLI.Extensions.ExtensionRegistry(AsyncCommands.Gate, valheimCLI.Extensions.ExtensionHost.Precondition);
+            valheimCLI.Extensions.ExtensionHost.Register(Extensions);
+            valheimCLI.Extensions.WorldObservations.Register(Extensions);
             CustomCommands.Register();
             WorldInspectionCommands.Register();
             TerrainInspectionCommands.Register();
@@ -120,6 +125,7 @@ namespace valheimCLI
         {
             _stateTracker?.Update();
             ProcessPendingCommands();
+            Extensions?.Tick();
             TryQueuePendingServerConnect();
             TryAutoStartQueuedJoin();
         }
@@ -681,88 +687,6 @@ namespace valheimCLI
                 return true;
             }
 
-            if (parts[0].Equals("cli_mwl_port_status", StringComparison.OrdinalIgnoreCase))
-            {
-                float radius = 80f;
-                if (parts.Length >= 2)
-                {
-                    float.TryParse(parts[1], out radius);
-                }
-
-                CustomCommands.PrintMwlPortStatus(radius, line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_mwl_goto_port", StringComparison.OrdinalIgnoreCase))
-            {
-                int index = 0;
-                if (parts.Length >= 2)
-                {
-                    int.TryParse(parts[1], out index);
-                }
-
-                CustomCommands.GotoMwlPort(Math.Max(0, index), line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_mwl_clear_shipments", StringComparison.OrdinalIgnoreCase))
-            {
-                CustomCommands.ClearMwlShipments(line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_mwl_port_payment_regression", StringComparison.OrdinalIgnoreCase))
-            {
-                string itemPrefab = parts.Length >= 2 ? parts[1] : "Wood";
-                int itemCount = 10;
-                if (parts.Length >= 3)
-                {
-                    int.TryParse(parts[2], out itemCount);
-                }
-
-                CustomCommands.RunMwlPortPaymentRegression(itemPrefab, Math.Max(1, itemCount), line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_mwl_port_delivery_regression", StringComparison.OrdinalIgnoreCase))
-            {
-                string itemPrefab = parts.Length >= 2 ? parts[1] : "Wood";
-                int itemCount = 10;
-                if (parts.Length >= 3)
-                {
-                    int.TryParse(parts[2], out itemCount);
-                }
-
-                CustomCommands.RunMwlPortDeliveryRegression(itemPrefab, Math.Max(1, itemCount), line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_mwl_port_ownership_seed", StringComparison.OrdinalIgnoreCase))
-            {
-                string itemPrefab = parts.Length >= 2 ? parts[1] : "Wood";
-                int itemCount = 10;
-                if (parts.Length >= 3)
-                {
-                    int.TryParse(parts[2], out itemCount);
-                }
-
-                CustomCommands.SeedMwlPortOwnershipShipment(itemPrefab, Math.Max(1, itemCount), line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_mwl_port_ownership_check", StringComparison.OrdinalIgnoreCase))
-            {
-                if (parts.Length < 2)
-                {
-                    _commandServer?.SendOutput("Usage: cli_mwl_port_ownership_check <shipmentId> [blocked|allowed]");
-                    return true;
-                }
-
-                string expectation = parts.Length >= 3 ? parts[2] : "blocked";
-                CustomCommands.CheckMwlPortOwnershipShipment(parts[1], expectation, line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
             if (!parts[0].Equals("cli_connect", StringComparison.OrdinalIgnoreCase))
             {
                 return false;
@@ -1030,6 +954,7 @@ namespace valheimCLI
         /// </summary>
         private void OnDestroy()
         {
+            Extensions?.Dispose();
             try { CaptureCommands.RestoreAll(); }
             catch (Exception ex) { Log.LogError($"Restoring clutter on unload failed: {ex}"); }
             _commandServer?.Dispose();

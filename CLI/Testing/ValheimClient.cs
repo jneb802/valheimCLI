@@ -131,6 +131,9 @@ public class ValheimClient : IDisposable
         {
             _writer.WriteLine("STATE");
             response = _reader.ReadLine();
+            // A subscribed connection may carry pushes ahead of the reply; they are raised, not taken for it.
+            while (TryHandleStateChange(response))
+                response = _reader.ReadLine();
         }
         catch (Exception ex) when (ex is IOException || ex is SocketException || ex is ObjectDisposedException)
         {
@@ -224,7 +227,8 @@ public class ValheimClient : IDisposable
         EnsureConnected();
 
         _writer!.WriteLine("SUBSCRIBE_STATE");
-        string? response = _reader!.ReadLine();
+        // The server registers the subscriber before it answers, so a push can precede SUBSCRIBED.
+        string? response = ReadReplySkippingPushes();
         _subscribed = response == "SUBSCRIBED";
         return _subscribed;
     }
@@ -234,9 +238,62 @@ public class ValheimClient : IDisposable
         EnsureConnected();
 
         _writer!.WriteLine("UNSUBSCRIBE_STATE");
-        string? response = _reader!.ReadLine();
+        string? response = ReadReplySkippingPushes();
         _subscribed = false;
         return response == "UNSUBSCRIBED";
+    }
+
+    private string? ReadReplySkippingPushes()
+    {
+        string? response = _reader!.ReadLine();
+        while (TryHandleStateChange(response))
+            response = _reader.ReadLine();
+        return response;
+    }
+
+    /// <summary>
+    /// Awaits the next state the server pushes after <see cref="SubscribeToStateChanges"/> and returns it (also raising
+    /// <see cref="OnStateChanged"/>), or null when the server closed the connection. Nothing polls: the read completes
+    /// when the push arrives. Pushes only report changes, so to wait for a state subscribe first, then check
+    /// <see cref="GetState"/> (a push arriving during it is raised through OnStateChanged), then await this.
+    /// Use a connection that carries nothing else while a read is pending: a command's reply would be mixed into it.
+    /// Cancelling it disconnects, because a cancelled read leaves the stream's position unknown.
+    /// </summary>
+    public async Task<string?> ReadStateChangeAsync(CancellationToken cancellationToken = default)
+    {
+        EnsureConnected();
+        if (!_subscribed)
+            throw new InvalidOperationException("Not subscribed to state changes");
+
+        string? line;
+        try
+        {
+            line = await _reader!.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            Disconnect();
+            throw;
+        }
+        catch (Exception ex) when (ex is IOException || ex is SocketException || ex is ObjectDisposedException)
+        {
+            Disconnect();
+            return null;
+        }
+
+        if (line == null)
+        {
+            Disconnect();
+            return null;
+        }
+
+        if (!TryHandleStateChange(line))
+        {
+            Disconnect();
+            throw new InvalidDataException("Expected a STATE_CHANGED push on a subscribed connection, got: " + line);
+        }
+
+        return line.Substring("STATE_CHANGED:".Length);
     }
 
     /// <summary>Server-side wait for a command's completion; the response holds its whole output.</summary>
