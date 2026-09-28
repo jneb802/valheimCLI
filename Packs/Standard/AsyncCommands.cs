@@ -703,58 +703,13 @@ namespace valheimCLI
             }
 
             Stopwatch clock = Stopwatch.StartNew();
-            SaveOutcome outcome = new SaveOutcome
-            {
-                TimeoutSeconds = timeout,
-                World = world.m_name,
-                Directory = world.GetSaveDirectory(world.m_fileSource)
-            };
-
-            // A save already under way (an autosave, another cli_save) would be joined on
-            // the main thread by the next one; let it finish first, then save.
-            while (znet.IsSaving() && clock.Elapsed.TotalSeconds < timeout && !ctx.Cancelled)
-                yield return null;
-
-            outcome.Skipped = SaveOutcome.SkipReason(
-                SaveSystem.HasSessionFlag(SaveSystemSessionFlags.DontSaveWorld),
-                ZNet.m_loadError,
-                ZoneSystem.instance != null && ZoneSystem.instance.SkipSaving(),
-                DungeonDB.instance != null && DungeonDB.instance.SkipSaving(),
-                znet.EnoughDiskSpaceAvailable(out bool _));
-            if (ctx.Cancelled)
-            {
-                Cancelled(ctx, "before a save was started; nothing written");
-                yield break;
-            }
-            if (znet.IsSaving())
-            {
-                outcome.Milliseconds = clock.ElapsedMilliseconds;
-                ctx.Output($"ERROR: code=save_timeout ms={outcome.Milliseconds} message=an earlier save was still writing after {timeout:F0}s; no new save was started");
-                yield break;
-            }
-            if (outcome.Skipped.Length > 0)
-            {
-                ctx.Output(outcome.Reply());
-                yield break;
-            }
-
-            outcome.SaveNumberBefore = SaveSystem.GetSaveNumber();
-            Game.instance.SavePlayerProfile(setLogoutPoint: true);
-            znet.Save(sync: false, saveOtherPlayerProfiles: true, waitForNextFrame: false);
-            System.Threading.Thread? thread = znet.m_saveThread;
-            outcome.Started = thread != null;
-            while (thread != null && thread.IsAlive && clock.Elapsed.TotalSeconds < timeout && !ctx.Cancelled)
-                yield return null;
-
-            outcome.Finished = thread != null && !thread.IsAlive;
-            outcome.SaveNumberAfter = SaveSystem.GetSaveNumber();
-            outcome.Milliseconds = clock.ElapsedMilliseconds;
-            if (ctx.Cancelled && !outcome.Finished)
-            {
-                Cancelled(ctx, "the save thread keeps writing and finishes on its own");
-                yield break;
-            }
-            ctx.Output(outcome.Reply());
+            var outcome = new SaveOutcome { TimeoutSeconds = timeout, World = world.m_name, Directory = world.GetSaveDirectory(world.m_fileSource) };
+            var host = new NativeSessionSave(znet, world, Game.instance);
+            var run = SessionSave.Run(host, outcome, () => clock.Elapsed.TotalSeconds, () => ctx.Cancelled,
+                _ => { }, result => ctx.Output(result.Reply()), (code, message) => ctx.Output($"ERROR: code={code} message={message}"));
+            while (run.MoveNext()) yield return run.Current;
+            // Console compatibility also keeps its pack owner alive until its issued write ends.
+            while (host.Writing) yield return null;
         }
 
         // ---- cli_until ----

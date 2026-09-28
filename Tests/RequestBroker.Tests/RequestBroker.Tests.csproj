@@ -46,6 +46,9 @@
     <Compile Include="../../CLI/Testing/ConnectionLoss.cs" Link="CLI/ConnectionLoss.cs" />
     <Compile Include="../../Packs/Reflection/StaticMemberCall.cs" Link="Source/StaticMemberCall.cs" />
     <Compile Include="../../Packs/Reflection/CallValues.cs" Link="Source/CallValues.cs" />
+    <Compile Include="../../Packs/Standard/SessionReadiness.cs" Link="Source/SessionReadiness.cs" />
+    <Compile Include="../../Packs/Standard/SessionSave.cs" Link="Source/SessionSave.cs" />
+    <Compile Include="../../Packs/Standard/SessionTransition.cs" Link="Source/SessionTransition.cs" />
     <Compile Include="../../Packs/Standard/SaveOutcome.cs" Link="Source/SaveOutcome.cs" />
     <Compile Include="../../CLI/Testing/GameLauncher.cs" Link="CLI/GameLauncher.cs" />
     <Compile Include="../../CLI/Testing/WaitProgress.cs" Link="CLI/WaitProgress.cs" />

@@ -11,6 +11,7 @@ namespace valheimCLI
     {
         public static ConsoleModule Module { get; private set; } = null!;
         private ConsoleModule? _own;
+        private ExtensionRegistration? _session;
         private IEnumerator Start()
         {
             float deadline = UnityEngine.Time.realtimeSinceStartup + 30;
@@ -18,14 +19,19 @@ namespace valheimCLI
             { if (UnityEngine.Time.realtimeSinceStartup > deadline) { Logger.LogError("CLI core 1.1 is not ready."); yield break; } yield return null; }
             // A replacement waits while the previous owner's issued effects settle.
             var core = valheimCLIPlugin.Instance!;
-            while (System.Linq.Enumerable.Any(core.Extensions!.Registrations, r => r.Id == "cli.standard"))
+            while (System.Linq.Enumerable.Any(core.Extensions!.Registrations, r => r.Id == "cli.standard" || r.Id == "valheim.session"))
             { if (UnityEngine.Time.realtimeSinceStartup > deadline) { Logger.LogError("Previous Standard pack is active/draining; replacement refused."); yield break; } yield return null; }
+            try
+            {
+            _session = SessionCapabilities.Register(core.Extensions!);
             _own = core.Modules.Register("cli.standard", "0.1.0", () => { CustomCommands.Register(); SessionControlCommands.Register(); }, StandardDispatch.Execute, StandardSession.Tick);
             Module = _own;
             _own.Owner.OnRetiring(() => RouteController.Stop(_ => { }));
             StandardSession.Initialize();
             Logger.LogInfo("Standard commands ready; owner=" + _own.Owner.Instance);
+            }
+            catch { _own?.Dispose(); _session?.Dispose(); throw; }
         }
-        private void OnDestroy() => _own?.Dispose();
+        private void OnDestroy() { _own?.Dispose(); _session?.Dispose(); }
     }
 }

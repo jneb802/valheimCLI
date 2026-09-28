@@ -129,3 +129,13 @@ World Tools exposes `valheim.world/terrain-grid <x> <z> <spacing> <countX> <coun
 Generator samples include height, biome and river facts. Loaded-ground samples read only an existing heightmap; biome and river fields are explicitly absent. No zones are generated and there is no fallback between layers. Capture is a sequence of observations, not an atomic snapshot of mutable ground. Cancellation never returns a partial grid as complete.
 
 [TerrainCapture](https://github.com/tvongaza/ValheimTesting/blob/main/examples/TerrainCapture/README.md) validates and saves this input for exact replay. A captured result is useful input, not an independent expected answer. Local loop/import tests and compilation against game assemblies pass; this new capability has not yet been exercised in Valheim.
+
+## Typed session lifecycle
+
+Standard owns `valheim.session/state`, `join`, `leave` and `save`. No extra pack or dependency between packs is introduced. `state` is read-only and exposes world UID, native world/player readiness, connection status, saving and load errors. Native readiness does not establish mod completion or loaded terrain at a destination.
+
+`join <host:port> <existing-character> [password-environment-variable]` requires the client menu and waits for a connected local player. The optional name resolves inside the game's process; the password itself never enters the command/result. Omission clears a stale password. A previous network instance's rejection is not attributed to the new join. `leave` saves the local character and waits for the menu; it does not confirm a remote server's world save. Both use the existing permission checks and shared mutation gate.
+
+`save [timeout-seconds]` is server-only (1–600 seconds, default 120). It shares the `cli_save` loop, checks vanilla save refusals, waits for any earlier save, issues once, then requires the new save thread to finish and the save counter to advance in the same world. This is stronger than accepting a `Saving..` message. A timeout or cancellation does not stop an issued native operation: its owner and gate remain until the operation settles. Read-only state remains available. Unprovable transitions can require a controlled restart.
+
+The external [SessionControl example](https://github.com/tvongaza/ValheimTesting/blob/main/examples/SessionControl/README.md) demonstrates exact-once actions and mandatory repinning after a transition, including failed or ambiguous attempts. Local policy/lifecycle tests and compilation against real game references pass. Native checks of this new structured surface remain pending; older text-command smoke checks do not establish them.
