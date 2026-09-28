@@ -14,6 +14,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Include="../../Packs/WorldTools/TerrainGridCapture.cs" Link="Source/TerrainGridCapture.cs" />
     <Compile Include="../../Source/RequestBroker.cs" Link="Source/RequestBroker.cs" />
     <Compile Include="../../Source/CommandResponse.cs" Link="Source/CommandResponse.cs" />
     <Compile Include="../../CLI/Testing/ValheimClient.cs" Link="CLI/ValheimClient.cs" />

@@ -9,6 +9,7 @@ namespace valheimCLI.Extensions
     internal static class WorldObservations
     {
         internal static ExtensionRegistration Register(ExtensionRegistry registry) => registry.Register("valheim.world", "0.1.0", 1,
+            new ExtensionCommand("terrain-grid", "Capture a bounded terrain grid: <x> <z> <spacing> <countX> <countZ> <generator|loaded-ground>", TerrainGridObservation.Read, readOnly: true, needsWorld: true),
             new ExtensionCommand("terrain-paint", "Read one loaded paint texel as raw RGBA: <integer x> <integer z>", Paint, readOnly: true, needsWorld: true),
             new ExtensionCommand("terrain-surface", "Read a loaded terrain vertex and its own collider: <x> <z> (grid vertices)", Surface, readOnly: true, needsWorld: true),
             new ExtensionCommand("player-support", "Read local player position, motion and grounded state", Support, readOnly: true, role: ExtensionRole.Client, needsWorld: true),

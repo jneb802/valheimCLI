@@ -121,3 +121,11 @@ existing read-only player-support observer while a human drives. Both require in
 Start with the external [testing-framework setup guide](https://github.com/tvongaza/ValheimTesting/blob/main/docs/getting-started.md) and [example index](https://github.com/tvongaza/ValheimTesting/blob/main/examples/README.md). NoGameTerrain runs without ValheimCLI or Valheim; GameObserve adds strict pins and a read-only connection. TerrainCheck, ClientSurfaceCheck and PaintCheck require World Tools and an already prepared fixture. WalkingReview leaves movement and usability judgement to a person.
 
 For a new game-side extension, read the [extension API guide](testing-toolkit.md) and the working [ReloadProbe](../examples/ReloadProbe). Its paired [ReloadCheck driver](https://github.com/tvongaza/ValheimTesting/blob/main/examples/ReloadCheck/README.md) demonstrates registration, cancellation, cleanup and command replacement. Use an owned scripts directory: ScriptEngine reloads every script there. Core replacement still requires a restart.
+
+## Bounded terrain capture
+
+World Tools exposes `valheim.world/terrain-grid <x> <z> <spacing> <countX> <countZ> <generator|loaded-ground>`. It accepts at most 256 samples, yields every 16 samples, and refuses a world/generator change during capture. Results include world UID, generator version, game version/assembly identity, timestamps, grid coordinates and a completeness flag. Coordinates use horizontal **x,z**, in metres, with x varying fastest.
+
+Generator samples include height, biome and river facts. Loaded-ground samples read only an existing heightmap; biome and river fields are explicitly absent. No zones are generated and there is no fallback between layers. Capture is a sequence of observations, not an atomic snapshot of mutable ground. Cancellation never returns a partial grid as complete.
+
+[TerrainCapture](https://github.com/tvongaza/ValheimTesting/blob/main/examples/TerrainCapture/README.md) validates and saves this input for exact replay. A captured result is useful input, not an independent expected answer. Local loop/import tests and compilation against game assemblies pass; this new capability has not yet been exercised in Valheim.
