@@ -18,7 +18,7 @@ name, seed, identity and generation version. Log messages alone are not a
 success acknowledgement. Update both the plugin and terminal client: replies
 preserve multiline log output, and malformed or incomplete responses now fail
 explicitly and disconnect. A response error does not mean creation was undone;
-inspect the save before deciding whether to try again. The CLI does not resend
+inspect the save before deciding whether to try again. The ValheimCLI does not resend
 the command automatically.
 
 In a loaded world:

@@ -31,6 +31,13 @@ def main():
     run('dotnet', 'build', 'valheimCLI.csproj', '-c', 'Release', '--no-restore', '-m:1')
     (dest / 'plugin').mkdir()
     shutil.copy2(ROOT / 'bin/Release/valheimCLI.dll', dest / 'plugin/valheimCLI.dll')
+    for name in ('Standard', 'WorldTools', 'Capture', 'Reflection'):
+        project = f'Packs/{name}/Valheim.Cli.{name}.csproj'
+        run('dotnet', 'build', project, '-c', 'Release', '--no-restore', '-m:1')
+        packdir = dest / 'packs' / name
+        packdir.mkdir(parents=True)
+        shutil.copy2(ROOT / f'Packs/{name}/bin/Release/net48/Valheim.Cli.{name}.dll', packdir / f'Valheim.Cli.{name}.dll')
+    shutil.copy2(ROOT / 'docs/command-packs.md', dest / 'COMMAND-PACKS.md')
     run('dotnet', 'publish', 'CLI/valheim-cli.csproj', '-c', 'Release', '--no-restore', '-m:1', '-p:UseAppHost=false', '-o', str(dest / 'cli'))
     for name in ('Valheim.Cli.Testing',):
         run('dotnet', 'pack', f'Toolkit/{name}/{name}.csproj', '-c', 'Release', '--no-restore', '-m:1', f'-p:PackageVersion={args.version}', '-o', str(dest / 'packages'))

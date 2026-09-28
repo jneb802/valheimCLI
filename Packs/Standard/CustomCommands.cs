@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
-using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using UnityEngine;
@@ -30,13 +29,6 @@ namespace valheimCLI
             BuildCommands.Register();
             CartCommands.Register();
             AsyncCommands.Register();
-            ManifestCommands.Register();
-            ReloadCommands.Register();
-            // A mismatched build must still be replaceable and identifiable.
-            foreach (string name in new[] { "cli_build", "cli_self_unload", "cli_await_plugin" })
-                StandingExpectations.AllowWhileMismatched(name);
-            CallCommands.Register();
-
             new Terminal.ConsoleCommand("cli_create_character", "Create and select a local character: cli_create_character <name> [--replace] [--local] [--skip-intro]. --skip-intro saves it as already spawned once, so it lands at the start without the valkyrie intro", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length < 2)
@@ -1169,7 +1161,7 @@ namespace valheimCLI
                     SetServerPassword(args[2]);
                 }
 
-                valheimCLIPlugin.RequestAutoStartQueuedJoin();
+                StandardSession.RequestAutoStartQueuedJoin();
                 ZSteamMatchmaking.instance.QueueServerJoin(address);
                 args.Context.AddString($"OK: Queued server join for {address}");
             });
@@ -2446,7 +2438,7 @@ namespace valheimCLI
 
             holdSeconds = Mathf.Clamp(holdSeconds, 0.05f, 10f);
             waitLoadedSeconds = Mathf.Clamp(waitLoadedSeconds, 0f, 30f);
-            valheimCLIPlugin.Instance.StartCoroutine(FireCurrentWeaponRoutine(holdSeconds, waitLoadedSeconds));
+            StandardPack.Module.Run(FireCurrentWeaponRoutine(holdSeconds, waitLoadedSeconds));
             addOutput($"OK: Queued fire currentWeapon='{weapon.m_shared.m_name}' holdSeconds={holdSeconds:F2} waitLoadedSeconds={waitLoadedSeconds:F1}");
         }
 
@@ -2473,7 +2465,7 @@ namespace valheimCLI
             }
 
             seconds = Mathf.Clamp(seconds, 0.2f, 15f);
-            valheimCLIPlugin.Instance.StartCoroutine(HoldAttackRoutine(seconds));
+            StandardPack.Module.Run(HoldAttackRoutine(seconds));
             addOutput($"OK: Queued hold attack currentWeapon='{weapon.m_shared.m_name}' seconds={seconds:F1}");
         }
 
@@ -3093,7 +3085,7 @@ namespace valheimCLI
                 return;
             }
 
-            valheimCLIPlugin.Instance.StartCoroutine(WalkRoutine(seconds, run));
+            StandardPack.Module.Run(WalkRoutine(seconds, run));
             addOutput($"OK: Walking forward for {seconds:F1}s (run={run})");
         }
 
@@ -3208,7 +3200,7 @@ namespace valheimCLI
                 return;
             }
 
-            valheimCLIPlugin.Instance.StartCoroutine(ResendDestroyedZdoRoutine(
+            StandardPack.Module.Run(ResendDestroyedZdoRoutine(
                 serverPeer.m_rpc,
                 zdoId,
                 ownerRevision,

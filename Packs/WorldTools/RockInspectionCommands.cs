@@ -296,7 +296,7 @@ namespace valheimCLI
             ZNetView view = go.GetComponentInParent<ZNetView>();
             ZDO? zdo = view != null ? view.GetZDO() : null;
             GameObject? prefab = zdo != null && ZNetScene.instance != null ? ZNetScene.instance.GetPrefab(zdo.GetPrefab()) : null;
-            return prefab != null ? prefab.name : CustomCommands.CleanPrefabName((view != null ? view.gameObject : go).name).Trim().Replace(' ', '_');
+            return prefab != null ? prefab.name : CommandArguments.CleanPrefabName((view != null ? view.gameObject : go).name).Trim().Replace(' ', '_');
         }
 
         /// <summary>The object's network identity, or zdo=none for a purely local object.</summary>

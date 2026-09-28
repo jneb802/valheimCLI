@@ -21,7 +21,7 @@ namespace valheimCLI.Extensions
                 var owners = registry.Registrations.Select(owner => new Dictionary<string, object?>
                 {
                     ["id"] = owner.Id, ["version"] = owner.Version, ["instance"] = owner.Instance,
-                    ["closing"] = registry.IsClosing(owner), ["cleanupError"] = owner.CleanupError,
+                    ["activeWork"] = owner.ActiveWorkCount, ["closing"] = registry.IsClosing(owner), ["cleanupError"] = owner.CleanupError,
                     ["commands"] = registry.Commands(owner).Select(command => new Dictionary<string, object?>
                     {
                         ["name"] = command.Name, ["help"] = command.Help, ["readOnly"] = command.ReadOnly,

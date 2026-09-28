@@ -1,6 +1,6 @@
-# CLI extension API and external testing
+# ValheimCLI extension API and external testing
 
-The reusable testing library has moved to [ValheimTesting](https://github.com/tvongaza/ValheimTesting). It consumes CLI's [transport package](client-library.md); CLI has no dependency on ValheimTesting. Synthetic terrain, fixtures, session ownership, test examples and their tests belong there. Ordinary mods do not need either test-side package.
+The reusable testing library has moved to [ValheimTesting](https://github.com/tvongaza/ValheimTesting). It consumes ValheimCLI's [transport package](client-library.md); ValheimCLI has no dependency on ValheimTesting. Synthetic terrain, fixtures, session ownership, test examples and their tests belong there. Ordinary mods do not need either test-side package.
 
 Build/test this repository:
 
@@ -23,20 +23,20 @@ registration = valheimCLIPlugin.Instance.Extensions.Register("my.mod.tests", "0.
 // OnDestroy: registration?.Dispose();
 ```
 
-Registration validates every command before publishing any. Names are namespaced by owner. Each instance has a new token. Dispose removes capabilities immediately and cancels queued/active handlers. Cleanup runs in reverse order after work settles; cleanup failure prevents silent replacement. Handlers run on the main thread, yield `null` to wait a frame, and must return `context.Succeed(data)` or `context.Fail(code, message)`. Arbitrary Unity yield instructions are not supported in v1.
+Registration validates every command before publishing any. Names are namespaced by owner. Each instance has a new token. Dispose removes capabilities immediately and cancels queued/active handlers. Cleanup runs in reverse order after work settles; cleanup failure prevents silent replacement. `Register` refuses an id whose previous owner is still active or draining, so a reloaded revision waits (bounded) until `Registrations` no longer lists its id before registering; [ReloadProbe](../examples/ReloadProbe/Plugin.cs) and the four packs show the loop. Handlers run on the main thread, yield `null` to wait a frame, and must return `context.Succeed(data)` or `context.Fail(code, message)`. Arbitrary Unity yield instructions are not supported in v1.
 
 Mutation is the safe default (`readOnly: false`), requires devcommands, and uses the existing async operation gate. Joined-client mutation also requires the existing opt-in client setting. Trusted adapters can of course mislabel or ignore these rules; this is an API contract, not a sandbox. Tests must serialize other synchronous console mutations themselves.
 
 If an effect continues after cancellation, install a `WaitForQuiescence` probe *before* issuing it. The core holds the gate and retiring owner until the probe confirms completion. A throwing/stuck probe leaves the owner blocked rather than claiming successful cleanup; diagnose and restart. The API cannot roll back arbitrary terrain/spawn/save effects.
 
-Use `cli_extensions` to discover commands, instance tokens and result versions. Use `cli_extension owner/command args` over the normal CLI connection. JSON values are bounded to 256 KiB/16 levels, strings/finite numbers/bools/arrays/string-keyed objects. Unsupported values fail explicitly. The actor rejects stale instance tokens and incomplete measurements. Arguments are single tokens in this preview; adapters validate their own grammar.
+Use `cli_extensions` to discover commands, instance tokens and result versions. Use `cli_extension owner/command args` over the normal ValheimCLI connection. JSON values are bounded to 256 KiB/16 levels, strings/finite numbers/bools/arrays/string-keyed objects. Unsupported values fail explicitly. The actor rejects stale instance tokens and incomplete measurements. Arguments are single tokens in this preview; adapters validate their own grammar.
 
-The bundled `valheim.world/terrain x z generator|loaded-ground` observation demonstrates reuse. It distinguishes raw generator height from actual loaded heightmap ground. Missing heightmap returns `complete: false` and null height; it does not invent a zero.
+The World Tools pack's `valheim.world/terrain x z generator|loaded-ground` observation demonstrates reuse. It distinguishes raw generator height from actual loaded heightmap ground. Missing heightmap returns `complete: false` and null height; it does not invent a zero.
 
 ## Mod-owned adapters and compatibility commands
 
 MWL port/shipment probes now belong to `MoreWorldLocations.TestAdapter` in MWL's
-repository, with external assertions in `MoreWorldLocations.SystemTests`. The CLI
+repository, with external assertions in `MoreWorldLocations.SystemTests`. The ValheimCLI
 core no longer registers `cli_mwl_*` commands or resolves MWL types. Install the
 optional adapter to retain those command names. An older core that still owns
 the names is refused by the adapter rather than silently overwritten.
@@ -61,4 +61,10 @@ No dependency on that mod or general admin-command bypass has been added.
 
 
 
-The external ReloadCheck driver and terrain/client examples now live in ValheimTesting. CLI retains the ReloadProbe game plugin used to exercise its extension host.
+The external ReloadCheck driver and terrain/client examples now live in ValheimTesting. ValheimCLI retains the ReloadProbe game plugin used to exercise its extension host.
+
+## General command extraction
+
+Core now registers only transport/extension/build/expectation diagnostics. General
+commands live in the optional [command packs](command-packs.md). Install World
+Tools for the `valheim.world` observers used by external system tests.

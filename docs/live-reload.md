@@ -2,15 +2,15 @@
 
 Load a new build of a plugin into a running game, without a restart, and prove
 from a script that the new build is the one running. This uses BepInEx
-ScriptEngine for the reload and three valheimCLI commands to wait for it and
+ScriptEngine for the reload and three ValheimCLI commands to wait for it and
 check it. It works for any BepInEx plugin that undoes its own effects when it
-is destroyed (the checklist below), and for valheimCLI itself.
+is destroyed (the checklist below), and for ValheimCLI itself.
 
 | Command | Does |
 | --- | --- |
 | `cli_await_plugin <guid\|file.dll> [md5-prefix\|-] [timeout=30]` | Waits until the plugin is reloaded, optionally proven to be the build with that md5 |
-| `cli_build` | Which valheimCLI build is answering: assembly, source, md5 of its file when it loaded, load time |
-| `cli_self_unload` | Unloads valheimCLI so a copy in `BepInEx/scripts` can load in its place |
+| `cli_build` | Which ValheimCLI build is answering: assembly, source, md5 of its file when it loaded, load time |
+| `cli_self_unload` | Unloads ValheimCLI so a copy in `BepInEx/scripts` can load in its place |
 
 `examples/reload-plugin.sh <path/to/Plugin.dll> [guid]` runs the whole flow.
 
@@ -140,9 +140,9 @@ triggers a reload replaces the file under the old instance first. So:
 - With an md5 prefix (6 to 32 hex digits), only an instance whose md5 starts
   with it counts. Pass the md5 of the DLL you copied; a reload of some other
   build then keeps waiting and the timeout names the md5 that did load.
-- An instance loaded in the same ScriptEngine pass as the answering valheimCLI
+- An instance loaded in the same ScriptEngine pass as the answering ValheimCLI
   counts by the md5 taken at that load. This answers after a reload that also
-  replaced valheimCLI (see below).
+  replaced ValheimCLI (see below).
 - Without an md5 (`-`) only a new instance counts: that proves a reload, not a
   build.
 
@@ -159,16 +159,16 @@ ERROR: code=await_timeout message=com.example.mymod not reloaded within 60s: no 
 The client's `--timeout` (default 120s) bounds the whole request; raise it for
 a longer wait.
 
-## Where to keep valheimCLI
+## Where to keep ValheimCLI
 
 Keep `valheimCLI.dll` in `BepInEx/plugins` while you reload other plugins.
 ScriptEngine reloads everything in `BepInEx/scripts` together, so a copy of
-valheimCLI there is replaced by every reload, and the connection that was
+ValheimCLI there is replaced by every reload, and the connection that was
 waiting is answered `ERROR: code=unloaded` (or closes first:
 `ERROR: code=connection_closed`). The client exits with code 3 either way;
 reconnect and ask again with the md5, which the same-pass rule answers at once.
 
-## Reloading valheimCLI itself
+## Reloading ValheimCLI itself
 
 The new instance destroys the one serving the request before that one could
 answer, so the connection closes: `cli_await_plugin` cannot report its own
@@ -206,9 +206,9 @@ If a copy in `BepInEx/plugins` and one in `BepInEx/scripts` both end up loaded
 port while the newer one's commands answer, and async replies would be lost.
 The newest instance therefore unloads any other before it opens the port, and
 logs a warning. Remove the `BepInEx/plugins` copy after moving
-valheimCLI to `BepInEx/scripts`.
+ValheimCLI to `BepInEx/scripts`.
 
-When valheimCLI unloads, every command still open is answered
+When ValheimCLI unloads, every command still open is answered
 `ERROR: code=unloaded` before the port closes (the unload waits up to half a
 second for those replies to be written). A connection that closes before any
 answer is reported by the client as `ERROR: code=connection_closed`. Both exit

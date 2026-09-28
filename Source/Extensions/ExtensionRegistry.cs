@@ -65,6 +65,7 @@ namespace valheimCLI.Extensions
     {
         internal readonly ExtensionRegistry Registry;
         internal readonly List<Action> Cleanup = new List<Action>();
+        internal readonly List<Action> Retiring = new List<Action>();
         internal readonly Dictionary<string, ExtensionCommand> Commands;
         internal int Active;
         internal bool Closing;
@@ -80,6 +81,16 @@ namespace valheimCLI.Extensions
             if (Closing) throw new ObjectDisposedException(Id);
             Cleanup.Add(cleanup ?? throw new ArgumentNullException(nameof(cleanup)));
         }
+        public bool IsClosing => Closing;
+        public int ActiveWorkCount => Active;
+        public void OnRetiring(Action action)
+        {
+            Registry.CheckThread();
+            if (Closing) throw new ObjectDisposedException(Id);
+            Retiring.Add(action ?? throw new ArgumentNullException(nameof(action)));
+        }
+        /// <summary>Keep the owner reserved while an existing console coroutine settles.</summary>
+        public IDisposable TrackWork() => Registry.TrackWork(this);
         public void Dispose() => Registry.Retire(this);
     }
 
@@ -225,7 +236,35 @@ namespace valheimCLI.Extensions
             if (owner.Closing) return;
             owner.Closing = true;
             owner.Commands.Clear();
+            owner.Active++; // A retiring callback may release the last external operation.
+            try
+            {
+                foreach (Action action in owner.Retiring.ToArray())
+                    try { action(); } catch (Exception ex) { owner.CleanupError += ex.Message + "; "; }
+                owner.Retiring.Clear();
+            }
+            finally { owner.Active--; }
             CleanupIfReady(owner);
+        }
+        internal IDisposable TrackWork(ExtensionRegistration owner)
+        {
+            CheckThread();
+            if (_disposed || owner.Closing || !_owners.TryGetValue(owner.Id, out var current) || !ReferenceEquals(current, owner))
+                throw new ObjectDisposedException(owner.Id);
+            owner.Active++;
+            return new ExternalWork(this, owner);
+        }
+        private sealed class ExternalWork : IDisposable
+        {
+            private readonly ExtensionRegistry _registry;
+            private ExtensionRegistration? _owner;
+            public ExternalWork(ExtensionRegistry registry, ExtensionRegistration owner) { _registry = registry; _owner = owner; }
+            public void Dispose()
+            {
+                _registry.CheckThread();
+                var owner = _owner; if (owner == null) return; _owner = null;
+                owner.Active--; _registry.CleanupIfReady(owner);
+            }
         }
         private void CleanupIfReady(ExtensionRegistration owner)
         {

@@ -46,7 +46,7 @@ OK: CALL ZNet.ContainsValidIPv4 kind=method type=bool
 
 The command is cheat-gated like the other `cli_` commands. In a world this
 game hosts (single player or a hosted server) run `devcommands` first. On a
-dedicated server the console is reached only through the CLI port; send
+dedicated server the console is reached only through the ValheimCLI port; send
 `devcommands` there the same way. On a client joined to a dedicated server
 Valheim refuses every cheat command, `cli_call` included.
 

@@ -1,6 +1,6 @@
-# valheimCLI Test Plans
+# ValheimCLI Test Plans
 
-`CLI/tests/` is for reusable sample plans that can run in a generic Valheim CLI setup.
+`CLI/tests/` is for reusable sample plans that can run in a generic ValheimCLI setup.
 
 Keep environment-specific validation plans out of this directory. Put local or private plans under `CLI/local-tests/`, and put run output under `CLI/runs/`. Those folders are ignored by git.
 
@@ -45,7 +45,7 @@ Zero remains valid for `wait` and `waitFor.stall`.
 
 Command errors, connection loss, missing output and local-process failures now
 fail a case even without `expect`. The runner uses the same command-result
-classification as ordinary CLI execution. An explicit expected error can test a
+classification as ordinary ValheimCLI execution. An explicit expected error can test a
 negative case:
 
 ```yaml
@@ -57,7 +57,7 @@ negative case:
       output: 'contains code=no_member'
 ```
 
-`errorCode` is the current CLI **result** code, not necessarily the detailed code
+`errorCode` is the current ValheimCLI **result** code, not necessarily the detailed code
 inside a plugin's reply. Many plugin errors currently map to `command_failed`, so
 also check the specific reply as above. Only the final command may produce the
 expected error; setup failures still fail. A command succeeding when an error is
@@ -88,8 +88,8 @@ local or remote game is left running. Teardown runs after failed/cancelled plans
 as well as successful ones. Set `game.preserveOnFailure: true` to retain a runner-
 owned session for debugging. A launcher that detached from its child cannot prove
 ownership: cleanup reports an error instead of falling back to process names.
-The existing explicit CLI stop command is separate and unchanged.
+The existing explicit ValheimCLI stop command is separate and unchanged.
 
 For reusable C# tests, extension adapters and disposable file fixtures see
 [the testing toolkit guide](../../docs/testing-toolkit.md). Session deployment,
-port reservation and remote station claims remain the caller's responsibility.
+port reservation and exclusive use of a shared game host remain the caller's responsibility.

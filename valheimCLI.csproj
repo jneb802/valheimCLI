@@ -30,6 +30,7 @@
 
   <ItemGroup>
     <Compile Remove="Toolkit\**" />
+    <Compile Remove="Packs\**" />
     <Compile Remove="Adapters\**" />
     <Compile Remove="examples\**" />
     <Compile Remove="CLI\**" />

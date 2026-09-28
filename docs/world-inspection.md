@@ -1,6 +1,6 @@
 # Inspect a world without changing it
 
-Run these through the existing CLI connection. Saved-data commands belong on the
+Run these through the existing ValheimCLI connection. Saved-data commands belong on the
 server; collision and paint commands belong on the machine whose scene you want
 to observe. A dedicated server need not have a distant player's terrain loaded.
 
@@ -31,7 +31,7 @@ session; compare persisted content separately across reloads.
 Missing local terrain is reported as unavailable, not height zero. Ray hits may
 include triggers, characters and non-walkable layers; inspect the layer and
 trigger fields before calling a hit a floor. Observing a collider is not a walk.
-An inventory that cannot be fully decoded returns `ERROR`, so the existing CLI
+An inventory that cannot be fully decoded returns `ERROR`, so the existing ValheimCLI
 failure path sees it even if other containers were readable. Temporary inventory
 loading uses the game's data-only reader and checks the decoded item count.
 

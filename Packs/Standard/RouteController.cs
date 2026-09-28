@@ -126,12 +126,12 @@ namespace valheimCLI
 
             if (_active != null)
             {
-                valheimCLIPlugin.Instance.StopCoroutine(_active);
+                StandardPack.Module.Stop(_active);
                 ReleaseControls();
             }
 
             _lastResult = "running";
-            _active = valheimCLIPlugin.Instance.StartCoroutine(FollowRoutine());
+            _active = StandardPack.Module.Run(FollowRoutine());
             addOutput($"OK: route started with {Route.Count} waypoint(s)");
         }
 
@@ -139,7 +139,7 @@ namespace valheimCLI
         {
             if (_active != null && valheimCLIPlugin.Instance != null)
             {
-                valheimCLIPlugin.Instance.StopCoroutine(_active);
+                StandardPack.Module.Stop(_active);
                 _active = null;
                 _lastResult = $"stopped at waypoint {_currentIndex}";
                 ReleaseControls();

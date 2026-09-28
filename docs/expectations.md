@@ -55,8 +55,8 @@ The md5 is of the DLL as it is on disk now. If the file was written after the
 game loaded it, the game may be running the previous build, so the plugin
 reports `changed_since_load=yes` and fails an md5 expectation (`any` still
 passes). A plugin loaded at startup is compared with the time the game
-started; valheimCLI compares with the time it loaded itself, so a live reload
-of valheimCLI is judged correctly. Another plugin that a reloader such as
+started; ValheimCLI compares with the time it loaded itself, so a live reload
+of ValheimCLI is judged correctly. Another plugin that a reloader such as
 ScriptEngine loaded from bytes after startup has no known load time: it
 reports `changed_since_load=unknown`, and an md5 expectation checks only its
 md5. A live-reload feature that loads the plugin can know more.
@@ -74,7 +74,7 @@ World keys:
 just its name. It only makes sense for a world you restore before each run,
 because any save changes it. Only a server or host has the files; a client
 joined to a server reports `files_hashed=client_has_no_files`, so check it on
-the server. When valheimCLI loaded after the world (a plugin reloader), or the
+the server. When ValheimCLI loaded after the world (a plugin reloader), or the
 world had no save directory yet (a new world), the load-time hash is unknown
 and a `worldfiles` expectation fails with that reason.
 
@@ -142,12 +142,12 @@ valheim-cli --expect-strict pins.txt --test plan.yaml
 ```
 
 The check runs once, when the game first answers and before the first step;
-with `--launch`, that is when the launched game's valheimCLI server is up.
+with `--launch`, that is when the launched game's ValheimCLI server is up.
 When it holds, the run prints `Expectations held (...)` and goes on. When it
 does not, no step and no cleanup runs: the run prints the `MISMATCH` lines
 and exits 6. A missing or malformed file stops the run before the game is
 launched or asked anything, with exit 4. A game that does not answer
-`cli_expect` (an older valheimCLI) fails the check too: a run is only called
+`cli_expect` (an older ValheimCLI) fails the check too: a run is only called
 pinned when the game said so.
 
 ```text
@@ -179,7 +179,7 @@ on the command line is relative to the working directory.
 ## Standing expectations
 
 Set a file in `BepInEx/config/valheimCLI.valheimCLI.cfg` and the game checks
-it before every command sent through the CLI:
+it before every command sent through the ValheimCLI:
 
 ```ini
 [Expectations]

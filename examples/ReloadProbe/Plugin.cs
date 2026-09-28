@@ -14,6 +14,7 @@ public sealed class ReloadProbe : BaseUnityPlugin
 #else
     public const string Revision = "0.1.0";
 #endif
+    private const string Id = "example.probe";
     private const string Marker = "CLI Reload Probe Lease ";
     private ExtensionRegistration? _registration;
     private int _waiting;
@@ -25,6 +26,13 @@ public sealed class ReloadProbe : BaseUnityPlugin
             if (Time.realtimeSinceStartup > deadline) { Logger.LogError("Stable CLI core is not available."); yield break; }
             yield return null;
         }
+        ExtensionRegistry registry = valheimCLI.valheimCLIPlugin.Instance!.Extensions!;
+        // A replacement waits while the previous revision's in-flight work (such as `wait`) drains.
+        while (registry.Registrations.Any(r => r.Id == Id))
+        {
+            if (Time.realtimeSinceStartup > deadline) { Logger.LogError("Previous probe is still active, draining or failed cleanup; replacement refused."); yield break; }
+            yield return null;
+        }
         var commands = new List<ExtensionCommand>
         {
             new ExtensionCommand("hello", "Read revision and live probe resources", Hello, readOnly: true),
@@ -33,7 +41,7 @@ public sealed class ReloadProbe : BaseUnityPlugin
 #if !PROBE_B
         commands.Add(new ExtensionCommand("removed", "Present only in revision A", Hello, readOnly: true));
 #endif
-        _registration = valheimCLI.valheimCLIPlugin.Instance.Extensions.Register("example.probe", Revision, 1, commands.ToArray());
+        _registration = registry.Register(Id, Revision, 1, commands.ToArray());
         var marker = new GameObject(Marker + _registration.Instance);
         DontDestroyOnLoad(marker);
         string instance = _registration.Instance;

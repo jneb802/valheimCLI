@@ -8,10 +8,37 @@ namespace valheimCLI.Extensions
     // First bundled module. Existing text inspection commands remain compatible.
     internal static class WorldObservations
     {
-        internal static void Register(ExtensionRegistry registry) => registry.Register("valheim.world", "0.1.0", 1,
+        internal static ExtensionRegistration Register(ExtensionRegistry registry) => registry.Register("valheim.world", "0.1.0", 1,
+            new ExtensionCommand("terrain-paint", "Read one loaded paint texel as raw RGBA: <integer x> <integer z>", Paint, readOnly: true, needsWorld: true),
             new ExtensionCommand("terrain-surface", "Read a loaded terrain vertex and its own collider: <x> <z> (grid vertices)", Surface, readOnly: true, needsWorld: true),
             new ExtensionCommand("player-support", "Read local player position, motion and grounded state", Support, readOnly: true, role: ExtensionRole.Client, needsWorld: true),
             new ExtensionCommand("terrain", "terrain <x> <z> <generator|loaded-ground>; metres, x/z horizontal", Terrain, readOnly: true, needsWorld: true));
+        private static IEnumerator Paint(ExtensionContext context)
+        {
+            if (context.Arguments.Count != 2 || !CommandArguments.TryFiniteFloat(context.Arguments[0], out float x) ||
+                !CommandArguments.TryFiniteFloat(context.Arguments[1], out float z) || Math.Abs(x) > 20000 || Math.Abs(z) > 20000 ||
+                x != Mathf.Round(x) || z != Mathf.Round(z))
+            { context.Fail("usage", "terrain-paint <integer x> <integer z>; native 1m grid within +/-20000"); yield break; }
+            var point = new Vector3(x, 0, z);
+            var hm = Heightmap.FindHeightmap(point);
+            var texture = hm != null ? hm.GetPaintMask() : null;
+            int px = -1, pz = -1;
+            if (hm != null) hm.WorldToVertexMask(point, out px, out pz);
+            // GetPaintMask(x,z) returns black out of range. Do not report that
+            // sentinel as measured unpainted ground; validate the texture first.
+            bool complete = hm != null && hm.m_scale == 1 && texture != null && texture.isReadable &&
+                px >= 0 && pz >= 0 && px < texture.width && pz < texture.height;
+            Color paint = complete ? hm!.GetPaintMask(px, pz) : default;
+            context.Succeed(new Dictionary<string, object?> {
+                ["source"] = "loaded-terrain-paint", ["complete"] = complete, ["x"] = x, ["z"] = z,
+                ["units"] = "rgba01", ["texelX"] = px, ["texelZ"] = pz,
+                ["mapX"] = hm != null ? (object)hm.transform.position.x : null,
+                ["mapZ"] = hm != null ? (object)hm.transform.position.z : null,
+                ["r"] = complete ? (object)paint.r : null, ["g"] = complete ? (object)paint.g : null,
+                ["b"] = complete ? (object)paint.b : null, ["a"] = complete ? (object)paint.a : null
+            });
+            yield break;
+        }
         private static IEnumerator Surface(ExtensionContext context)
         {
             if(context.Arguments.Count!=2 || !CommandArguments.TryFiniteFloat(context.Arguments[0],out float x) ||

@@ -326,7 +326,7 @@ namespace valheimCLI
                 string zdo = nview != null && nview.IsValid() ? nview.GetZDO().m_uid.ToString() : "local";
                 string name = collider.GetComponentInParent<Heightmap>() != null
                     ? "terrain"
-                    : CustomCommands.CleanPrefabName(nview != null ? nview.gameObject.name : collider.gameObject.name);
+                    : CommandArguments.CleanPrefabName(nview != null ? nview.gameObject.name : collider.gameObject.name);
                 n++;
                 output(string.Format(CultureInfo.InvariantCulture,
                     "SURFACE {0:F1},{1:F1} hit={2} name={3} y={4:F3} layer={5} zdo={6} trigger={7}",

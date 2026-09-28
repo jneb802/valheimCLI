@@ -13,7 +13,7 @@ namespace valheimCLI
     public class valheimCLIPlugin : BaseUnityPlugin
     {
         private const string ModName = "valheimCLI";
-        internal const string ModVersion = "1.0.0";
+        internal const string ModVersion = "1.1.0";
         private const string Author = "valheimCLI";
         internal const string ModGUID = Author + "." + ModName;
         private static string ConfigFileName = ModGUID + ".cfg";
@@ -31,13 +31,10 @@ namespace valheimCLI
 
         private readonly List<string> _capturedOutput = new();
         private bool _capturingOutput;
-        private bool _autoStartQueuedJoinAttempted;
-        private string? _pendingConnectAddress;
-        private string? _pendingConnectPassword;
-        private static bool _autoStartQueuedJoinRequested;
-        private static readonly FieldInfo? QueuedJoinServerField = typeof(FejdStartup).GetField("m_queuedJoinServer", BindingFlags.Instance | BindingFlags.NonPublic);
 
         public Extensions.ExtensionRegistry? Extensions { get; private set; }
+        public Extensions.ConsoleModuleHost Modules { get; private set; } = null!;
+        public bool AutoStartQueuedJoin => _autoStartQueuedJoinConfig?.Value == true;
 
         public void Awake()
         {
@@ -54,10 +51,6 @@ namespace valheimCLI
             ManifestCommands.FileConfig = Config.Bind("Expectations", "File", "", "A file of key=value lines naming the plugin builds (and optionally the world) this game must run; see docs/expectations.md. While it does not hold, every command sent through the CLI except the diagnostics (cli_manifest, cli_world, cli_expect) is refused. A relative path is relative to the BepInEx config folder. Empty = off.");
             ManifestCommands.StrictConfig = Config.Bind("Expectations", "Strict", false, "Also require the expectations file to name every loaded plugin (a plugin not listed is a mismatch; list it as name=any if its build does not matter) and, once a world is loaded, to name the world (world= or worlduid=; world=any accepts any).");
             ManifestCommands.UseConfig(Config);
-            if (HasStartupJoinArgument())
-            {
-                RequestAutoStartQueuedJoin();
-            }
 
             Assembly assembly = Assembly.GetExecutingAssembly();
             HarmonyInstance.PatchAll(assembly);
@@ -71,16 +64,13 @@ namespace valheimCLI
             // someone else registered first is still ours once we replace it.
             Dictionary<string, object> beforeRegister = SnapshotCommands();
             List<KeyValuePair<string, Terminal.ConsoleCommand>> before = new(Terminal.commands);
-            Extensions = new valheimCLI.Extensions.ExtensionRegistry(AsyncCommands.Gate, valheimCLI.Extensions.ExtensionHost.Precondition);
+            Extensions = new valheimCLI.Extensions.ExtensionRegistry(AsyncExecution.Gate, valheimCLI.Extensions.ExtensionHost.Precondition);
             valheimCLI.Extensions.ExtensionHost.Register(Extensions);
-            valheimCLI.Extensions.WorldObservations.Register(Extensions);
-            CustomCommands.Register();
-            WorldInspectionCommands.Register();
-            TerrainInspectionCommands.Register();
-            SessionControlCommands.Register();
-            TerrainActionCommands.Register();
-            CaptureCommands.Register();
-            RockInspectionCommands.Register();
+            Modules = new Extensions.ConsoleModuleHost(this, Extensions);
+            ManifestCommands.Register();
+            ReloadCommands.Register();
+            foreach (string name in new[] { "cli_build", "cli_self_unload", "cli_await_plugin" })
+                StandingExpectations.AllowWhileMismatched(name);
             List<object> registeredHere = CliCommandValidity.NewlyRegistered(beforeRegister, SnapshotCommands());
             CliCommandValidity.RecordOwnCommands(registeredHere);
             Log.LogInfo($"Registered {registeredHere.Count} valheimCLI commands");
@@ -126,8 +116,7 @@ namespace valheimCLI
             _stateTracker?.Update();
             ProcessPendingCommands();
             Extensions?.Tick();
-            TryQueuePendingServerConnect();
-            TryAutoStartQueuedJoin();
+            Modules?.Tick();
         }
 
         private void ProcessPendingCommands()
@@ -173,534 +162,15 @@ namespace valheimCLI
 
         private bool TryExecuteBuiltInCommand(string command)
         {
-            const string trustedPrefix = "cli_run_trusted";
-            if (command.Equals(trustedPrefix, StringComparison.OrdinalIgnoreCase) ||
-                command.StartsWith(trustedPrefix + " ", StringComparison.OrdinalIgnoreCase))
+            const string prefix = "cli_run_trusted";
+            if (command.Equals(prefix, StringComparison.OrdinalIgnoreCase) || command.StartsWith(prefix + " ", StringComparison.OrdinalIgnoreCase))
             {
-                string trustedCommand = command.Length > trustedPrefix.Length
-                    ? command.Substring(trustedPrefix.Length).Trim()
-                    : string.Empty;
-                if (string.IsNullOrEmpty(trustedCommand))
-                {
-                    _commandServer?.SendOutput("Usage: cli_run_trusted <console command>");
-                    return true;
-                }
-
-                ExecuteCommand(trustedCommand, skipAllowedCheck: true);
+                string inner = command.Substring(prefix.Length).Trim();
+                if (inner.Length == 0) _commandServer?.SendOutput("Usage: cli_run_trusted <console command>");
+                else ExecuteCommand(inner, skipAllowedCheck: true);
                 return true;
             }
-
-            string[] parts = command.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length == 0)
-            {
-                return false;
-            }
-
-            if (parts[0].Equals("cli_create_character", StringComparison.OrdinalIgnoreCase))
-            {
-                if (parts.Length < 2)
-                {
-                    _commandServer?.SendOutput("Usage: cli_create_character <name> [--replace] [--local] [--skip-intro]");
-                    return true;
-                }
-
-                bool replace = false;
-                bool forceLocal = false;
-                bool skipIntro = false;
-                for (int i = 2; i < parts.Length; i++)
-                {
-                    replace |= parts[i].Equals("--replace", StringComparison.OrdinalIgnoreCase);
-                    forceLocal |= parts[i].Equals("--local", StringComparison.OrdinalIgnoreCase);
-                    skipIntro |= parts[i].Equals("--skip-intro", StringComparison.OrdinalIgnoreCase);
-                }
-
-                forceLocal |= replace;
-                CustomCommands.CreateCharacter(parts[1], replace, forceLocal, skipIntro, line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_select_character", StringComparison.OrdinalIgnoreCase))
-            {
-                if (parts.Length < 2)
-                {
-                    _commandServer?.SendOutput("Usage: cli_select_character <name-or-filename>");
-                    return true;
-                }
-
-                CustomCommands.SelectCharacter(parts[1], line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_connect_direct", StringComparison.OrdinalIgnoreCase))
-            {
-                if (parts.Length < 2)
-                {
-                    _commandServer?.SendOutput("Usage: cli_connect_direct <host[:port]> [password]");
-                    return true;
-                }
-
-                if (!CustomCommands.TryParseHostPort(parts[1], out string host, out int port))
-                {
-                    _commandServer?.SendOutput($"ERROR: Invalid server address '{parts[1]}'");
-                    return true;
-                }
-
-                if (FejdStartup.instance == null)
-                {
-                    QueueServerConnect(parts[1], parts.Length >= 3 ? parts[2] : null);
-                    _commandServer?.SendOutput($"OK: Queued dedicated server join for {parts[1]}");
-                    return true;
-                }
-
-                if (parts.Length >= 3)
-                {
-                    SetServerPassword(parts[2]);
-                }
-
-                CustomCommands.StartDedicatedServerJoin(host, port, line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_connect_steam_user", StringComparison.OrdinalIgnoreCase))
-            {
-                if (parts.Length < 2 || !ulong.TryParse(parts[1], out ulong steamId))
-                {
-                    _commandServer?.SendOutput("Usage: cli_connect_steam_user <steamId> [password]");
-                    return true;
-                }
-
-                CustomCommands.StartSteamUserJoin(steamId, parts.Length >= 3 ? parts[2] : null, line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_connect_playfab_user", StringComparison.OrdinalIgnoreCase))
-            {
-                if (parts.Length < 2 || string.IsNullOrWhiteSpace(parts[1]))
-                {
-                    _commandServer?.SendOutput("Usage: cli_connect_playfab_user <remotePlayerId> [password]");
-                    return true;
-                }
-
-                CustomCommands.StartPlayFabUserJoin(parts[1], parts.Length >= 3 ? parts[2] : null, line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_connection_status", StringComparison.OrdinalIgnoreCase))
-            {
-                _commandServer?.SendOutput($"OK: connectionStatus={ZNet.GetConnectionStatus()}, server={ZNet.GetServerString()}");
-                return true;
-            }
-
-            if (parts[0].Equals("cli_multiplayer_identity", StringComparison.OrdinalIgnoreCase))
-            {
-                CustomCommands.PrintMultiplayerIdentity(line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_start_host_world", StringComparison.OrdinalIgnoreCase))
-            {
-                if (!CustomCommands.TryParseHostedWorldOptions(parts, 1, out string worldName, out bool publicServer, out bool crossplay, out string? password, out string error))
-                {
-                    _commandServer?.SendOutput(error);
-                    return true;
-                }
-
-                CustomCommands.StartHostedWorld(worldName, publicServer, crossplay, password, line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_set_tod", StringComparison.OrdinalIgnoreCase))
-            {
-                if (parts.Length < 2 || !float.TryParse(parts[1], out float dayFraction))
-                {
-                    _commandServer?.SendOutput("Usage: cli_set_tod <0-1|-1>");
-                    return true;
-                }
-
-                CustomCommands.SetDebugTimeOfDay(dayFraction, line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_set_env", StringComparison.OrdinalIgnoreCase))
-            {
-                if (parts.Length < 2)
-                {
-                    _commandServer?.SendOutput("Usage: cli_set_env <env|reset>");
-                    return true;
-                }
-
-                CustomCommands.SetDebugEnvironment(parts[1], line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_goto_location", StringComparison.OrdinalIgnoreCase))
-            {
-                if (parts.Length < 2)
-                {
-                    _commandServer?.SendOutput("Usage: cli_goto_location <location_prefab_name_or_group>");
-                    return true;
-                }
-
-                CustomCommands.GotoLocation(parts[1], line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_find_locations", StringComparison.OrdinalIgnoreCase))
-            {
-                if (parts.Length < 2)
-                {
-                    _commandServer?.SendOutput("Usage: cli_find_locations <text> [limit]");
-                    return true;
-                }
-
-                int limit = 20;
-                if (parts.Length >= 3)
-                {
-                    int.TryParse(parts[2], out limit);
-                }
-
-                CustomCommands.FindLocations(parts[1], Math.Max(1, limit), line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_logout_save", StringComparison.OrdinalIgnoreCase))
-            {
-                CustomCommands.LogoutSave(line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_spawn_near", StringComparison.OrdinalIgnoreCase))
-            {
-                if (parts.Length < 2)
-                {
-                    _commandServer?.SendOutput("Usage: cli_spawn_near <prefab> [count] [level] [radius]");
-                    return true;
-                }
-
-                int count = 1;
-                if (parts.Length >= 3)
-                {
-                    int.TryParse(parts[2], out count);
-                }
-
-                int level = 1;
-                if (parts.Length >= 4)
-                {
-                    int.TryParse(parts[3], out level);
-                }
-
-                float radius = 3f;
-                if (parts.Length >= 5)
-                {
-                    float.TryParse(parts[4], out radius);
-                }
-
-                CustomCommands.SpawnNear(parts[1], count, level, radius, line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_spawn_at", StringComparison.OrdinalIgnoreCase))
-            {
-                if (parts.Length < 5)
-                {
-                    _commandServer?.SendOutput("Usage: cli_spawn_at <prefab> <x> <y> <z> [count] [level] [radius]");
-                    return true;
-                }
-
-                if (!float.TryParse(parts[2], out float x) || !float.TryParse(parts[3], out float y) || !float.TryParse(parts[4], out float z))
-                {
-                    _commandServer?.SendOutput("ERROR: Invalid coordinates");
-                    return true;
-                }
-
-                int count = 1;
-                if (parts.Length >= 6)
-                {
-                    int.TryParse(parts[5], out count);
-                }
-
-                int level = 1;
-                if (parts.Length >= 7)
-                {
-                    int.TryParse(parts[6], out level);
-                }
-
-                float radius = 3f;
-                if (parts.Length >= 8)
-                {
-                    float.TryParse(parts[7], out radius);
-                }
-
-                CustomCommands.SpawnAt(parts[1], x, y, z, count, level, radius, line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_spawn_frozen", StringComparison.OrdinalIgnoreCase))
-            {
-                if (parts.Length < 2)
-                {
-                    _commandServer?.SendOutput("Usage: cli_spawn_frozen <prefab> [count] [level] [distance] [spacing]");
-                    return true;
-                }
-
-                int count = 1;
-                if (parts.Length >= 3)
-                {
-                    int.TryParse(parts[2], out count);
-                }
-
-                int level = 1;
-                if (parts.Length >= 4)
-                {
-                    int.TryParse(parts[3], out level);
-                }
-
-                float distance = 12f;
-                if (parts.Length >= 5)
-                {
-                    float.TryParse(parts[4], out distance);
-                }
-
-                float spacing = 3f;
-                if (parts.Length >= 6)
-                {
-                    float.TryParse(parts[5], out spacing);
-                }
-
-                CustomCommands.SpawnFrozenNear(parts[1], count, level, distance, spacing, line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_destroy_nearby_characters", StringComparison.OrdinalIgnoreCase))
-            {
-                if (parts.Length < 2)
-                {
-                    _commandServer?.SendOutput("Usage: cli_destroy_nearby_characters <name|*> [radius]");
-                    return true;
-                }
-
-                float radius = 40f;
-                if (parts.Length >= 3)
-                {
-                    float.TryParse(parts[2], out radius);
-                }
-
-                CustomCommands.DestroyNearbyCharacters(parts[1], radius, line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_set_nearby_character_health", StringComparison.OrdinalIgnoreCase))
-            {
-                if (parts.Length < 3 || !float.TryParse(parts[2], out float health))
-                {
-                    _commandServer?.SendOutput("Usage: cli_set_nearby_character_health <name|*> <health> [radius]");
-                    return true;
-                }
-
-                float radius = 40f;
-                if (parts.Length >= 4)
-                {
-                    float.TryParse(parts[3], out radius);
-                }
-
-                CustomCommands.SetNearbyCharacterHealth(parts[1], health, radius, line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_freeze_nearest_character", StringComparison.OrdinalIgnoreCase))
-            {
-                if (parts.Length < 2)
-                {
-                    _commandServer?.SendOutput("Usage: cli_freeze_nearest_character <name> [radius]");
-                    return true;
-                }
-
-                float radius = 30f;
-                if (parts.Length >= 3)
-                {
-                    float.TryParse(parts[2], out radius);
-                }
-
-                CustomCommands.FreezeNearestCharacter(parts[1], radius, line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_aim_at", StringComparison.OrdinalIgnoreCase))
-            {
-                if (parts.Length < 4 ||
-                    !float.TryParse(parts[1], out float aimX) ||
-                    !float.TryParse(parts[2], out float aimY) ||
-                    !float.TryParse(parts[3], out float aimZ))
-                {
-                    _commandServer?.SendOutput("Usage: cli_aim_at <x> <y> <z>");
-                    return true;
-                }
-
-                CustomCommands.AimAtPoint(new UnityEngine.Vector3(aimX, aimY, aimZ), line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_aim_at_nearest_character", StringComparison.OrdinalIgnoreCase))
-            {
-                if (parts.Length < 2)
-                {
-                    _commandServer?.SendOutput("Usage: cli_aim_at_nearest_character <name> [radius] [heightOffset]");
-                    return true;
-                }
-
-                float radius = 50f;
-                if (parts.Length >= 3)
-                {
-                    float.TryParse(parts[2], out radius);
-                }
-
-                float heightOffset = 0.8f;
-                if (parts.Length >= 4)
-                {
-                    float.TryParse(parts[3], out heightOffset);
-                }
-
-                CustomCommands.AimAtNearestCharacter(parts[1], radius, heightOffset, line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_fire_current_weapon", StringComparison.OrdinalIgnoreCase))
-            {
-                float holdSeconds = 0.15f;
-                if (parts.Length >= 2)
-                {
-                    float.TryParse(parts[1], out holdSeconds);
-                }
-
-                float waitLoadedSeconds = 4f;
-                if (parts.Length >= 3)
-                {
-                    float.TryParse(parts[2], out waitLoadedSeconds);
-                }
-
-                CustomCommands.FireCurrentWeapon(holdSeconds, waitLoadedSeconds, line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_weapon_state", StringComparison.OrdinalIgnoreCase))
-            {
-                CustomCommands.PrintWeaponState(line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_set_player_safety", StringComparison.OrdinalIgnoreCase))
-            {
-                if (parts.Length < 2 || !bool.TryParse(parts[1], out bool enabled))
-                {
-                    _commandServer?.SendOutput("Usage: cli_set_player_safety <true|false>");
-                    return true;
-                }
-
-                CustomCommands.SetPlayerSafety(enabled, line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_give_item", StringComparison.OrdinalIgnoreCase))
-            {
-                if (parts.Length < 2)
-                {
-                    _commandServer?.SendOutput("Usage: cli_give_item <prefab> [count] [quality]");
-                    return true;
-                }
-
-                int count = 1;
-                if (parts.Length >= 3)
-                {
-                    int.TryParse(parts[2], out count);
-                }
-
-                int quality = 1;
-                if (parts.Length >= 4)
-                {
-                    int.TryParse(parts[3], out quality);
-                }
-
-                CustomCommands.GiveItem(parts[1], Math.Max(1, count), Math.Max(1, Math.Min(4, quality)), line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_equip_item", StringComparison.OrdinalIgnoreCase))
-            {
-                if (parts.Length < 2)
-                {
-                    _commandServer?.SendOutput("Usage: cli_equip_item <prefab-or-display-name>");
-                    return true;
-                }
-
-                CustomCommands.EquipInventoryItem(parts[1], line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_apply_magic_effect", StringComparison.OrdinalIgnoreCase))
-            {
-                if (parts.Length < 3)
-                {
-                    _commandServer?.SendOutput("Usage: cli_apply_magic_effect <item> <effect> [rarity] [value]");
-                    return true;
-                }
-
-                string rarity = parts.Length >= 4 ? parts[3] : "Magic";
-                float value = 1f;
-                if (parts.Length >= 5)
-                {
-                    float.TryParse(parts[4], out value);
-                }
-
-                CustomCommands.ApplyMagicEffect(parts[1], parts[2], rarity, value, line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_setup_reload_on_kill_clip", StringComparison.OrdinalIgnoreCase))
-            {
-                string crossbow = parts.Length >= 2 ? parts[1] : "CrossbowArbalest";
-                string bolt = parts.Length >= 3 ? parts[2] : "BoltCarapace";
-                int boltCount = 100;
-                if (parts.Length >= 4)
-                {
-                    int.TryParse(parts[3], out boltCount);
-                }
-
-                CustomCommands.SetupReloadOnKillClip(crossbow, bolt, Math.Max(1, boltCount), line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (parts[0].Equals("cli_zdo_resend_destroyed", StringComparison.OrdinalIgnoreCase))
-            {
-                if (parts.Length < 2)
-                {
-                    _commandServer?.SendOutput("Usage: cli_zdo_resend_destroyed <zdoId> [delaySeconds]");
-                    return true;
-                }
-
-                float delaySeconds = 3f;
-                if (parts.Length >= 3)
-                {
-                    float.TryParse(parts[2], out delaySeconds);
-                }
-
-                CustomCommands.ResendDestroyedZdo(parts[1], Math.Max(0.5f, delaySeconds), line => _commandServer?.SendOutput(line));
-                return true;
-            }
-
-            if (!parts[0].Equals("cli_connect", StringComparison.OrdinalIgnoreCase))
-            {
-                return false;
-            }
-
-            if (parts.Length < 2)
-            {
-                _commandServer?.SendOutput("Usage: cli_connect <host:port> [password]");
-                return true;
-            }
-
-            QueueServerConnect(parts[1], parts.Length >= 3 ? parts[2] : null);
-            _commandServer?.SendOutput($"OK: Queued server join for {parts[1]}");
-            return true;
+            return Modules.TryDispatch(command, line => _commandServer?.SendOutput(line));
         }
 
         /// <summary>
@@ -784,66 +254,6 @@ namespace valheimCLI
             }
         }
 
-        public static void QueueServerConnect(string address, string? password)
-        {
-            if (Instance == null)
-            {
-                _autoStartQueuedJoinRequested = true;
-                return;
-            }
-
-            Instance._pendingConnectAddress = address;
-            Instance._pendingConnectPassword = password;
-            RequestAutoStartQueuedJoin();
-            Instance.TryQueuePendingServerConnect();
-        }
-
-        private void TryQueuePendingServerConnect()
-        {
-            if (string.IsNullOrWhiteSpace(_pendingConnectAddress))
-            {
-                return;
-            }
-
-            if (FejdStartup.instance == null)
-            {
-                return;
-            }
-
-            string address = _pendingConnectAddress!;
-            string? password = _pendingConnectPassword;
-
-            if (!CustomCommands.TryParseHostPort(address, out string host, out int port))
-            {
-                _pendingConnectAddress = null;
-                _pendingConnectPassword = null;
-                Log.LogError($"Invalid queued dedicated server address '{address}'");
-                return;
-            }
-
-            if (!string.IsNullOrWhiteSpace(password))
-            {
-                SetServerPassword(password!);
-            }
-
-            _pendingConnectAddress = null;
-            _pendingConnectPassword = null;
-            CustomCommands.StartDedicatedServerJoin(host, port, line => Log.LogInfo(line));
-        }
-
-        private static void SetServerPassword(string password)
-        {
-            PropertyInfo? property = typeof(FejdStartup).GetProperty("ServerPassword", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
-            MethodInfo? setter = property?.GetSetMethod(true);
-            if (setter == null)
-            {
-                Log.LogWarning("Could not set FejdStartup.ServerPassword; server password was not applied.");
-                return;
-            }
-
-            setter.Invoke(null, new object[] { password });
-        }
-
         public void CaptureOutput(string text)
         {
             if (_capturingOutput)
@@ -853,64 +263,6 @@ namespace valheimCLI
         }
 
         public static valheimCLIPlugin? Instance { get; private set; }
-
-        public static void RequestAutoStartQueuedJoin()
-        {
-            _autoStartQueuedJoinRequested = true;
-            if (Instance != null)
-            {
-                Instance._autoStartQueuedJoinAttempted = false;
-            }
-        }
-
-        private static bool HasStartupJoinArgument()
-        {
-            string[] args = Environment.GetCommandLineArgs();
-            for (int i = 0; i < args.Length; i++)
-            {
-                if (args[i] == "+connect" || args[i] == "+connect_lobby")
-                {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        private void TryAutoStartQueuedJoin()
-        {
-            if (_autoStartQueuedJoinConfig?.Value != true || !_autoStartQueuedJoinRequested || _autoStartQueuedJoinAttempted)
-            {
-                return;
-            }
-
-            FejdStartup fejd = FejdStartup.instance;
-            if (fejd == null || fejd.m_characterSelectScreen == null || !fejd.m_characterSelectScreen.activeInHierarchy)
-            {
-                return;
-            }
-
-            if (!HasQueuedJoin(fejd))
-            {
-                return;
-            }
-
-            _autoStartQueuedJoinAttempted = true;
-            Log.LogInfo("Queued server join detected; starting selected character.");
-            fejd.OnCharacterStart();
-        }
-
-        private static bool HasQueuedJoin(FejdStartup fejd)
-        {
-            if (QueuedJoinServerField == null)
-            {
-                Log.LogWarning("Could not inspect FejdStartup.m_queuedJoinServer; auto-start skipped.");
-                return false;
-            }
-
-            object? value = QueuedJoinServerField.GetValue(fejd);
-            return value is ServerJoinData queuedJoin && queuedJoin.IsValid;
-        }
 
         private void OnEnable()
         {
@@ -954,9 +306,8 @@ namespace valheimCLI
         /// </summary>
         private void OnDestroy()
         {
+            Modules?.Dispose();
             Extensions?.Dispose();
-            try { CaptureCommands.RestoreAll(); }
-            catch (Exception ex) { Log.LogError($"Restoring clutter on unload failed: {ex}"); }
             _commandServer?.Dispose();
             _commandServer = null;
             _configWatcher?.Dispose();

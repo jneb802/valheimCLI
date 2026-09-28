@@ -1,6 +1,6 @@
 # Control a test session
 
-These commands operate through the existing localhost CLI listener. Use your
+These commands operate through the existing localhost ValheimCLI listener. Use your
 existing SSH tunnel for remote machines. There is no new public admin endpoint.
 
 ## Dedicated server and client
@@ -9,10 +9,10 @@ existing SSH tunnel for remote machines. There is no new public admin endpoint.
 1-based peer index from `cli_peers`; it is not a permanent player identifier.
 The reply confirms a teleport request, not arrival. Verify the character's
 position on a later `cli_peers` or client state read. The target client needs
-no CLI installation for this vanilla RPC.
+no ValheimCLI installation for this vanilla RPC.
 
 Valheim refuses cheat-marked commands on a client connected to a dedicated
-server. To use the CLI test actions there, set this **on that client**, then
+server. To use the ValheimCLI test actions there, set this **on that client**, then
 restart it:
 
 ```ini

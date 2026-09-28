@@ -6,6 +6,6 @@ The transport and YAML test-plan runner shared by the valheim-cli executable and
 <PackageReference Include="Valheim.Cli.Testing" Version="[0.1.0-preview.4]" />
 ```
 
-Until upstream merges the extension/transport work, build the pinned package from the tvongaza/valheimCLI fork. The ValheimTesting repository records its exact source revision and provides a bootstrap script. No public NuGet release is claimed.
+No public NuGet release exists yet: build the pinned package from this repository's source. The ValheimTesting repository records the exact source revision it uses and provides a bootstrap script.
 
-Synthetic terrain, test fixtures, game assertions and session ownership live in [ValheimTesting](https://github.com/tvongaza/ValheimTesting). CLI does not depend on that library.
+Synthetic terrain, test fixtures, game assertions and session ownership live in [ValheimTesting](https://github.com/tvongaza/ValheimTesting). ValheimCLI does not depend on that library.

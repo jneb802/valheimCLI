@@ -11,13 +11,13 @@ Research checked 26 September 2026. Expand World is useful for the small real-ga
 ## Two distinct fixture families
 
 1. **Controlled modded fixtures:** small test archipelago or terrain regions with a short slope, crossing and nearby POI. Pin the recipe, game/mod builds, seed and generated save hashes. Use EWD/EWS on both sides wherever terrain or biome generation changes. Generate once, verify, then copy the prepared save for subsequent runs.
-2. **Vanilla-terrain compatibility fixtures:** a few prepared zones in a normal seeded world, CLI-equipped client without Roads/MWL or terrain-generator mods. These remain the acceptance evidence for server-side-only operation. Do not assume saving a custom biome/height world makes its generator removable.
+2. **Vanilla-terrain compatibility fixtures:** a few prepared zones in a normal seeded world, ValheimCLI-equipped client without Roads/MWL or terrain-generator mods. These remain the acceptance evidence for server-side-only operation. Do not assume saving a custom biome/height world makes its generator removable.
 
 EWD documents a limited server-only subset (locations, dungeons, rooms, vegetation and selected settings); custom terrain/biomes are outside that subset. EWS documents installation on server and clients. Preserve those requirements in the fixture manifest. [EWD server-only rules](https://github.com/JereKuusela/valheim-expand_world_data#server-side), [EWS requirements](https://github.com/JereKuusela/valheim-expand_world_size#expand-world-size).
 
 ## Bounded pilot, after the current framework gate
 
-- Choose one pinned EWD/EWS release and verify compatibility with the installed game; no additional station campaign yet.
+- Choose one pinned EWD/EWS release and verify compatibility with the installed game; no additional native campaign yet.
 - Disable unrelated locations explicitly rather than deleting entries that auto-populate again. Reduce quotas as well as area, to avoid wasting time trying to place impossible sites. Disable automatic config reload for immutable test runs.
 - Build one compact ordinary-biome fixture: flat control patch, grade-limited slope, river crossing, POI approach and a zone boundary.
 - Inspect actual generator inputs and loaded ground separately; freeze the verified save/config as an immutable fixture with assertions about the intended features.

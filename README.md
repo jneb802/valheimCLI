@@ -1,4 +1,4 @@
-# Valheim CLI
+# ValheimCLI
 
 Run Valheim console commands from your terminal.
 
@@ -15,7 +15,7 @@ cp bin/Debug/valheimCLI.dll ~/Library/Application\ Support/Steam/steamapps/commo
 
 ## Usage
 
-The CLI targets net9.0. On a machine with only a newer runtime installed
+The ValheimCLI targets net9.0. On a machine with only a newer runtime installed
 (e.g. .NET 10), run it with `DOTNET_ROLL_FORWARD=Major` set, or build with
 `dotnet build -p:TargetFramework=net10.0`.
 
@@ -99,7 +99,7 @@ A reply in which the game printed nothing is an error, not an empty
 success: a plugin answers every command it ran, at least with
 `Executed: <command>`, but a dedicated server prints nothing for a command
 it does not have. For a `cli_` command whose reply is empty, or only that
-confirmation, the CLI asks the plugin for its registered commands: a name
+confirmation, the ValheimCLI asks the plugin for its registered commands: a name
 the plugin build does not have is `ERROR: code=unknown_command ...`, which
 names the plugin and says to update it. Any other empty reply is
 `ERROR: code=no_output ...`. Both exit 1. This applies to single commands
@@ -121,7 +121,7 @@ valheim-cli cli_save 120                       # save the world, answer when the
 
 `cli_manifest` lists every loaded plugin with the md5 of its DLL, `cli_world`
 names the loaded world (and on a server or host hashes its save files at
-load), and `cli_expect` checks both against `key=value` expectations. The CLI
+load), and `cli_expect` checks both against `key=value` expectations. The ValheimCLI
 snapshots a working game into a file and checks later runs against it:
 
 ```bash
@@ -131,7 +131,7 @@ valheim-cli --expect pins.txt spawn Boar 5            # run a command only on th
 valheim-cli --expect-strict pins.txt --test plan.yaml # run a test plan only on the expected game
 ```
 
-Set `[Expectations] File` in the config and the game refuses every CLI command
+Set `[Expectations] File` in the config and the game refuses every ValheimCLI command
 but the diagnostics while it does not match. See
 [docs/expectations.md](docs/expectations.md) for the file format, strict mode
 and the world-files hash recipe.
@@ -141,7 +141,7 @@ and the world-files hash recipe.
 With BepInEx ScriptEngine installed, a plugin in `BepInEx/scripts` is reloaded
 when its DLL changes. `cli_await_plugin <guid|file.dll> [md5-prefix|-] [timeout]`
 waits until the reload has happened and proves which build loaded;
-`cli_build` says which valheimCLI build answers; valheimCLI unloads cleanly so it
+`cli_build` says which ValheimCLI build answers; ValheimCLI unloads cleanly so it
 can be reloaded too. `examples/reload-plugin.sh <Plugin.dll> [guid]` copies a
 build and waits for it. Setup, the reload flow and what a plugin must undo in
 `OnDestroy` to reload cleanly: [docs/live-reload.md](docs/live-reload.md).
@@ -206,9 +206,9 @@ The readiness line reports separate fields for the game process, plugin TCP serv
 Status diagnostics distinguish these connection failures when the facts are available:
 
 - `game_not_running`: no Valheim process was detected.
-- `wrong_port`: the BepInEx log shows valheimCLI loaded on a different port.
+- `wrong_port`: the BepInEx log shows ValheimCLI loaded on a different port.
 - `plugin_server_not_listening`: the plugin loaded marker exists, but the requested port is not accepting connections.
-- `plugin_missing_or_not_loaded`: BepInEx wrote a log, but valheimCLI did not report loading.
+- `plugin_missing_or_not_loaded`: BepInEx wrote a log, but ValheimCLI did not report loading.
 - `bepinex_log_missing`: no BepInEx log was found at the resolved game path.
 
 `--launch` reports named phases in human output and JSON:
@@ -264,7 +264,7 @@ How the decisions are made:
 
 - **Progress** is any change in state, load phase, location progress or count, locations generated, active area loaded, connection status or server, whether the game runs, whether the plugin answers, and (only while the game is starting and reports nothing else) the size of the BepInEx log. Timers such as `respawnWait` and `estimatedLocationSeconds` move on their own and do not count.
 - **The stall window** starts at the last change and is armed only once the game has been seen running, so a wait started ahead of a launch waits for the launch. 120s is conservative: location generation reports its progress and the load phases follow one another, but a heavily modded game between the plugin loading and the main menu, loading the area around the player on a slow disk, or a world save that holds the main thread can each sit on one value for about a minute. A stall window no shorter than `--timeout` never fires. Raise it, or pass `--stall 0`, for a wait during which a person acts in a menu (nothing in the status changes while a character is picked).
-- **A remote game** (`--remote`, for a game reached through a tunnel) is known only by its plugin's answers. The CLI then reads none of this machine's Valheim processes or its BepInEx log, which would otherwise describe a game someone plays here (a `wrong_port` for the local game's port, a `game=running` that is not the server). Until the plugin answers, the heartbeat shows `game=not_answering` and the stall window runs from the start of the wait: a remote game whose plugin never loads ends as `stalled` after `--stall`, not at `--timeout`, and says to check the tunnel, the game and its BepInEx log on its machine. Pass a longer `--stall` when the remote game is started after the wait. `--status` reports `remote=true` and `code=remote_not_answering`; `--launch` and `--stop-after` are refused, as they act on this machine's game.
+- **A remote game** (`--remote`, for a game reached through a tunnel) is known only by its plugin's answers. The ValheimCLI then reads none of this machine's Valheim processes or its BepInEx log, which would otherwise describe a game someone plays here (a `wrong_port` for the local game's port, a `game=running` that is not the server). Until the plugin answers, the heartbeat shows `game=not_answering` and the stall window runs from the start of the wait: a remote game whose plugin never loads ends as `stalled` after `--stall`, not at `--timeout`, and says to check the tunnel, the game and its BepInEx log on its machine. Pass a longer `--stall` when the remote game is started after the wait. `--status` reports `remote=true` and `code=remote_not_answering`; `--launch` and `--stop-after` are refused, as they act on this machine's game.
 - **Lost** needs something that was there: a game not up yet (`wait --for plugin-server` right after a launch) is waited for, however long it takes to answer. The loss must hold for 3 polls in a row spanning at least 4 s, so one failed poll between two answers (a tunnel hiccup) is not a loss. A failed poll can itself take seconds: through a tunnel to a Windows machine, connecting to the closed port is retried for about 2 s, so a killed dedicated server there ended its wait as `plugin_lost` about 12 s after the kill. A wait for `process` is never lost; it is how a script waits for a relaunch. `--allow-unreachable` keeps waiting through a loss too, for a wait across a restart someone else makes.
 - **Unreachable** is decided only from settled states, and only after the status has held for 15 s, which covers a logout or disconnect requested just before or just after the wait starts. Waiting for `main-menu` is unreachable when the game is in a world with its player and nothing is leaving it: the plugin does not report the world shutting down and the connection status shows no error or disconnect. A join whose server asks for a password it did not give (the game sits at its password prompt, reported as `passwordPrompt=true`) ends after the 15 s grace with the reason, instead of at its timeout; a plain `wait --for server-connected` does the same unless `--allow-unreachable` (someone is typing the password). A connection attempt that ends in any `Error...` status (wrong version or password, banned, full, kicked, failed) ends a `server-connected` wait at once, once the wait has seen a non-error status or a different rejection: the game keeps the previous attempt's `ErrorPassword` until a new connection starts, so an answer already there when the wait began belongs to an earlier attempt. Loading states (`Loading`, `InWorldNoPlayer`) are never unreachable, as entering and leaving a world pass through the same ones, and waiting for a world from the main menu is never unreachable, as a join may be queued; the stall window covers both. `--allow-unreachable` keeps waiting in any state, for a wait where someone else logs out; add `--stall 0` if that person may take longer than the stall window.
 
@@ -287,13 +287,17 @@ Exit codes:
 - `1`: command or test failure
 - `2`: timeout, or a wait that stalled
 - `3`: connection failure, including a command the server could not finish
-  because it stopped or a live reload replaced valheimCLI
+  because it stopped or a live reload replaced ValheimCLI
   (`ERROR: code=unloaded` from the server, or `ERROR: code=connection_closed`
   when the connection closed first; the command is not resent)
 - `4`: bad input
 - `5`: game not ready, or a wait whose target cannot be reached from the game's state
 - `6`: the game does not match an `--expect` file (or a plan's `game.expect` file)
 - `7`: the game exited, or its plugin stopped answering, during a wait (`game_exited`, `plugin_lost`)
+
+## Testing mods and optional command packs
+
+See [pack installation and migration](docs/command-packs.md) for the split core/Standard/World Tools/Reflection/Capture layout, and [the extension API guide](docs/testing-toolkit.md) for mod-owned adapters. External reusable fixtures and assertions live in [ValheimTesting](https://github.com/tvongaza/ValheimTesting), with a [getting-started guide](https://github.com/tvongaza/ValheimTesting/blob/main/docs/getting-started.md) and [runnable example index](https://github.com/tvongaza/ValheimTesting/blob/main/examples/README.md). Keep broad unit tests in your mod repository; use small native checks for save/replication boundaries and a separate human verdict for usability.
 
 ## Test Layout And Artifacts
 
@@ -329,7 +333,7 @@ the tunnel.
 `BepInEx/config/valheimCLI.valheimCLI.cfg`:
 - `Server.Port` - default 5555
 - `Server.Enabled` - toggle on/off
-- `Expectations.File` - expectations file checked before every CLI command (empty = off); see [docs/expectations.md](docs/expectations.md)
+- `Expectations.File` - expectations file checked before every ValheimCLI command (empty = off); see [docs/expectations.md](docs/expectations.md)
 - `Expectations.Strict` - the file must also name every loaded plugin and the loaded world
 
 ## Requirements
@@ -337,3 +341,8 @@ the tunnel.
 - .NET SDK 8.0+
 - BepInEx installed in Valheim
 - Publicized assemblies in `Managed/publicized_assemblies/`
+
+
+## AI agent entry point
+
+See [AGENTS.md](AGENTS.md) for testing-tool instructions, repository ownership boundaries and linked runnable examples. Claude-based agents can use the [CLAUDE.md](CLAUDE.md) pointer to the same instructions.

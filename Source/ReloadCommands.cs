@@ -56,7 +56,7 @@ namespace valheimCLI
                     AwaitSelf(request, args.Context.AddString);
                     return;
                 }
-                AsyncCommands.Start("await_plugin", args.Context.AddString, ctx => AwaitPlugin(ctx, request), gated: false);
+                AsyncExecution.Start("await_plugin", args.Context.AddString, ctx => AwaitPlugin(ctx, request), gated: false);
             });
 
             new Terminal.ConsoleCommand("cli_self_unload", "Unload this valheimCLI instance so a copy in BepInEx/scripts can load in its place on ScriptEngine's next reload; the command port closes once the reply is sent: cli_self_unload", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
@@ -121,10 +121,10 @@ namespace valheimCLI
                 console($"OK: PLUGIN guid={valheimCLIPlugin.ModGUID} version={valheimCLIPlugin.ModVersion} assembly={assembly} source={LiveReload.ClassifySource(s_location, assembly)} md5={s_md5} ms=0 self=true location={s_location}");
                 return;
             }
-            AsyncCommands.Start("await_plugin", console, ctx => AwaitSelfReplaced(ctx, request), gated: false);
+            AsyncExecution.Start("await_plugin", console, ctx => AwaitSelfReplaced(ctx, request), gated: false);
         }
 
-        private static IEnumerator AwaitSelfReplaced(AsyncCommands.Context ctx, AwaitPluginRequest request)
+        private static IEnumerator AwaitSelfReplaced(AsyncExecution.Context ctx, AwaitPluginRequest request)
         {
             Stopwatch clock = Stopwatch.StartNew();
             while (clock.Elapsed.TotalSeconds < request.TimeoutSeconds && !ctx.Cancelled)
@@ -141,7 +141,7 @@ namespace valheimCLI
         /// overwritten or removed by whichever loader ran last, so the objects
         /// themselves are the record.
         /// </summary>
-        private static IEnumerator AwaitPlugin(AsyncCommands.Context ctx, AwaitPluginRequest request)
+        private static IEnumerator AwaitPlugin(AsyncExecution.Context ctx, AwaitPluginRequest request)
         {
             PluginAwaiter awaiter = new PluginAwaiter(request, FindInstances(request).Select(p => p.GetInstanceID()).ToList(), s_passMd5);
             Stopwatch clock = Stopwatch.StartNew();

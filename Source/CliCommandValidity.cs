@@ -65,6 +65,8 @@ namespace valheimCLI
         }
 
         public static void ForgetOwnCommands() => Own.Clear();
+        public static void ForgetOwnCommands(IEnumerable<object> commands)
+        { foreach (object command in commands) Own.Remove(command); }
 
         public static int OwnCommandCount => Own.Count;
 
