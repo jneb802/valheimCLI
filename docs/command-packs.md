@@ -12,7 +12,13 @@ There is no second DLL loader or runtime compiler.
 | `Valheim.Cli.Reflection.dll` | Optional `cli_call` reflection over game and mod members | 1 |
 | `Valheim.Cli.Capture.dll` | Reversible grass/clutter visibility override | 1 |
 
-All 130 existing console command names are preserved, exactly once. Core alone
+Before the split, core registered 135 console commands. The seven `cli_mwl_*`
+port commands left core (see below); the other 128 keep their names and are each
+registered exactly once, in core or one pack. Core adds `cli_extension` and
+`cli_extensions`, which are two of its eight, for 130 in total.
+`docs/command-inventory-before.json` records the 135;
+`CommandPackInventoryTests` in `Tests/RequestBroker.Tests` checks the difference
+and the counts in the table above. Core alone
 intentionally does not expose gameplay commands. The Standard pack is large
 because session, actor and capture actions share existing gameplay helpers;
 these remain one optional assembly to avoid cross-pack static dependencies.
@@ -58,11 +64,38 @@ registration, preserving earlier owners. Unload removes only command objects
 this pack owns; a later replacement under the same name is not removed or granted
 its predecessor's client permission. Name prefixes never establish authority.
 
-Main-menu compatibility dispatch now checks the registered command's normal
-console validity before calling its handler. It cannot bypass permissions by
-calling a retained delegate after an alias was replaced. Existing handlers retain
-their documented role/argument/world checks. The trusted-console entry point is
-unchanged. Native achievement/cheat confirmation remains a separate game gate.
+### Behaviour change: direct commands now need console permission
+
+This is a deliberate tightening. Before the split, core's direct dispatcher
+(`TryExecuteBuiltInCommand`) called the handlers of 37 commands in every game
+state, in a world as well as at the main menu, without the console's validity
+check, so cheat-marked ones ran without `devcommands`. Thirty of them are now in
+Standard (the other seven were the `cli_mwl_*` commands). Standard owns that
+dispatcher, and `ConsoleModuleHost` first applies the registered command's own
+`IsValid`, the check the console uses (including the `AllowOnServerClients`
+waiver on a joined client). With no console yet, cheat, network and server-only
+commands are refused. A refusal is
+`ERROR: code=command_not_allowed ...`. The dispatcher also cannot call a
+retained delegate after an alias was replaced.
+
+These 20 cheat-marked direct commands now need `devcommands` on a host or single
+player game, or `AllowOnServerClients` on a client joined to a dedicated server:
+`cli_aim_at`, `cli_aim_at_nearest_character`, `cli_apply_magic_effect`,
+`cli_destroy_nearby_characters`, `cli_equip_item`, `cli_find_locations`,
+`cli_fire_current_weapon`, `cli_freeze_nearest_character`, `cli_give_item`,
+`cli_goto_location`, `cli_set_env`, `cli_set_nearby_character_health`,
+`cli_set_player_safety`, `cli_set_tod`, `cli_setup_reload_on_kill_clip`,
+`cli_spawn_at`, `cli_spawn_frozen`, `cli_spawn_near`, `cli_weapon_state` and
+`cli_zdo_resend_destroyed`. The other ten direct commands (character selection
+and creation, connection, host-world and `cli_logout_save`) are not cheat-marked,
+so `devcommands` does not affect them.
+
+Migration: enable `devcommands` once per game session before a script or plan
+uses these commands (a plan can run it as a setup step), then check a command's
+reply rather than toggling again. `cli_run_trusted` is unchanged and does not
+waive the cheat check. Existing handlers retain their documented
+role/argument/world checks. Native achievement/cheat confirmation remains a
+separate game gate.
 
 Retiring a pack removes aliases immediately. Tracked asynchronous work retains
 its owner until it settles; old and new instances cannot overlap under that ID.
@@ -81,8 +114,8 @@ through their owner, not on the plugin instance directly.
 ## Build and local checks
 
 ```sh
+# Includes CommandPackInventoryTests (command inventory, pack boundaries and project settings):
 dotnet test Tests/RequestBroker.Tests/RequestBroker.Tests.csproj -c Release
-python3 scripts/check-command-packs.py
 # These use YOUR existing game assembly references in Environment.props:
 dotnet build Packs/Standard/Valheim.Cli.Standard.csproj -c Release
 dotnet build Packs/WorldTools/Valheim.Cli.WorldTools.csproj -c Release
@@ -92,9 +125,8 @@ dotnet build Packs/Reflection/Valheim.Cli.Reflection.csproj -c Release
 
 All packs retain `AllowUnsafeBlocks`, matching core: Mono needs the emitted verification attributes when running code compiled against publicized game references. Without it the assemblies load but private-member paths (for example character selection and save completion) fail only when invoked. The inventory check enforces this build setting. This does not change command permissions.
 
-The integration packager puts core in `plugin/` and optional DLLs in separate
-`packs/` subdirectories. The portable executable and `Valheim.Cli.Testing` package
-remain ValheimCLI-owned; ValheimTesting is not bundled back into core.
+The portable executable and `Valheim.Cli.Testing` package remain
+ValheimCLI-owned; ValheimTesting is not bundled back into core.
 
 Reflection is independently optional: inspection/terrain consumers need not install
 `cli_call`. Its existing cheat gate, overload selection and live-assembly lookup
@@ -128,7 +160,7 @@ World Tools exposes `valheim.world/terrain-grid <x> <z> <spacing> <countX> <coun
 
 Generator samples include height, biome and river facts. Loaded-ground samples read only an existing heightmap; biome and river fields are explicitly absent. No zones are generated and there is no fallback between layers. Capture is a sequence of observations, not an atomic snapshot of mutable ground. Cancellation never returns a partial grid as complete.
 
-[TerrainCapture](https://github.com/tvongaza/ValheimTesting/blob/main/examples/TerrainCapture/README.md) validates and saves this input for exact replay. A captured result is useful input, not an independent expected answer. Local loop/import tests and compilation against game assemblies pass; this new capability has not yet been exercised in Valheim.
+[TerrainCapture](https://github.com/tvongaza/ValheimTesting/blob/main/examples/TerrainCapture/README.md) validates and saves this input for exact replay. A captured result is useful input, not an independent expected answer. Local loop/import tests and compilation against game assemblies pass, and the [native follow-up](#native-follow-up--27-september-2026) exercised capture, replay and the unloaded-ground refusal in Valheim.
 
 ## Typed session lifecycle
 
@@ -136,6 +168,10 @@ Standard owns `valheim.session/state`, `join`, `leave` and `save`. No extra pack
 
 `join <host:port> <existing-character> [password-environment-variable]` requires the client menu and waits for a connected local player. The optional name resolves inside the game's process; the password itself never enters the command/result. Omission clears a stale password. A previous network instance's rejection is not attributed to the new join. `leave` saves the local character and waits for the menu; it does not confirm a remote server's world save. Both use the existing permission checks and shared mutation gate.
 
-`save [timeout-seconds]` is server-only (1–600 seconds, default 120). It shares the `cli_save` loop, checks vanilla save refusals, waits for any earlier save, issues once, then requires the new save thread to finish and the save counter to advance in the same world. This is stronger than accepting a `Saving..` message. A timeout or cancellation does not stop an issued native operation: its owner and gate remain until the operation settles. Read-only state remains available. Unprovable transitions can require a controlled restart.
+`save [timeout-seconds]` is server-only (1–600 seconds, default 120). It shares the `cli_save` loop, checks vanilla save refusals, waits for any earlier save, issues once, then requires the new save thread to finish and the save counter to advance in the same world. This is stronger than accepting a `Saving..` message. The timeout bounds only the wait for an earlier save: if that save is still writing, the reply is `save_timeout` and nothing was issued. Once issued, the reply, owner and gate are held until the write ends, so the reply reports the real outcome (`saved: true`, or `save_failed`), with `pastTimeout: true` when the write outlived the timeout. Give the client request a timeout longer than the save can take. Cancellation does not stop an issued native operation: its owner and gate remain until the operation settles. Read-only state remains available. Unprovable transitions can require a controlled restart.
 
-The external [SessionControl example](https://github.com/tvongaza/ValheimTesting/blob/main/examples/SessionControl/README.md) demonstrates exact-once actions and mandatory repinning after a transition, including failed or ambiguous attempts. Local policy/lifecycle tests and compilation against real game references pass. Native checks of this new structured surface remain pending; older text-command smoke checks do not establish them.
+The external [SessionControl example](https://github.com/tvongaza/ValheimTesting/blob/main/examples/SessionControl/README.md) demonstrates exact-once actions and mandatory repinning after a transition, including failed or ambiguous attempts. Local policy/lifecycle tests and compilation against real game references pass, and the [native follow-up](#native-follow-up--27-september-2026) exercised structured join, leave and save; older text-command smoke checks do not establish them. The later change that follows a save past its timeout (`pastTimeout`) has local tests only.
+
+## Native follow-up — 27 September 2026
+
+The current four-pack build passed the [bounded strict capability campaign](https://github.com/tvongaza/ValheimTesting/blob/main/docs/native-validation-20260927.md): strict A/B reload/removal, terrain capture/replay and unloaded refusal, structured join/leave/save, stale-password recovery, and controlled mutation draining during owner replacement. Per-command pins and the persistent dispatch guard stayed enabled. A wrong core hash blocked logout without leaving the world. The 12-second drain fixture proves native scheduling and owner/gate lifetime for a controlled effect; it is not a claim that every native save/join cancellation case was exercised. No production CLI change was needed in this campaign.

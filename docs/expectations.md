@@ -137,9 +137,11 @@ Snapshot once, from a setup you know is good, and check every run of a plan
 against it:
 
 ```bash
-examples/pin-mods.sh snapshot pins.txt              # once: valheim-cli manifest --write pins.txt
+valheim-cli manifest --write pins.txt               # once
 valheim-cli --expect-strict pins.txt --test plan.yaml
 ```
+
+[ValheimTesting's `tools/dev-loop`](https://github.com/tvongaza/ValheimTesting/tree/main/tools/dev-loop) wraps this in `pin-mods.sh` (macOS/Linux) and `pin-mods.ps1` (Windows PowerShell).
 
 The check runs once, when the game first answers and before the first step;
 with `--launch`, that is when the launched game's ValheimCLI server is up.
@@ -179,7 +181,7 @@ on the command line is relative to the working directory.
 ## Standing expectations
 
 Set a file in `BepInEx/config/valheimCLI.valheimCLI.cfg` and the game checks
-it before every command sent through the ValheimCLI:
+it before every command sent through ValheimCLI:
 
 ```ini
 [Expectations]
@@ -247,7 +249,7 @@ A bug report says exactly what ran: ask for the output of
 `valheim-cli manifest --with-world`, which is also a file the maintainer can
 check a local game against.
 
-See `examples/pin-mods.sh` for snapshot-and-check in one script.
+See `pin-mods.sh` (macOS/Linux) or `pin-mods.ps1` (Windows PowerShell) in [ValheimTesting's `tools/dev-loop`](https://github.com/tvongaza/ValheimTesting/tree/main/tools/dev-loop) for snapshot-and-check in one script.
 
 ## World files hash
 
@@ -264,14 +266,8 @@ The game takes it just before it loads the world, so it is the saved state the
 world was loaded from. Backups the game keeps elsewhere in `worlds_local` are
 not included.
 
-The same in Python:
-
-```bash
-python3 -c 'import hashlib,os,sys;r=sys.argv[1];print(hashlib.md5("\n".join(sorted(os.path.relpath(os.path.join(d,f),r).replace(os.sep,"/")+":"+hashlib.md5(open(os.path.join(d,f),"rb").read()).hexdigest() for d,_,fs in os.walk(r) for f in fs)).encode()).hexdigest())' "/path/to/worlds_local/Dev"
-```
-
-And in a shell (Linux `md5sum`; on macOS replace `md5sum | cut -d" " -f1` with
-`md5 -q`):
+The same in a shell (Linux `md5sum`; on macOS replace `md5sum | cut -d" " -f1`
+with `md5 -q`):
 
 ```bash
 cd "/path/to/worlds_local/Dev" && printf %s "$(find . -type f | while IFS= read -r f; do printf '%s:%s\n' "${f#./}" "$(md5sum < "$f" | cut -d" " -f1)"; done | LC_ALL=C sort)" | md5sum | cut -d" " -f1
@@ -279,3 +275,20 @@ cd "/path/to/worlds_local/Dev" && printf %s "$(find . -type f | while IFS= read 
 
 `examples/world-hash.sh` wraps this for either system and can compare the
 result with a running game's `cli_world`.
+
+Or, where Python is already installed (optional; nothing in the toolkit needs it):
+
+```bash
+python3 -c 'import hashlib,os,sys;r=sys.argv[1];print(hashlib.md5("\n".join(sorted(os.path.relpath(os.path.join(d,f),r).replace(os.sep,"/")+":"+hashlib.md5(open(os.path.join(d,f),"rb").read()).hexdigest() for d,_,fs in os.walk(r) for f in fs)).encode()).hexdigest())' "/path/to/worlds_local/Dev"
+```
+
+
+## Defaults in testing helpers
+
+Use `--expect-strict <file>` for executable calls that measure or mutate a test fixture; the equivalent in-game command is `cli_expect --strict ...`. ValheimTesting's `pin-mods.sh check` and `run`, and their PowerShell twins in `pin-mods.ps1`, use strict mode by default. Snapshot creation remains an explicit read-only setup operation; review its output before accepting it as your test expectation.
+
+ValheimTesting's `dev-loop.sh` and its PowerShell twin `dev-loop.ps1` require `VALHEIM_EXPECTATIONS` when a plan is supplied and pass `--expect-strict` a copy of it whose pin for the mod is the md5 of the DLL just built and deployed. The tracked smoke/spawn plans also request strict pins. Missing or mismatched pins stop the test instead of silently running unpinned. Launch-only/status checks are bootstrap operations, not test acceptance.
+
+External [ValheimTesting](https://github.com/tvongaza/ValheimTesting) actors recheck strict pins before every command; their reload tests explicitly update only the candidate plugin hash from the artifact being installed. The preflight and action remain separate requests; the existing server-side expectation guard can enforce the file again at dispatch.
+
+These helper scripts, and their inert-tool tests (bash on macOS and Linux, PowerShell on Windows), moved to [ValheimTesting's `tools/dev-loop`](https://github.com/tvongaza/ValheimTesting/tree/main/tools/dev-loop) on 28 September 2026.

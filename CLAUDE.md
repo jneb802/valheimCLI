@@ -48,7 +48,7 @@ CLI (valheim-cli)  <--TCP:5555-->  Mod (valheimCLI.dll)  -->  Console.TryRunComm
 
 ## Testing
 
-Start with local coverage: `dotnet test Tests/RequestBroker.Tests/RequestBroker.Tests.csproj` and `python3 scripts/check-command-packs.py`. See [AGENTS.md](AGENTS.md) for the shared test pyramid and examples. Game-side builds need the local compile references; external library tests do not need Valheim.
+Start with local coverage: `dotnet test Tests/RequestBroker.Tests/RequestBroker.Tests.csproj`, which includes the command-pack inventory checks (`CommandPackInventoryTests`). The developer-loop scripts (`dev-loop`, `pin-mods`, `log-summary`) and their tests live in [ValheimTesting's `tools/dev-loop`](https://github.com/tvongaza/ValheimTesting/tree/main/tools/dev-loop), not here. See [AGENTS.md](AGENTS.md) for the shared test pyramid and examples. Game-side builds need the local compile references; external library tests do not need Valheim.
 
 For an authorized disposable native fixture, use matching core and [optional command packs](docs/command-packs.md). Core alone no longer exposes general gameplay commands. Keep core in plugins, use ScriptEngine only for optional packs/adapters, verify strict pins and world readiness, and never test against a server or save that people play on. The external ValheimCLI output is under `CLI/bin/Debug/net9.0/`.
 

@@ -171,8 +171,10 @@ was written. The answer:
 - `OK: SAVE ms=<ms> world=<name> saveNumber=<n> dir=<world save folder>`
 - `ERROR: code=save_failed ...`: the save ended without moving the save
   number (the game log has `World save (5/5) FAILED` or `Error saving world`).
-- `ERROR: code=save_timeout ...`: still writing at the deadline; it finishes
-  on its own, and the next `cli_save` waits for it before saving again.
+- `ERROR: code=save_timeout ...`: an earlier save (an autosave) was still
+  writing at the deadline, so no new save was started. The deadline does not
+  cut short a save this command started: the answer waits for that write to
+  end and reports its real outcome, even when that is after the deadline.
 - `ERROR: code=save_skipped reason=...`: the game would not start a save
   (`session_flag`, `load_error`, `zone_system`, `dungeon_db`, `low_disk`);
   nothing was written.
@@ -180,7 +182,7 @@ was written. The answer:
   with no world loaded.
 
 A save that is already running (an autosave) is waited for first. Give the
-client a `--timeout` longer than the save's own, or the request times out
+client a `--timeout` longer than the save can take, or the request times out
 first (`command_timeout`, while the save carries on). Prefer it to `save`
 followed by watching the log for its last line: a watcher that starts after
 the save has finished waits out its timeout. On a dedicated server the
@@ -322,11 +324,12 @@ Configure hosts, executable paths, and game paths with environment variables or 
 
 ## Examples
 
-[`examples/`](examples/README.md) holds small scripts for a mod's development
-loop: build, install, launch and run a plan in one step; wait for a log line;
-summarise a run's warnings and errors; tunnel to a game on another machine.
-They run against the local game by default and against a remote one through
-the tunnel.
+[`examples/`](examples/README.md) holds small scripts around a running game:
+wait for a log line, reload a plugin, sample values, tunnel to a game on
+another machine. They run against the local game by default and against a
+remote one through the tunnel. The build-install-launch-run-a-plan loop, pin
+snapshots and the log summary live in [ValheimTesting's
+`tools/dev-loop`](https://github.com/tvongaza/ValheimTesting/tree/main/tools/dev-loop).
 
 ## Config
 

@@ -17,6 +17,9 @@ namespace valheimCLI
         /// <summary>The save thread has ended.</summary>
         public bool Finished;
 
+        /// <summary>The save thread was still writing when the timeout passed.</summary>
+        public bool PastTimeout;
+
         public uint SaveNumberBefore;
         public uint SaveNumberAfter;
         public long Milliseconds;

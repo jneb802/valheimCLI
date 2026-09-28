@@ -294,3 +294,17 @@ The reply is `OK: fly=True changed=True`, read back from the player. `cli_fly`,
 are cheat-marked; `cli_build_snap_points` only reads. On a dedicated-server
 client they need `AllowOnServerClients` like the other test actions; they are
 covered by it because this plugin registers them.
+
+## Confirm a world save
+
+`cli_save [timeout=120]` and the Standard pack's `valheim.session/save
+[timeout-seconds]` share one loop. It waits for an earlier save (an autosave)
+first; if that one is still writing when the timeout passes, the reply is
+`save_timeout` and no new save was issued. Once this request has issued its
+save, the timeout no longer decides the reply: the reply, the shared mutation
+gate and the pack owner are held until the write ends, and the reply then
+reports what happened: saved (the save number moved on) or `save_failed`.
+`valheim.session/save` adds `pastTimeout: true` when the write outlived the
+timeout; `cli_save`'s `ms=` shows the same. Give the client request a timeout
+longer than the save can take; if the client gives up first it gets
+`command_timeout` while the save carries on, and a later save waits for it.

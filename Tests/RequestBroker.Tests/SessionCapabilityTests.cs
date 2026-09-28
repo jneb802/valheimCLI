@@ -46,12 +46,34 @@ public class SessionCapabilityTests
         var run=SessionSave.Run(host,new SaveOutcome(),()=>0,()=>!change,_=>{},_=>Assert.Fail("result"),(c,m)=>error=c);
         Assert.False(run.MoveNext());Assert.Equal(change?"world_changed":"cancelled",error);Assert.Equal(0,host.Starts);
     }
-    [Fact] public void TimedOutSaveRetainsUntilWriterReallyStops()
+    [Fact] public void SaveOutlivingItsTimeoutIsFollowedAndReportsTheRealOutcome()
     {
-        var host=new SaveHost();double now=0;Func<bool>? quiet=null;SaveOutcome? result=null;
-        var run=SessionSave.Run(host,new SaveOutcome{TimeoutSeconds=1},()=>now,()=>false,p=>quiet=p,r=>result=r,(c,m)=>Assert.Fail(c));
-        Assert.True(run.MoveNext());now=2;Assert.False(run.MoveNext());Assert.False(result!.Saved);Assert.False(quiet!());
-        host.Writing=false;Assert.True(quiet());Assert.Equal(1,host.Starts);
+        SaveHost host=new SaveHost();double now=0;Func<bool>? quiet=null;SaveOutcome? result=null;
+        IEnumerator run=SessionSave.Run(host,new SaveOutcome{TimeoutSeconds=1},()=>now,()=>false,p=>quiet=p,r=>result=r,(c,m)=>Assert.Fail(c));
+        Assert.True(run.MoveNext());now=2;Assert.True(run.MoveNext());Assert.Null(result);Assert.False(quiet!());
+        host.Writing=false;host.SaveNumber=9;Assert.False(run.MoveNext());
+        Assert.True(result!.Saved);Assert.True(result.Finished);Assert.True(result.PastTimeout);Assert.Equal(2000L,result.Milliseconds);
+        Assert.True(quiet());Assert.Equal(1,host.Starts);
+    }
+    [Fact] public void SaveOutlivingItsTimeoutThatFailsReportsSaveFailedNotTimeout()
+    {
+        SaveHost host=new SaveHost();double now=0;SaveOutcome? result=null;
+        IEnumerator run=SessionSave.Run(host,new SaveOutcome{TimeoutSeconds=1},()=>now,()=>false,_=>{},r=>result=r,(c,m)=>Assert.Fail(c));
+        Assert.True(run.MoveNext());now=2;Assert.True(run.MoveNext());host.Writing=false;Assert.False(run.MoveNext());
+        Assert.False(result!.Saved);Assert.True(result.PastTimeout);Assert.StartsWith("ERROR: code=save_failed ",result.Reply());
+    }
+    [Fact] public void EarlierSaveStillWritingAtTheTimeoutIssuesNothing()
+    {
+        SaveHost host=new SaveHost{IsSaving=true};double now=0;string? error=null;
+        IEnumerator run=SessionSave.Run(host,new SaveOutcome{TimeoutSeconds=1},()=>now,()=>false,_=>Assert.Fail("retained without write"),_=>Assert.Fail("result"),(c,m)=>error=c);
+        Assert.True(run.MoveNext());now=2;Assert.False(run.MoveNext());Assert.Equal("save_timeout",error);Assert.Equal(0,host.Starts);
+    }
+    [Fact] public void CancelledWhileFollowingAWriteReportsCancellationAndKeepsTheHold()
+    {
+        SaveHost host=new SaveHost();double now=0;bool cancelled=false;Func<bool>? quiet=null;string? error=null;
+        IEnumerator run=SessionSave.Run(host,new SaveOutcome{TimeoutSeconds=1},()=>now,()=>cancelled,p=>quiet=p,_=>Assert.Fail("result"),(c,m)=>error=c);
+        Assert.True(run.MoveNext());now=2;Assert.True(run.MoveNext());cancelled=true;Assert.False(run.MoveNext());
+        Assert.Equal("cancelled",error);Assert.False(quiet!());host.Writing=false;Assert.True(quiet());
     }
     [Fact] public void TransitionCancellationRetainsIssuedEffectAndDoesNotRetry()
     {

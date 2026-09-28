@@ -127,6 +127,11 @@
   "cli_build_snap_points": "Source/BuildCommands.cs",
   "cli_build_place_snapped": "Source/BuildCommands.cs",
   "cli_piece_support_settle": "Source/BuildCommands.cs",
-  "cli_extensions": "Source/Extensions/ExtensionHost.cs",
-  "cli_extension": "Source/Extensions/ExtensionHost.cs"
+  "cli_mwl_port_status": "Source/CustomCommands.cs",
+  "cli_mwl_goto_port": "Source/CustomCommands.cs",
+  "cli_mwl_clear_shipments": "Source/CustomCommands.cs",
+  "cli_mwl_port_payment_regression": "Source/CustomCommands.cs",
+  "cli_mwl_port_delivery_regression": "Source/CustomCommands.cs",
+  "cli_mwl_port_ownership_seed": "Source/CustomCommands.cs",
+  "cli_mwl_port_ownership_check": "Source/CustomCommands.cs"
 }

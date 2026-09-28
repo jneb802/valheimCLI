@@ -1,6 +1,6 @@
 # Example Test Plan: Creature Spawning
-# Run with: valheim-cli --test tests/example-spawn.yaml
-# Or with auto-launch: valheim-cli --test tests/example-spawn.yaml --launch
+# Run with: valheim-cli --expect-strict pins.txt --test tests/example-spawn.yaml
+# Or with auto-launch: valheim-cli --expect-strict pins.txt --test tests/example-spawn.yaml --launch
 
 name: Creature Spawning Tests
 description: Tests basic creature spawning functionality
@@ -12,7 +12,11 @@ description: Tests basic creature spawning functionality
 #   launchTimeout: 120s    # Wait up to 2 min for game ready
 #   stopAfter: false       # Keep game running after tests
 #   expect: pins.txt       # Game must match this file before the first step (docs/expectations.md)
-#   expectStrict: false    # Every loaded plugin must be listed in it
+#   expectStrict: true    # Every loaded plugin must be listed in it
+
+game:
+  expect: pins.txt        # Supply exact fixture world/plugin pins (or override with --expect-strict)
+  expectStrict: true
 
 settings:
   timeout: 30s

@@ -84,10 +84,13 @@ namespace valheimCLI
             var outcome = new SaveOutcome { TimeoutSeconds = timeout, World = world.m_name };
             var run = SessionSave.Run(new NativeSessionSave(net, world, game), outcome, () => clock.Elapsed.TotalSeconds,
                 () => context.Cancelled, context.WaitForQuiescence, result => {
+                    // The reply is held until the write ends, so Finished is known here; a write that
+                    // outlived the timeout reports its real outcome with pastTimeout=true.
                     if (!result.Saved) { context.Fail(result.Skipped.Length > 0 || !result.Started ? "save_skipped" : !result.Finished ? "save_timeout" : "save_failed", result.Reply()); return; }
                     context.Succeed(new Dictionary<string, object?> { ["source"] = "session-save", ["complete"] = true,
                         ["worldUid"] = world.m_uid.ToString(System.Globalization.CultureInfo.InvariantCulture), ["saved"] = true,
-                        ["before"] = result.SaveNumberBefore, ["after"] = result.SaveNumberAfter, ["milliseconds"] = result.Milliseconds });
+                        ["before"] = result.SaveNumberBefore, ["after"] = result.SaveNumberAfter, ["milliseconds"] = result.Milliseconds,
+                        ["pastTimeout"] = result.PastTimeout });
                 }, context.Fail);
             while (run.MoveNext()) yield return run.Current;
         }

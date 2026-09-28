@@ -1,8 +1,13 @@
 # A smoke test for any mod: does the game still reach a playable world with the
 # mod installed, and does the mod answer?
 #
-#   valheim-cli --test examples/smoke-plan.yaml --launch
-#   examples/dev-loop.sh MyMod.csproj examples/smoke-plan.yaml
+#   valheim-cli --expect-strict pins.txt --test examples/smoke-plan.yaml --launch
+#
+# Or build, deploy and run it in one step with ValheimTesting's dev-loop scripts
+# (https://github.com/tvongaza/ValheimTesting, tools/dev-loop):
+#   VALHEIM_EXPECTATIONS=pins.txt tools/dev-loop/dev-loop.sh MyMod.csproj examples/smoke-plan.yaml
+#   (Windows PowerShell: $env:VALHEIM_EXPECTATIONS = 'pins.txt', then
+#    powershell -ExecutionPolicy Bypass -File tools\dev-loop\dev-loop.ps1 MyMod.csproj examples\smoke-plan.yaml)
 #
 # It makes a throwaway local character and world (the names below), so it never
 # touches your real saves. Replace the "Your mod answers" step with one of your
@@ -13,6 +18,8 @@ name: Mod smoke test
 description: Reach a fresh local world with the mod loaded, check the player and one of the mod's commands, take a screenshot.
 
 game:
+  expect: pins.txt        # Supply your reviewed plugin pins; CLI override above is absolute
+  expectStrict: true
   launch: false          # --launch starts Valheim first
   launchTimeout: 300s
   stopAfter: false       # --stop-after quits the game after a passing run
