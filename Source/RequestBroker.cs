@@ -160,7 +160,7 @@ namespace valheimCLI
                     _lastDroppedFrom = id;
                     return;
                 }
-                if (id != 0 && _output.TryGetValue(id, out List<string> lines))
+                if (id != 0 && _output.TryGetValue(id, out var lines))
                 {
                     lines.Add(line);
                     return;
@@ -251,7 +251,7 @@ namespace valheimCLI
             lock (_lock)
             {
                 Response response = new Response { Id = id, Completed = _completed.Contains(id) };
-                if (_output.TryGetValue(id, out List<string> lines))
+                if (_output.TryGetValue(id, out var lines))
                 {
                     response.Lines.AddRange(lines);
                     _output.Remove(id);

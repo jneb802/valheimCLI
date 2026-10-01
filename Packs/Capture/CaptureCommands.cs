@@ -13,7 +13,7 @@ namespace valheimCLI
 
         private static void Restore(ClutterSystem clutter)
         {
-            if (!Originals.TryGetValue(clutter, out Dictionary<ClutterSystem.Clutter, bool> saved)) return;
+            if (!Originals.TryGetValue(clutter, out var saved)) return;
             foreach (var entry in saved) entry.Key.m_enabled = entry.Value;
             Originals.Remove(clutter);
             Owners.RemoveAll(owner => !owner.TryGetTarget(out var target) || ReferenceEquals(target, clutter));
@@ -51,7 +51,7 @@ namespace valheimCLI
                 bool on = args[1] == "on";
                 if (!on)
                 {
-                    if (!Originals.TryGetValue(clutter, out Dictionary<ClutterSystem.Clutter, bool> saved))
+                    if (!Originals.TryGetValue(clutter, out var saved))
                     {
                         saved = Originals.GetOrCreateValue(clutter);
                         Owners.RemoveAll(owner => !owner.TryGetTarget(out var target) || target == null);
