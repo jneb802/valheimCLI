@@ -384,7 +384,7 @@ public class ValheimClient : IDisposable
 
                     for (int i = 0; i < count; i++)
                     {
-                        string? outputLine = _reader.ReadLine();
+                        string? outputLine = _reader!.ReadLine();
                         if (outputLine == null)
                             return ProtocolError(result, "connection closed inside the command response");
                         result.Add(outputLine);
@@ -392,7 +392,7 @@ public class ValheimClient : IDisposable
 
                     // A multiline entry from an older server can put real
                     // output here. Never silently consume it as the terminator.
-                    if (_reader.ReadLine() != "END_OUTPUT")
+                    if (_reader!.ReadLine() != "END_OUTPUT")
                         return ProtocolError(result, "expected END_OUTPUT after the declared line count");
                     break;
                 }
