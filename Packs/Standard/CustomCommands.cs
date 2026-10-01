@@ -12,7 +12,6 @@ namespace valheimCLI
 {
     public static class CustomCommands
     {
-        private static readonly FieldInfo? PlayerInstanceField = typeof(FejdStartup).GetField("m_playerInstance", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo? ProfilesField = typeof(FejdStartup).GetField("m_profiles", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo? ProfileIndexField = typeof(FejdStartup).GetField("m_profileIndex", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo? WorldField = typeof(FejdStartup).GetField("m_world", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -1483,55 +1482,72 @@ namespace valheimCLI
                 return;
             }
 
-            GameObject? playerInstance = PlayerInstanceField?.GetValue(fejd) as GameObject;
-            Player? previewPlayer = playerInstance != null ? playerInstance.GetComponent<Player>() : null;
-            if (previewPlayer == null)
-            {
-                addOutput("ERROR: Character preview player is not available");
-                return;
-            }
-
             string filename = characterName.ToLowerInvariant();
             FileHelpers.FileSource fileSource = forceLocal ? FileHelpers.FileSource.Local : FileHelpers.FileSource.Auto;
-            if (PlayerProfile.HaveProfile(filename))
+            bool exists = PlayerProfile.HaveProfile(filename);
+            if (exists)
             {
                 if (!replace)
                 {
                     addOutput($"ERROR: Character '{characterName}' already exists. Use --replace to recreate it.");
                     return;
                 }
-
-                PlayerProfile.RemoveProfile(filename);
-                SaveSystem.InvalidateCache();
             }
 
-            PlayerProfile profile = new PlayerProfile(filename, fileSource);
-            if (forceLocal)
+            // The selected character is also the menu's preview player. Vanilla
+            // resets that preview in OnCharacterNew before saving a new profile;
+            // reusing it copies the selected character's inventory and mod data.
+            fejd.OnCharacterNew();
+            Player? previewPlayer = fejd.GetPreviewPlayer();
+            if (previewPlayer == null)
             {
-                profile.m_fileSource = FileHelpers.FileSource.Local;
-            }
-
-            // A new profile is marked for the first-spawn intro: the game
-            // queues it when the world starts and spawns the player on a
-            // valkyrie that holds it (and refuses teleports) until someone
-            // dismisses the text. Saved as already spawned once, the character
-            // lands at the start like a returning one; the game clears this
-            // flag itself after the first spawn.
-            if (skipIntro)
-            {
-                profile.m_firstSpawn = false;
-            }
-
-            previewPlayer.GiveDefaultItems();
-            profile.SetName(characterName);
-            profile.SavePlayerData(previewPlayer);
-            if (!profile.Save())
-            {
-                addOutput($"ERROR: Failed to save character '{characterName}'");
+                fejd.OnNewCharacterCancel();
+                addOutput("ERROR: Fresh character preview player is not available");
                 return;
             }
 
-            SaveSystem.InvalidateCache();
+            PlayerProfile profile;
+            try
+            {
+                if (exists && replace)
+                {
+                    PlayerProfile.RemoveProfile(filename);
+                    SaveSystem.InvalidateCache();
+                }
+
+                profile = new PlayerProfile(filename, fileSource);
+                if (forceLocal)
+                {
+                    profile.m_fileSource = FileHelpers.FileSource.Local;
+                }
+
+                // A new profile is marked for the first-spawn intro: the game
+                // queues it when the world starts and spawns the player on a
+                // valkyrie that holds it (and refuses teleports) until someone
+                // dismisses the text. Saved as already spawned once, the character
+                // lands at the start like a returning one; the game clears this
+                // flag itself after the first spawn.
+                if (skipIntro)
+                {
+                    profile.m_firstSpawn = false;
+                }
+
+                previewPlayer.GiveDefaultItems();
+                profile.SetName(characterName);
+                profile.SavePlayerData(previewPlayer);
+                if (!profile.Save())
+                {
+                    addOutput($"ERROR: Failed to save character '{characterName}'");
+                    return;
+                }
+
+                SaveSystem.InvalidateCache();
+            }
+            finally
+            {
+                fejd.OnNewCharacterCancel();
+            }
+
             ProfilesField?.SetValue(fejd, null);
             SetSelectedProfileMethod?.Invoke(fejd, new object[] { filename });
             PlatformPrefs.SetString("profile", filename);
