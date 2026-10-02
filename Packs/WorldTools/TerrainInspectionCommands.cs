@@ -39,6 +39,11 @@ namespace valheimCLI
                 AreaReady(args, args.Context.AddString);
             });
 
+            new Terminal.ConsoleCommand("cli_terrain_modifiers_at", "Read the game's loaded terrain modifiers in application order near a point, including sort keys and saved identity: cli_terrain_modifiers_at <x> <z> [radius=30]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                TerrainModifierInspection.At(args, args.Context.AddString);
+            });
+
             new Terminal.ConsoleCommand("cli_piece_support", "What holds each build piece near a point up, as the game currently has it: the support it has, the most and least it can have, and whether the game has computed it yet: cli_piece_support <x> <z> [radius=30] [nameFilter]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 PieceSupport(args, args.Context.AddString);
