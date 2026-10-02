@@ -24,6 +24,8 @@ public class CommandPackInventoryTests
 
     // New in core with the extension API.
     private static readonly string[] Added = { "cli_extension", "cli_extensions" };
+    // New commands in optional packs, beyond the preserved pre-split inventory.
+    private static readonly string[] NewPackCommands = { "cli_generator_at" };
 
     private static readonly string[] Packs = { "Standard", "WorldTools", "Capture", "Reflection" };
 
@@ -69,13 +71,14 @@ public class CommandPackInventoryTests
         var expected = new HashSet<string>(before, StringComparer.Ordinal);
         expected.ExceptWith(Removed);
         expected.UnionWith(Added);
+        expected.UnionWith(NewPackCommands);
         var difference = new HashSet<string>(expected, StringComparer.Ordinal);
         difference.SymmetricExceptWith(found.Keys);
         Assert.True(difference.Count == 0,
             "Lost/added commands: " + string.Join(", ", difference.OrderBy(name => name, StringComparer.Ordinal)));
 
         _output.WriteLine($"PASS: {before.Count} commands before the split; {before.Count - Removed.Length} kept exactly once, " +
-                          $"{Removed.Length} cli_mwl_* removed, {Added.Length} added ({found.Count} now).");
+                          $"{Removed.Length} cli_mwl_* removed, {Added.Length + NewPackCommands.Length} added ({found.Count} now).");
         foreach (string folder in FolderOfDll.Values)
             _output.WriteLine($"{folder} {CountIn(found, folder)}");
     }

@@ -7,7 +7,7 @@ There is no second DLL loader or runtime compiler.
 | Install | Owns | Console commands |
 |---|---|---:|
 | `valheimCLI.dll` core 1.1 | Socket/broker, main-thread dispatch, permissions, expectations, build/reload diagnostics, async completion, shared operation gate and extension ownership | 8 |
-| `Valheim.Cli.Standard.dll` | Characters/joins, player/item/actor actions, building/carts, routes, screenshots/map exports, async waits/save and existing general gameplay helpers | 106 |
+| `Valheim.Cli.Standard.dll` | Characters/joins, player/item/actor actions, building/carts, routes, screenshots/map exports, generator point probes, async waits/save and existing general gameplay helpers | 107 |
 | `Valheim.Cli.WorldTools.dll` | World/ZDO/container census, terrain/rock inspection and actions, structured terrain/collider/player-support observations | 14 |
 | `Valheim.Cli.Reflection.dll` | Optional `cli_call` reflection over game and mod members | 1 |
 | `Valheim.Cli.Capture.dll` | Reversible grass/clutter visibility override | 1 |
@@ -15,7 +15,8 @@ There is no second DLL loader or runtime compiler.
 Before the split, core registered 135 console commands. The seven `cli_mwl_*`
 port commands left core (see below); the other 128 keep their names and are each
 registered exactly once, in core or one pack. Core adds `cli_extension` and
-`cli_extensions`, which are two of its eight, for 130 in total.
+`cli_extensions`, which are two of its eight; Standard adds the read-only
+`cli_generator_at` point probe, for 131 in total.
 `docs/command-inventory-before.json` records the 135;
 `CommandPackInventoryTests` in `Tests/RequestBroker.Tests` checks the difference
 and the counts in the table above. Core alone

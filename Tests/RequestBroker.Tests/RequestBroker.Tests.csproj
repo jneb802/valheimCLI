@@ -56,6 +56,7 @@
     <Compile Include="../../CLI/Testing/SilentReply.cs" Link="CLI/SilentReply.cs" />
     <Compile Include="../../Packs/Standard/WorldFixturePolicy.cs" Link="Source/WorldFixturePolicy.cs" />
     <Compile Include="../../Packs/Standard/WorldDumpGrid.cs" Link="Source/WorldDumpGrid.cs" />
+    <Compile Include="../../Packs/Standard/GeneratorPointRequest.cs" Link="Source/GeneratorPointRequest.cs" />
   </ItemGroup>
 
   <ItemGroup>

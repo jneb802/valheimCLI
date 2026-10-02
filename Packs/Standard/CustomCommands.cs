@@ -514,6 +514,17 @@ namespace valheimCLI
                 args.Context.AddString($"OK: screenshot queued path={path} size={Screen.width * supersize}x{Screen.height * supersize}");
             }, isCheat: true);
 
+            new Terminal.ConsoleCommand("cli_generator_at", "Read the world generator at up to 16 points without creating a dump: cli_generator_at <x> <z> [<x> <z> ...]. Returns height, biome, river, river width and unitless base height at each point", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                string[] words = Enumerable.Range(0, args.Length).Select(index => args[index]).ToArray();
+                if (!GeneratorPointRequest.TryParse(words, out List<float[]> points))
+                {
+                    args.Context.AddString("Usage: cli_generator_at <x> <z> [<x> <z> ...] (1..16 points inside the world square)");
+                    return;
+                }
+                GeneratorAt(points, args.Context.AddString);
+            }, isCheat: true);
+
             new Terminal.ConsoleCommand("cli_world_dump", "Sample the world generator to CSV for offline analysis: cli_world_dump [step=50] [dir] [--window cx,cz,half]. Writes world.csv (x,z,height,biome,river,river_width,base_height) over the full map plus locations.csv (name,x,z,radius); with --window it writes one window file and no locations. Samples sit on the world lattice (-10000 + i*step), so step 8 lands on the pathfinding cells and step 128 on the island grid", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 const string usage = "Usage: cli_world_dump [step=50] [dir] [--window cx,cz,half]";
@@ -2046,6 +2057,29 @@ namespace valheimCLI
             camera.transform.position = position;
             camera.transform.rotation = rotation;
             addOutput($"OK: freefly camera at {position.x:F1},{position.y:F1},{position.z:F1} yaw={yaw:F1} pitch={pitch:F1}");
+        }
+
+        public static void GeneratorAt(IReadOnlyList<float[]> points, Action<string> addOutput)
+        {
+            WorldGenerator world = WorldGenerator.instance;
+            if (world == null || world.m_world == null || ZoneSystem.instance == null)
+            {
+                addOutput("ERROR: GENERATOR_AT no world loaded");
+                return;
+            }
+            CultureInfo invariant = CultureInfo.InvariantCulture;
+            foreach (float[] point in points)
+            {
+                float x = point[0], z = point[1];
+                float height = world.GetHeight(x, z);
+                Heightmap.Biome biome = world.GetBiome(x, z);
+                world.GetRiverWeight(x, z, out float river, out float riverWidth);
+                float baseHeight = world.GetBaseHeight(x, z, menuTerrain: false);
+                addOutput(string.Format(invariant,
+                    "GENERATOR {0:F1},{1:F1} height={2:F1} biome={3} river={4:F2} river_width={5:F1} base_height={6:F5}",
+                    x, z, height, biome, river, riverWidth, baseHeight));
+            }
+            addOutput(FormattableString.Invariant($"OK: GENERATOR_AT samples={points.Count} world={world.m_world.m_name} uid={world.m_world.m_uid}"));
         }
 
         public static void WorldDump(int step, string? directory, Action<string> addOutput,

@@ -25,7 +25,16 @@ In a loaded world:
 
 ```
 cli_world_dump 8 --window 1000,1000,64
+cli_generator_at 1000 1000 1008 1000
 ```
+
+`cli_generator_at` answers at up to 16 explicit x/z points without writing a
+file. It uses the same generator calls and display precision as the CSV and
+ends with `OK: GENERATOR_AT samples=N world=... uid=...`, so a short independent
+check can compare selected dump nodes without another export and confirm the
+loaded world identity. It is read-only but
+cheat-marked: enable devcommands and use strict plugin/world expectations.
+Its values are generator facts, not loaded terrain or paint.
 
 The optional output directory goes after the step and before `--window`.
 Without a directory, files go below the game's local save directory in
