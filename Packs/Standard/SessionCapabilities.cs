@@ -11,6 +11,7 @@ namespace valheimCLI
     {
         internal static ExtensionRegistration Register(ExtensionRegistry registry) => registry.Register("valheim.session", "0.1.0", 1,
             new ExtensionCommand("state", "Read session facts; mod readiness must be checked separately", State, readOnly: true),
+            new ExtensionCommand("direct-start", "Report support for the password-free startup request file", DirectStart, readOnly: true),
             new ExtensionCommand("join", "Join from menu: <host:port> <character> [password-environment-variable]", Join),
             new ExtensionCommand("leave", "Save the local character and return to the menu", Leave, role: ExtensionRole.Client, needsWorld: true),
             new ExtensionCommand("save", "Confirm a server world save: [timeout-seconds, 1..600]", Save, role: ExtensionRole.Server, needsWorld: true));
@@ -18,6 +19,13 @@ namespace valheimCLI
         private static bool WorldPresent => Game.instance != null && ZNet.World != null && ZoneSystem.instance != null && ZDOMan.instance != null;
         private static bool PlayerReady => Player.m_localPlayer != null && !Player.m_localPlayer.IsTeleporting() && !Player.m_localPlayer.IsDead();
         private static bool ShuttingDown => Game.instance != null && Game.instance.IsShuttingDown();
+        private static IEnumerator DirectStart(ExtensionContext context)
+        {
+            if (context.Arguments.Count != 0) { context.Fail("usage", "direct-start takes no arguments"); yield break; }
+            context.Succeed(new Dictionary<string, object?> { ["source"] = "direct-start", ["complete"] = true,
+                ["supported"] = true, ["claimed"] = Environment.GetEnvironmentVariable(StartupWorldSpec.ClaimedVariable) == "1" });
+            yield break;
+        }
         private static IEnumerator State(ExtensionContext context)
         {
             if (context.Arguments.Count != 0) { context.Fail("usage", "state takes no arguments"); yield break; }

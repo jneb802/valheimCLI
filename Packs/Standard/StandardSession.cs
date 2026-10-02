@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Reflection;
 namespace valheimCLI
 {
@@ -8,9 +9,81 @@ namespace valheimCLI
         private static string? _pendingConnectAddress;
         private static string? _pendingConnectPassword;
         private static bool _autoStartQueuedJoinRequested;
+        private static StartupWorldSpec? _startupWorld;
+        private static bool _startupWorldAttempted;
         private static readonly FieldInfo? QueuedJoinServerField = typeof(FejdStartup).GetField("m_queuedJoinServer", BindingFlags.Instance | BindingFlags.NonPublic);
-        internal static void Initialize() { if (HasStartupJoinArgument()) RequestAutoStartQueuedJoin(); }
-        internal static void Tick() { TryQueuePendingServerConnect(); TryAutoStartQueuedJoin(); }
+        internal static void Initialize()
+        {
+            string? path = Environment.GetEnvironmentVariable(StartupWorldSpec.PathVariable);
+            if (!string.IsNullOrEmpty(path) && Environment.GetEnvironmentVariable(StartupWorldSpec.ClaimedVariable) != "1")
+            {
+                try
+                {
+                    if (HasStartupJoinArgument()) throw new InvalidDataException("Do not combine the startup spec with +connect or +connect_lobby.");
+                    if (!Path.IsPathRooted(path) || new FileInfo(path).Length > 4096)
+                        throw new InvalidDataException("The startup spec must be a small file at an absolute path.");
+                    _startupWorld = StartupWorldSpec.Parse(File.ReadAllText(path));
+                }
+                catch (Exception error) when (error is IOException || error is UnauthorizedAccessException || error is ArgumentException)
+                { valheimCLIPlugin.Log.LogError("Client startup spec refused: " + error.Message); }
+            }
+            else if (HasStartupJoinArgument()) RequestAutoStartQueuedJoin();
+        }
+        internal static void Tick() { TryStartupWorld(); TryQueuePendingServerConnect(); TryAutoStartQueuedJoin(); }
+
+        private static void TryStartupWorld()
+        {
+            StartupWorldSpec? spec = _startupWorld;
+            if (spec == null || _startupWorldAttempted) return;
+            FejdStartup fejd = FejdStartup.instance;
+            // Wait for the menu's profile UI and platform matchmaking to exist; FejdStartup itself appears earlier.
+            if (fejd == null || fejd.m_characterSelectScreen == null ||
+                spec.Mode == "join" && ZSteamMatchmaking.instance == null || Game.instance != null)
+                return;
+            _startupWorldAttempted = true;
+            Environment.SetEnvironmentVariable(StartupWorldSpec.ClaimedVariable, "1"); // A Standard-pack reload cannot issue it twice.
+            try
+            {
+                string selection = "";
+                CustomCommands.SelectCharacter(spec.Character, line => selection = line);
+                if (!selection.StartsWith("OK: Selected character '", StringComparison.Ordinal) ||
+                    !selection.EndsWith(" (" + spec.Character + ", Local)", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("The exact disposable local character was not selected: " + selection);
+
+                if (spec.Devcommands)
+                {
+                    Terminal.m_cheat = true;
+                    Console.instance?.updateCommandList();
+                }
+
+                string password = spec.PasswordVariable == null ? "" : Environment.GetEnvironmentVariable(spec.PasswordVariable) ?? "";
+                if (spec.PasswordVariable != null && password.Length == 0)
+                    throw new InvalidOperationException("The named startup password variable is empty or missing.");
+                string result = "";
+                switch (spec.Mode)
+                {
+                    case "join":
+                        if (!CustomCommands.TryParseHostPort(spec.Target, out string host, out int port))
+                            throw new InvalidDataException("The startup join target is not host:port.");
+                        if (typeof(FejdStartup).GetProperty("ServerPassword", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)?.GetSetMethod(true) is not MethodInfo setter)
+                            throw new InvalidOperationException("This game build has no server-password setter.");
+                        setter.Invoke(null, new object[] { password });
+                        CustomCommands.StartDedicatedServerJoin(host, port, line => result = line);
+                        break;
+                    case "host":
+                        CustomCommands.StartHostedWorld(spec.Target, spec.PublicServer, spec.Crossplay, password, line => result = line);
+                        break;
+                    default:
+                        CustomCommands.StartLocalWorld(spec.Target, line => result = line);
+                        break;
+                }
+                if (!result.StartsWith("OK:", StringComparison.Ordinal))
+                    throw new InvalidOperationException("The startup action was refused: " + result);
+                valheimCLIPlugin.Log.LogInfo("Client startup spec issued once: " + spec.Mode + " using local character " + spec.Character);
+            }
+            catch (Exception error)
+            { valheimCLIPlugin.Log.LogError("Client startup spec failed without retry: " + error); }
+        }
         public static void QueueServerConnect(string address, string? password)
         {
             if (valheimCLIPlugin.Instance == null)
