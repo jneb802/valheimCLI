@@ -14,7 +14,7 @@ namespace valheimCLI
             new ExtensionCommand("direct-start", "Report support for the password-free startup request file", DirectStart, readOnly: true),
             // This is the manifest-visible contract for the Standard pack's console teleport commands. A runner can
             // refuse an older pinned pack before launch, then confirm this capability again at the client's menu.
-            new ExtensionCommand("teleport-signals", "Report the bounded teleport command set used by test arrivals", TeleportSignals, readOnly: true, role: ExtensionRole.Client),
+            new ExtensionCommand("teleport-signals", "Report the bounded teleport command set used by test arrivals", TeleportSignals, readOnly: true),
             new ExtensionCommand("join", "Join from menu: <host:port> <character> [password-environment-variable]", Join),
             new ExtensionCommand("leave", "Save the local character and return to the menu", Leave, role: ExtensionRole.Client, needsWorld: true),
             new ExtensionCommand("save", "Confirm a server world save: [timeout-seconds, 1..600]", Save, role: ExtensionRole.Server, needsWorld: true));
