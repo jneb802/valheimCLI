@@ -32,6 +32,6 @@ namespace valheimCLI
             }
             catch { _own?.Dispose(); _session?.Dispose(); throw; }
         }
-        private void OnDestroy() { _own?.Dispose(); _session?.Dispose(); }
+        private void OnDestroy() { TestTeleportTiming.Set(false, out _); _own?.Dispose(); _session?.Dispose(); }
     }
 }

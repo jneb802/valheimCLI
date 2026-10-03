@@ -45,6 +45,15 @@ namespace valheimCLI
 
         public static void Register()
         {
+            new Terminal.ConsoleCommand("cli_teleport_test_mode", "Test-only teleport timing: cli_teleport_test_mode on|off|status. On requires VALHEIMCLI_TEST_FAST_TELEPORT=1 at launch. Area and floor checks remain vanilla; the 8 s distant floor may end after 2 s when both are ready, and cooldown drops to 0.5 s. Off by default.", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length != 2 || args[1] != "on" && args[1] != "off" && args[1] != "status")
+                { args.Context.AddString("Usage: cli_teleport_test_mode on|off|status"); return; }
+                if (args[1] != "status" && !TestTeleportTiming.Set(args[1] == "on", out string error))
+                { args.Context.AddString("ERROR: code=teleport_test_mode_refused reason=" + error); return; }
+                args.Context.AddString($"OK: testFastTeleport enabled={TestTeleportTiming.Enabled} gameChecks=area,floor minMoveSeconds=2 cooldownSeconds=0.5");
+            }, isCheat: true);
+
             new Terminal.ConsoleCommand("cli_teleport_trace_arm", "Arm a one-hop local-player teleport trace before requesting a peer teleport. Returns an id for cli_teleport_trace_wait.", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length != 1) { args.Context.AddString("Usage: cli_teleport_trace_arm"); return; }

@@ -29,7 +29,7 @@ namespace valheimCLI
             }
             else if (HasStartupJoinArgument()) RequestAutoStartQueuedJoin();
         }
-        internal static void Tick() { TryStartupWorld(); TryQueuePendingServerConnect(); TryAutoStartQueuedJoin(); TeleportTrace.Tick(); }
+        internal static void Tick() { TryStartupWorld(); TryQueuePendingServerConnect(); TryAutoStartQueuedJoin(); TeleportTrace.Tick(); TestTeleportTiming.Tick(); }
 
         private static void TryStartupWorld()
         {
