@@ -234,19 +234,31 @@ namespace valheimCLI
         /// Socket thread: wait until the request completes or its timeout passes,
         /// then take its output. <paramref name="sleep"/> is called between polls
         /// with the poll interval in milliseconds (injected so tests need no clock).
-        /// An incomplete request is abandoned: later output is dropped.
+        /// An incomplete request is abandoned when its deadline passes or its caller disconnects:
+        /// later output is dropped and cooperative extension handlers see cancellation.
         /// </summary>
         public Response Wait(Request request, Action<int> sleep, Func<DateTime>? now = null, int pollMs = 20)
+            => WaitWithDisconnect(request, sleep, () => false, now, pollMs);
+
+        /// <summary>As above, but abandon the request when its calling connection closes.</summary>
+        public Response WaitWithDisconnect(Request request, Action<int> sleep, Func<bool> disconnected, Func<DateTime>? now = null, int pollMs = 20)
         {
+            if (disconnected == null) throw new ArgumentNullException(nameof(disconnected));
             now ??= () => DateTime.UtcNow;
             DateTime deadline = now().AddSeconds(request.TimeoutSeconds);
             while (!IsComplete(request.Id) && now() < deadline)
+            {
+                if (disconnected())
+                    return TakeResponse(request.Id, "command_disconnected");
                 sleep(pollMs);
+            }
             return TakeResponse(request.Id);
         }
 
         /// <summary>Collect a request's output now; incomplete requests are abandoned.</summary>
-        public Response TakeResponse(long id)
+        public Response TakeResponse(long id) => TakeResponse(id, null);
+
+        private Response TakeResponse(long id, string? abandonmentCode)
         {
             lock (_lock)
             {
@@ -275,7 +287,10 @@ namespace valheimCLI
                         fate = "it issues no further actions; an effect already started (a teleport, a screenshot write) settles first, and its later output is dropped.";
                     else
                         fate = "it still runs on the game thread (later requests queue behind it) and its output is dropped.";
-                    response.Lines.Add($"ERROR: code=command_timeout message=Command #{id} did not complete in time; {fate}");
+                    string cause = abandonmentCode == "command_disconnected"
+                        ? "lost its calling client before completion"
+                        : "did not complete in time";
+                    response.Lines.Add($"ERROR: code={abandonmentCode ?? "command_timeout"} message=Command #{id} {cause}; {fate}");
                     _async.Remove(id);
                 }
                 _begunAsync.Remove(id);

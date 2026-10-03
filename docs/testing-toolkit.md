@@ -29,6 +29,8 @@ Mutation is the safe default (`readOnly: false`), requires devcommands, and uses
 
 If an effect continues after cancellation, install a `WaitForQuiescence` probe *before* issuing it. The core holds the gate and retiring owner until the probe confirms completion. A throwing/stuck probe leaves the owner blocked rather than claiming successful cleanup; diagnose and restart. The API cannot roll back arbitrary terrain/spawn/save effects.
 
+Closing the calling ValheimCLI connection while an extension runs also cancels its context on the next game tick. Queued work is dropped. An effect already issued must still quiesce under the rule above. A completed reply remains complete even if the client closes immediately afterward. The caller cannot receive a cancellation reply after disconnecting; `command_disconnected` is recorded in the broker for diagnosis.
+
 Use `cli_extensions` to discover commands, instance tokens and result versions. Use `cli_extension owner/command args` over the normal ValheimCLI connection. JSON values are bounded to 256 KiB/16 levels, strings/finite numbers/bools/arrays/string-keyed objects. Unsupported values fail explicitly. The actor rejects stale instance tokens and incomplete measurements. Arguments are single tokens in this preview; adapters validate their own grammar.
 
 The World Tools pack's `valheim.world/terrain x z generator|loaded-ground` observation demonstrates reuse. It distinguishes raw generator height from actual loaded heightmap ground. Missing heightmap returns `complete: false` and null height; it does not invent a zero.

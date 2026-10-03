@@ -297,9 +297,15 @@ namespace valheimCLI
                             RequestBroker.Request request = _broker.Submit(command, timeoutSeconds);
                             _logger.LogInfo($"Queued CLI command #{request.Id} (timeout {timeoutSeconds:F0}s): {command}");
 
-                            RequestBroker.Response response = _broker.Wait(request, Thread.Sleep);
+                            RequestBroker.Response response = _broker.WaitWithDisconnect(request, Thread.Sleep,
+                                disconnected: () => PeerConnection.IsClosed(client));
                             if (!response.Completed)
-                                _logger.LogWarning($"CLI command #{request.Id} timed out after {timeoutSeconds:F0}s: {command}");
+                            {
+                                if (PeerConnection.IsClosed(client))
+                                    _logger.LogInfo($"CLI command #{request.Id} abandoned after its caller disconnected");
+                                else
+                                    _logger.LogWarning($"CLI command #{request.Id} timed out after {timeoutSeconds:F0}s: {command}");
+                            }
 
                             CommandResponse.Write(writer, response.Lines);
                         }
