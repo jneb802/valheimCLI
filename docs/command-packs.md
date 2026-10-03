@@ -7,7 +7,7 @@ There is no second DLL loader or runtime compiler.
 | Install | Owns | Console commands |
 |---|---|---:|
 | `valheimCLI.dll` core 1.1 | Socket/broker, main-thread dispatch, permissions, expectations, build/reload diagnostics, async completion, shared operation gate and extension ownership | 8 |
-| `Valheim.Cli.Standard.dll` | Characters/joins, player/item/actor actions, building/carts, routes, screenshots/map exports, generator point probes, async waits/save and existing general gameplay helpers | 111 |
+| `Valheim.Cli.Standard.dll` | Characters/joins, player/item/actor actions, building/carts, routes, screenshots/map exports, generator point probes, async waits/save and existing general gameplay helpers | 112 |
 | `Valheim.Cli.WorldTools.dll` | World/ZDO/container census, terrain/rock inspection and actions, structured terrain/collider/player-support observations | 15 |
 | `Valheim.Cli.Reflection.dll` | Optional `cli_call` reflection over game and mod members | 1 |
 | `Valheim.Cli.Capture.dll` | Reversible grass/clutter visibility override | 1 |
@@ -16,7 +16,7 @@ Before the split, core registered 135 console commands. The seven `cli_mwl_*`
 port commands left core (see below); the other 128 keep their names and are each
 registered exactly once, in core or one pack. Core adds `cli_extension` and
 `cli_extensions`, which are two of its eight; Standard adds the read-only
-`cli_generator_at` point probe, `cli_terrain_modifiers_at` loaded-modifier census, explicit local-character cheat acknowledgement, the two one-hop teleport trace commands and test-only teleport timing, for 136 in total.
+`cli_generator_at` point probe, `cli_terrain_modifiers_at` loaded-modifier census, explicit local-character cheat acknowledgement, the two one-hop teleport trace commands, bounded player readiness and test-only teleport timing, for 137 in total.
 `docs/command-inventory-before.json` records the 135;
 `CommandPackInventoryTests` in `Tests/RequestBroker.Tests` checks the difference
 and the counts in the table above. Core alone
@@ -35,6 +35,13 @@ are milliseconds from arming, with frame precision. `-1` means a phase was not
 observed; a completed teleport without `floorReadyMs` may have used the game's
 fallback and is not proof of supported arrival. Check ground support separately.
 These commands measure only; they do not shorten Valheim's waits.
+
+`cli_wait_teleportable [timeout] [still-seconds] [grounded]` waits inside the
+client for the game's cooldown and a quiet, usable player, then returns once.
+`cli_extension valheim.world/player-support-wait <x> <ground-y> <z> <timeout>`
+likewise waits for a supported landing and holds it for 250 ms. They replace
+repeated remote support queries in multi-location test runs; neither moves the
+player. A result is tied to the current world and strict pins as usual.
 
 `cli_teleport_test_mode on` is separate and off by default. It requires both
 cheat permission and `VALHEIMCLI_TEST_FAST_TELEPORT=1` in the client's launch

@@ -38,6 +38,7 @@
     <Compile Include="../../Packs/Standard/SupportSettle.cs" Link="Source/SupportSettle.cs" />
     <Compile Include="../../Packs/Standard/ItemSelection.cs" Link="Source/ItemSelection.cs" />
     <Compile Include="../../Packs/WorldTools/ContainerLookup.cs" Link="Source/ContainerLookup.cs" />
+    <Compile Include="../../Packs/WorldTools/PlayerSupportPolicy.cs" Link="Source/PlayerSupportPolicy.cs" />
     <Compile Include="../../Packs/WorldTools/SceneInspection.cs" Link="Source/SceneInspection.cs" />
     <Compile Include="../../CLI/Testing/CommandInfo.cs" Link="CLI/CommandInfo.cs" />
     <Compile Include="../../CLI/Testing/CommandMetadata.cs" Link="CLI/CommandMetadata.cs" />

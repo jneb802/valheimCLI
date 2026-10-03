@@ -41,10 +41,24 @@ namespace valheimCLI
     public static class AsyncCommands
     {
         private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
+        private static readonly System.Reflection.FieldInfo? TeleportCooldownField =
+            typeof(Player).GetField("m_teleportCooldown", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
         public static OperationGate Gate => AsyncExecution.Gate;
 
         public static void Register()
         {
+            new Terminal.ConsoleCommand("cli_wait_teleportable", "Wait in the game until its local player can accept a teleport: cli_wait_teleportable [timeout=30] [still-seconds=0] [grounded=false]. Returns once, without remote support polling.", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length > 4 || args.Length >= 2 && (!TryF(args[1], out float parsedTimeout) || float.IsNaN(parsedTimeout) || parsedTimeout <= 0f || parsedTimeout > 120f) ||
+                    args.Length >= 3 && (!TryF(args[2], out float parsedStill) || float.IsNaN(parsedStill) || parsedStill < 0f || parsedStill > 10f) ||
+                    args.Length == 4 && !bool.TryParse(args[3], out _))
+                { args.Context.AddString("Usage: cli_wait_teleportable [timeout=30] [still-seconds=0] [grounded=false]"); return; }
+                float timeout = args.Length >= 2 ? float.Parse(args[1], Inv) : 30f;
+                float still = args.Length >= 3 ? float.Parse(args[2], Inv) : 0f;
+                bool grounded = args.Length == 4 && bool.Parse(args[3]);
+                Start("wait_teleportable", args.Context.AddString, ctx => WaitTeleportable(ctx, timeout, still, grounded), gated: false);
+            });
+
             new Terminal.ConsoleCommand("cli_teleport_test_mode", "Test-only teleport timing: cli_teleport_test_mode on|off|status. On requires VALHEIMCLI_TEST_FAST_TELEPORT=1 at launch. Area and floor checks remain vanilla; the 8 s distant floor may end after 2 s when both are ready, and cooldown drops to 0.5 s. Off by default.", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length != 2 || args[1] != "on" && args[1] != "off" && args[1] != "status")
@@ -156,6 +170,50 @@ namespace valheimCLI
         }
 
         private static bool TryF(string s, out float value) => float.TryParse(s, NumberStyles.Float, Inv, out value);
+
+        private static IEnumerator WaitTeleportable(Context ctx, float timeout, float stillFor, bool requireGrounded)
+        {
+            if (TeleportCooldownField == null)
+            { ctx.Output("ERROR: code=teleport_ready_unavailable reason=this game build has no auditable cooldown field"); yield break; }
+            Stopwatch clock = Stopwatch.StartNew();
+            long stillSince = -1;
+            string pending = "no local player";
+            while (clock.Elapsed.TotalSeconds < timeout && !ctx.Cancelled)
+            {
+                Player player = Player.m_localPlayer;
+                if (player != null)
+                {
+                    TeleportBlock block = CustomCommands.TeleportBlocker(player);
+                    if (block != TeleportBlock.None)
+                    { ctx.Output("ERROR: code=teleport_refused reason=" + PlayerModes.DescribeRefusal(PlayerModes.BlockAnswer(block))); yield break; }
+                    float cooldown = (float)TeleportCooldownField.GetValue(player);
+                    float speed = player.GetVelocity().magnitude;
+                    bool ready = !player.IsTeleporting() && cooldown >= TeleportTimingPolicy.VanillaCooldownSeconds &&
+                        speed <= .15f && (!requireGrounded || player.IsOnGround());
+                    if (ready)
+                    {
+                        if (stillSince < 0) stillSince = clock.ElapsedMilliseconds;
+                        if (clock.ElapsedMilliseconds - stillSince >= stillFor * 1000f)
+                        {
+                            Vector3 p = player.transform.position;
+                            ctx.Output(string.Format(Inv, "OK: TELEPORTABLE ms={0} stillMs={1} cooldownSeconds={2:F2} grounded={3} position={4:F2},{5:F2},{6:F2}",
+                                clock.ElapsedMilliseconds, clock.ElapsedMilliseconds - stillSince, cooldown, player.IsOnGround(), p.x, p.y, p.z));
+                            yield break;
+                        }
+                        pending = "standing still";
+                    }
+                    else
+                    {
+                        stillSince = -1;
+                        pending = player.IsTeleporting() ? "teleport in progress" : cooldown < TeleportTimingPolicy.VanillaCooldownSeconds ? "teleport cooldown" :
+                            requireGrounded && !player.IsOnGround() ? "not grounded" : "player moving";
+                    }
+                }
+                yield return null;
+            }
+            if (ctx.Cancelled) { Cancelled(ctx, "the player readiness wait issued no teleport"); yield break; }
+            ctx.Output($"ERROR: code=teleport_ready_timeout pending={pending} ms={clock.ElapsedMilliseconds}");
+        }
 
         private static IEnumerator WaitTeleportTrace(Context ctx, int id, float timeout)
         {
