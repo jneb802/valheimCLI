@@ -279,6 +279,14 @@ A flag that did not take gives `ERROR: code=safety_not_applied` with the same
 fields. Check the line rather than running `debugmode` or `devcommands`, which
 toggle: run blind, they are as likely to switch a mode off as on.
 
+For a **disposable test character** that must run cheat-classified CLI commands,
+`cli_acknowledge_local_cheats` marks the current local profile as having used
+cheats and returns `OK: localCharacterCheated=True`. This is permanent for that
+character. `confirmcheats` can execute on the server when a client joins a
+dedicated world, leaving the client's profile unmarked; this command applies
+locally instead. Stage and verify a copied character first. Do not use it on a
+personal or Steam Cloud character. A missing local player is refused.
+
 A client joined to a dedicated server never has cheats in effect, whatever the
 `cheats` field says, so the Z key does nothing there. `cli_fly` sets debug fly
 directly:

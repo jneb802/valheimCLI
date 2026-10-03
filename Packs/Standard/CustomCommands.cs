@@ -704,6 +704,30 @@ namespace valheimCLI
                 SetPlayerSafety(enabled, args.Context.AddString);
             }, isCheat: true);
 
+            // Vanilla confirmcheats is a remote server command when this client joined a dedicated server: its
+            // success reply does not mark the local PlayerProfile, so the next local cheat-classified command is
+            // still refused. This explicit local equivalent is for disposable test characters only.
+            new Terminal.ConsoleCommand("cli_acknowledge_local_cheats", "Permanently mark the current local character as having used cheats (disposable test characters only): cli_acknowledge_local_cheats", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length != 1)
+                {
+                    args.Context.AddString("Usage: cli_acknowledge_local_cheats");
+                    return;
+                }
+                if (Player.m_localPlayer == null || Game.instance == null)
+                {
+                    args.Context.AddString("ERROR: code=no_local_player A loaded local character is required");
+                    return;
+                }
+                PlayerProfile profile = Game.instance.GetPlayerProfile();
+                if (!profile.m_usedCheats)
+                {
+                    profile.m_usedCheats = true;
+                    profile.IncrementStat(PlayerStatType.Cheats);
+                }
+                args.Context.AddString("OK: localCharacterCheated=" + profile.m_usedCheats);
+            }, isCheat: false);
+
             new Terminal.ConsoleCommand("cli_fly", "Report, set or toggle the local player's debug fly without the Z key, which needs cheats in effect and so never works on a client joined to a dedicated server: cli_fly [on|off|toggle]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 Player player = Player.m_localPlayer;
