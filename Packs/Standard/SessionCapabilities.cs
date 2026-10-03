@@ -12,6 +12,9 @@ namespace valheimCLI
         internal static ExtensionRegistration Register(ExtensionRegistry registry) => registry.Register("valheim.session", "0.1.0", 1,
             new ExtensionCommand("state", "Read session facts; mod readiness must be checked separately", State, readOnly: true),
             new ExtensionCommand("direct-start", "Report support for the password-free startup request file", DirectStart, readOnly: true),
+            // This is the manifest-visible contract for the Standard pack's console teleport commands. A runner can
+            // refuse an older pinned pack before launch, then confirm this capability again at the client's menu.
+            new ExtensionCommand("teleport-signals", "Report the bounded teleport command set used by test arrivals", TeleportSignals, readOnly: true, role: ExtensionRole.Client),
             new ExtensionCommand("join", "Join from menu: <host:port> <character> [password-environment-variable]", Join),
             new ExtensionCommand("leave", "Save the local character and return to the menu", Leave, role: ExtensionRole.Client, needsWorld: true),
             new ExtensionCommand("save", "Confirm a server world save: [timeout-seconds, 1..600]", Save, role: ExtensionRole.Server, needsWorld: true));
@@ -19,6 +22,14 @@ namespace valheimCLI
         private static bool WorldPresent => Game.instance != null && ZNet.World != null && ZoneSystem.instance != null && ZDOMan.instance != null;
         private static bool PlayerReady => Player.m_localPlayer != null && !Player.m_localPlayer.IsTeleporting() && !Player.m_localPlayer.IsDead();
         private static bool ShuttingDown => Game.instance != null && Game.instance.IsShuttingDown();
+        private static IEnumerator TeleportSignals(ExtensionContext context)
+        {
+            if (context.Arguments.Count != 0) { context.Fail("usage", "teleport-signals takes no arguments"); yield break; }
+            context.Succeed(new Dictionary<string, object?> { ["source"] = "teleport-signals", ["complete"] = true,
+                ["commands"] = new[] { "cli_skip_intro", "cli_wait_teleportable", "cli_teleport_trace_arm",
+                    "cli_teleport_trace_wait", "cli_teleport_test_mode", "cli_teleport_peer" } });
+            yield break;
+        }
         private static IEnumerator DirectStart(ExtensionContext context)
         {
             if (context.Arguments.Count != 0) { context.Fail("usage", "direct-start takes no arguments"); yield break; }
