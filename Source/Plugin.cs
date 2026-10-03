@@ -68,6 +68,7 @@ namespace valheimCLI
             valheimCLI.Extensions.ExtensionHost.Register(Extensions);
             Modules = new Extensions.ConsoleModuleHost(this, Extensions);
             ManifestCommands.Register();
+            AccessCommands.Register();
             ReloadCommands.Register();
             foreach (string name in new[] { "cli_build", "cli_self_unload", "cli_await_plugin" })
                 StandingExpectations.AllowWhileMismatched(name);

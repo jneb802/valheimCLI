@@ -6,7 +6,7 @@ There is no second DLL loader or runtime compiler.
 
 | Install | Owns | Console commands |
 |---|---|---:|
-| `valheimCLI.dll` core 1.1 | Socket/broker, main-thread dispatch, permissions, expectations, build/reload diagnostics, async completion, shared operation gate and extension ownership | 8 |
+| `valheimCLI.dll` core 1.1 | Socket/broker, main-thread dispatch, permissions, expectations, build/reload diagnostics, async completion, shared operation gate and extension ownership | 9 |
 | `Valheim.Cli.Standard.dll` | Characters/joins, player/item/actor actions, building/carts, routes, screenshots/map exports, generator point probes, async waits/save and existing general gameplay helpers | 112 |
 | `Valheim.Cli.WorldTools.dll` | World/ZDO/container census, terrain/rock inspection and actions, structured terrain/collider/player-support observations | 15 |
 | `Valheim.Cli.Reflection.dll` | Optional `cli_call` reflection over game and mod members | 1 |
@@ -14,9 +14,8 @@ There is no second DLL loader or runtime compiler.
 
 Before the split, core registered 135 console commands. The seven `cli_mwl_*`
 port commands left core (see below); the other 128 keep their names and are each
-registered exactly once, in core or one pack. Core adds `cli_extension` and
-`cli_extensions`, which are two of its eight; Standard adds the read-only
-`cli_generator_at` point probe, `cli_terrain_modifiers_at` loaded-modifier census, explicit local-character cheat acknowledgement, the two one-hop teleport trace commands, bounded player readiness and test-only teleport timing, for 137 in total.
+registered exactly once, in core or one pack. Core adds `cli_extension`, `cli_extensions` and `cli_access`, three of its nine; Standard adds the read-only
+`cli_generator_at` point probe, `cli_terrain_modifiers_at` loaded-modifier census, explicit local-character cheat acknowledgement, the two one-hop teleport trace commands, bounded player readiness and test-only teleport timing, for 138 in total.
 `docs/command-inventory-before.json` records the 135;
 `CommandPackInventoryTests` in `Tests/RequestBroker.Tests` checks the difference
 and the counts in the table above. Core alone
@@ -210,3 +209,17 @@ The external [SessionControl example](https://github.com/tvongaza/ValheimTesting
 ## Native follow-up — 27 September 2026
 
 The current four-pack build passed the [bounded strict capability campaign](https://github.com/tvongaza/ValheimTesting/blob/main/docs/native-validation-20260927.md): strict A/B reload/removal, terrain capture/replay and unloaded refusal, structured join/leave/save, stale-password recovery, and controlled mutation draining during owner replacement. Per-command pins and the persistent dispatch guard stayed enabled. A wrong core hash blocked logout without leaving the world. The 12-second drain fixture proves native scheduling and owner/gate lifetime for a controlled effect; it is not a claim that every native save/join cancellation case was exercised. No production CLI change was needed in this campaign.
+
+### Observe test access before using cheats
+
+Core provides `cli_access`, a non-cheat, read-only command returning one `ACCESS` JSON line (schema 1).
+It reports `devcommands`, `cheatsAcknowledged`, `allowOnServerClients`, `server`, `dedicated`,
+`joinedClient`, `localPlayer` and `profileAvailable`. Strict expectations still apply.
+
+Valheim 1.0.16 has separate devcommand and achievement-acknowledgement gates. A mod marking the game
+modded can already satisfy the latter; a minimal test stack may not. On an owned disposable dedicated
+server, enable devcommands and use `confirmcheats` if acknowledgement is missing. On a client, wait
+until its disposable local character has loaded before `cli_acknowledge_local_cheats`; it cannot mark
+an unloaded character at the menu. Re-read `cli_access` after the action. Joined-client mutations also
+need the explicit `AllowOnServerClients` setting and remain subject to command-specific permissions.
+The observation grants nothing, and acceptance never replaces assertions about the action's effect.

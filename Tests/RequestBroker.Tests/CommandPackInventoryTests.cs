@@ -23,7 +23,7 @@ public class CommandPackInventoryTests
     };
 
     // New in core with the extension API.
-    private static readonly string[] Added = { "cli_extension", "cli_extensions" };
+    private static readonly string[] Added = { "cli_extension", "cli_extensions", "cli_access" };
     // New commands in optional packs, beyond the preserved pre-split inventory.
     private static readonly string[] NewPackCommands = { "cli_generator_at", "cli_terrain_modifiers_at", "cli_acknowledge_local_cheats", "cli_teleport_trace_arm", "cli_teleport_trace_wait", "cli_teleport_test_mode", "cli_wait_teleportable" };
 
