@@ -45,6 +45,23 @@ namespace valheimCLI
 
         public static void Register()
         {
+            new Terminal.ConsoleCommand("cli_teleport_trace_arm", "Arm a one-hop local-player teleport trace before requesting a peer teleport. Returns an id for cli_teleport_trace_wait.", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length != 1) { args.Context.AddString("Usage: cli_teleport_trace_arm"); return; }
+                if (!TeleportTrace.Arm(out int id, out string error))
+                { args.Context.AddString("ERROR: code=teleport_trace_arm reason=" + error); return; }
+                args.Context.AddString("OK: TELEPORT_TRACE_ARM id=" + id);
+            });
+
+            new Terminal.ConsoleCommand("cli_teleport_trace_wait", "Wait for one armed teleport to finish and return its phase timings without remote polling: cli_teleport_trace_wait <id> [timeout=30].", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2 || args.Length > 3 || !int.TryParse(args[1], out int id) || id < 1 ||
+                    args.Length == 3 && (!TryF(args[2], out float duration) || duration <= 0f))
+                { args.Context.AddString("Usage: cli_teleport_trace_wait <id> [timeout=30]"); return; }
+                float timeout = args.Length == 3 ? float.Parse(args[2], Inv) : 30f;
+                Start("teleport_trace_wait", args.Context.AddString, ctx => WaitTeleportTrace(ctx, id, timeout), gated: false);
+            });
+
             new Terminal.ConsoleCommand("cli_arrive", "Teleport and wait until the player has landed and every zone within radius is loaded: cli_arrive <x> <y> <z> [radius=64] [timeout=30]. A teleport the game refuses (one in progress, or its 2 s cooldown) is offered again until accepted; one that cannot stick (intro, attached, dead) is refused; a landing must hold for 1 s; a bounced or undone landing is re-issued (up to three times).", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length < 4 || !TryF(args[1], out float x) || !TryF(args[2], out float y) || !TryF(args[3], out float z))
@@ -130,6 +147,18 @@ namespace valheimCLI
         }
 
         private static bool TryF(string s, out float value) => float.TryParse(s, NumberStyles.Float, Inv, out value);
+
+        private static IEnumerator WaitTeleportTrace(Context ctx, int id, float timeout)
+        {
+            Stopwatch clock = Stopwatch.StartNew();
+            while (clock.Elapsed.TotalSeconds < timeout && !ctx.Cancelled)
+            {
+                if (TeleportTrace.TryResult(id, out string line)) { ctx.Output(line); yield break; }
+                yield return null;
+            }
+            if (ctx.Cancelled) { Cancelled(ctx, "the teleport trace remains armed until the game completes the hop"); yield break; }
+            ctx.Output($"ERROR: code=teleport_trace_timeout id={id} ms={clock.ElapsedMilliseconds}");
+        }
 
         /// <summary>Open the async request and run the coroutine; typed in the F5 console (no request) it runs anyway and prints there.</summary>
         internal static void Start(string name, Action<string> console, Func<Context, IEnumerator> body, bool gated)

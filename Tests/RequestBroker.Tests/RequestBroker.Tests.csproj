@@ -29,6 +29,7 @@
     <Compile Include="../../Packs/WorldTools/TerrainEditRequest.cs" Link="Source/TerrainEditRequest.cs" />
     <Compile Include="../../Packs/Standard/SessionArguments.cs" Link="Source/SessionArguments.cs" />
     <Compile Include="../../Packs/Standard/StartupWorldSpec.cs" Link="Source/StartupWorldSpec.cs" />
+    <Compile Include="../../Packs/Standard/TeleportTimeline.cs" Link="Source/TeleportTimeline.cs" />
     <Compile Include="../../Packs/Capture/CaptureCommands.cs" Link="Source/CaptureCommands.cs" />
     <Compile Include="../../Source/CommandArguments.cs" Link="Source/CommandArguments.cs" />
     <Compile Include="../../Packs/Standard/BuildPlacement.cs" Link="Source/BuildPlacement.cs" />
