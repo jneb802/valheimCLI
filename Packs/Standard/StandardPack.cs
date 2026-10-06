@@ -28,10 +28,13 @@ namespace valheimCLI
             Module = _own;
             _own.Owner.OnRetiring(() => RouteController.Stop(_ => { }));
             StandardSession.Initialize();
+            // Without the patch the pack still works; cli_set_player_safety then reports ghostReplicated=False.
+            try { GhostReplication.Patch(); }
+            catch (Exception ex) { GhostReplication.Unpatch(); Logger.LogError("Ghost mode is not replicated to other peers: " + ex); }
             Logger.LogInfo("Standard commands ready; owner=" + _own.Owner.Instance);
             }
             catch { _own?.Dispose(); _session?.Dispose(); throw; }
         }
-        private void OnDestroy() { TestTeleportTiming.Set(false, out _); _own?.Dispose(); _session?.Dispose(); }
+        private void OnDestroy() { GhostReplication.Unpatch(); TestTeleportTiming.Set(false, out _); _own?.Dispose(); _session?.Dispose(); }
     }
 }

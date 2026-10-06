@@ -283,8 +283,8 @@ namespace valheimCLI.Tests
         [Fact]
         public void TheSafetyLineNamesEveryFlagItSets()
         {
-            Assert.Equal("OK: playerSafety enabled=True god=True ghost=True debugMode=True cheats=True",
-                PlayerModes.SafetyLine(true, true, true, true, true));
+            Assert.Equal("OK: playerSafety enabled=True god=True ghost=True debugMode=True cheats=True ghostReplicated=True",
+                PlayerModes.SafetyLine(true, true, true, true, true, true));
         }
 
         /// <summary>Turning safety off leaves cheats as they were: a devcommands the user ran is not undone.</summary>
@@ -293,18 +293,71 @@ namespace valheimCLI.Tests
         [InlineData(true)]
         public void SafetyOffDoesNotRequireCheatsOff(bool cheats)
         {
-            Assert.StartsWith("OK: ", PlayerModes.SafetyLine(false, false, false, false, cheats));
+            Assert.StartsWith("OK: ", PlayerModes.SafetyLine(false, false, false, false, cheats, true));
         }
 
         [Theory]
-        [InlineData(false, true, true, true)]
-        [InlineData(true, false, true, true)]
-        [InlineData(true, true, false, true)]
-        [InlineData(true, true, true, false)]
-        public void AFlagThatDidNotTakeIsAnError(bool god, bool ghost, bool debugMode, bool cheats)
+        [InlineData(false, true, true, true, true)]
+        [InlineData(true, false, true, true, true)]
+        [InlineData(true, true, false, true, true)]
+        [InlineData(true, true, true, false, true)]
+        [InlineData(true, true, true, true, false)]
+        public void AFlagThatDidNotTakeIsAnError(bool god, bool ghost, bool debugMode, bool cheats, bool ghostReplicated)
         {
-            Assert.StartsWith("ERROR: code=safety_not_applied playerSafety enabled=True", PlayerModes.SafetyLine(true, god, ghost, debugMode, cheats));
-            Assert.False(PlayerModes.SafetyApplied(true, god, ghost, debugMode, cheats));
+            Assert.StartsWith("ERROR: code=safety_not_applied playerSafety enabled=True", PlayerModes.SafetyLine(true, god, ghost, debugMode, cheats, ghostReplicated));
+            Assert.False(PlayerModes.SafetyApplied(true, god, ghost, debugMode, cheats, ghostReplicated));
         }
+
+        [Fact]
+        public void TargetableProtectionKeepsGodAndDebugModeAndLeavesGhostOff()
+        {
+            Assert.Equal("OK: playerSafety enabled=True god=True ghost=False debugMode=True cheats=True ghostReplicated=True targetable=True",
+                PlayerModes.SafetyLine(true, true, false, true, true, true, targetable: true));
+            Assert.StartsWith("ERROR: code=safety_not_applied", PlayerModes.SafetyLine(true, true, true, true, true, true, targetable: true));
+            Assert.StartsWith("ERROR: code=safety_not_applied", PlayerModes.SafetyLine(true, true, false, true, true, true)); // ghost asked for, not set
+        }
+
+        [Theory]
+        [InlineData("cli_set_player_safety true", true, false)]
+        [InlineData("cli_set_player_safety false", false, false)]
+        [InlineData("cli_set_player_safety true targetable", true, true)]
+        public void TheSafetyArgumentsAreTrueFalseOrTrueTargetable(string line, bool enabled, bool targetable)
+        {
+            Assert.True(PlayerModes.TryParseSafety(line.Split(' '), out bool e, out bool t, out _));
+            Assert.Equal((enabled, targetable), (e, t));
+        }
+
+        [Theory]
+        [InlineData("cli_set_player_safety")]
+        [InlineData("cli_set_player_safety maybe")]
+        [InlineData("cli_set_player_safety false targetable")]
+        [InlineData("cli_set_player_safety true visible")]
+        [InlineData("cli_set_player_safety true targetable extra")]
+        public void OtherSafetyArgumentsAreRefused(string line) =>
+            Assert.False(PlayerModes.TryParseSafety(line.Split(' '), out _, out _, out _));
+
+        /// <summary>
+        /// The player's own process reads the game's field; another process reads the ZDO, so a creature it simulates sees
+        /// a ghost as the player's game does. A ZDO that carries no ghost mode (a peer without this pack set it) falls back
+        /// to the field, as the game always did.
+        /// </summary>
+        [Theory]
+        [InlineData(true, true, null, true)]
+        [InlineData(false, true, true, false)]   // the owner's field decides, whatever the ZDO says
+        [InlineData(false, false, true, true)]   // a remote copy reads the replicated ghost mode: the fix
+        [InlineData(true, false, false, false)]
+        [InlineData(false, false, null, false)]  // nothing replicated: the game's own behaviour
+        public void AnotherProcessReadsTheReplicatedGhostMode(bool localField, bool ownsPlayer, bool? replicated, bool expected)
+        {
+            Assert.Equal(expected, PlayerModes.GhostSeenBy(localField, ownsPlayer, replicated));
+        }
+
+        [Theory]
+        [InlineData(1, true)]
+        [InlineData(0, false)]
+        [InlineData(-1, null)]  // the key is absent: GhostSeenBy falls back to the game's field
+        [InlineData(2, null)]
+        public void TheZdoValueIsAGhostNotAGhostOrNothing(int zdoValue, bool? expected) =>
+            Assert.Equal(expected, PlayerModes.ReplicatedGhost(zdoValue));
     }
 }

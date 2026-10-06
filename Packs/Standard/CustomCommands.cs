@@ -693,15 +693,15 @@ namespace valheimCLI
                 args.Context.AddString($"OK: tutorialsEnabled={enabled} dismissedActiveRaven={dismissed}");
             }, isCheat: true);
 
-            new Terminal.ConsoleCommand("cli_set_player_safety", "Set local player god, ghost and debug modes (true also turns cheats on) and report each: cli_set_player_safety <true|false>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            new Terminal.ConsoleCommand("cli_set_player_safety", "Set local player god, ghost and debug modes (true also turns cheats on; true targetable leaves ghost off) and report each: cli_set_player_safety <true|false> [targetable]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
-                if (args.Length < 2 || !bool.TryParse(args[1], out bool enabled))
+                if (!PlayerModes.TryParseSafety(args.Args, out bool enabled, out bool targetable, out string error))
                 {
-                    args.Context.AddString("Usage: cli_set_player_safety <true|false>");
+                    args.Context.AddString(error);
                     return;
                 }
 
-                SetPlayerSafety(enabled, args.Context.AddString);
+                SetPlayerSafety(enabled, args.Context.AddString, targetable);
             }, isCheat: true);
 
             // Vanilla confirmcheats is a remote server command when this client joined a dedicated server: its
@@ -3633,7 +3633,7 @@ namespace valheimCLI
             addOutput($"OK: weapon={weaponText} ammo={ammoText} requiresReload={requiresReload} loaded={loaded} inAttack={player.InAttack()}");
         }
 
-        public static void SetPlayerSafety(bool enabled, Action<string> addOutput)
+        public static void SetPlayerSafety(bool enabled, Action<string> addOutput, bool targetable = false)
         {
             Player player = Player.m_localPlayer;
             if (player == null)
@@ -3643,7 +3643,7 @@ namespace valheimCLI
             }
 
             player.SetGodMode(enabled);
-            player.SetGhostMode(enabled);
+            player.SetGhostMode(enabled && !targetable); // Replicated to every peer that loads this pack (GhostReplication).
             // Debug mode (fly on Z, no-cost building on B) is set, never
             // toggled: the vanilla debugmode command flips it, so running that
             // blind is as likely to turn it off as on.
@@ -3658,7 +3658,7 @@ namespace valheimCLI
                 Terminal.m_cheat = true;
                 Console.instance?.updateCommandList();
             }
-            addOutput(PlayerModes.SafetyLine(enabled, player.InGodMode(), player.InGhostMode(), Player.m_debugMode, Terminal.m_cheat));
+            addOutput(PlayerModes.SafetyLine(enabled, player.InGodMode(), player.InGhostMode(), Player.m_debugMode, Terminal.m_cheat, GhostReplication.Replicated(player) == player.InGhostMode(), targetable));
         }
 
         private static bool TryGetLocalInventory(Action<string> addOutput, out Inventory inventory)

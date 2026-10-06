@@ -272,11 +272,29 @@ on Z, no-cost building on B) do nothing without them; `false` leaves cheats as
 they were. Every flag is read back from the game onto the reply:
 
 ```
-OK: playerSafety enabled=True god=True ghost=True debugMode=True cheats=True
+OK: playerSafety enabled=True god=True ghost=True debugMode=True cheats=True ghostReplicated=True
 ```
 
 A flag that did not take gives `ERROR: code=safety_not_applied` with the same
-fields. Check the line rather than running `debugmode` or `devcommands`, which
+fields.
+
+`cli_set_player_safety true targetable` sets god mode and debug mode but leaves
+ghost mode off, for a test of AI or targeting that needs creatures to see the
+player while it cannot die. The reply ends in `targetable=True`.
+
+**Ghost mode on every peer.** The game keeps ghost mode in a field of the
+player's own process, while a creature's AI runs in whichever process owns the
+creature, often another client. Without this pack another peer's creatures
+could see, hear and hunt a player in ghost mode. The Standard pack writes the
+player's ghost mode to its ZDO whenever it is set (by this command or by the
+game's `ghost` cheat), and every process that loads the pack reads another
+player's ghost mode from there. `ghostReplicated=True` says the ZDO carries the
+same value as the local field. A peer without the pack still reads the local
+field, so give every process the pack when a test relies on it. The game's other
+ghost-mode checks follow on those peers as they would in the player's own game:
+a creature hit by a player in ghost mode is marked cheated, and an egg does not
+hatch next to one. God mode and damage are unchanged: god mode keeps health at 1 or more, it does not stop hits
+or knockback. Check the line rather than running `debugmode` or `devcommands`, which
 toggle: run blind, they are as likely to switch a mode off as on.
 
 For a **disposable test character** that must run cheat-classified CLI commands,

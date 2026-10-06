@@ -405,13 +405,13 @@ namespace valheimCLI
 
             if (parts[0].Equals("cli_set_player_safety", StringComparison.OrdinalIgnoreCase))
             {
-                if (parts.Length < 2 || !bool.TryParse(parts[1], out bool enabled))
+                if (!PlayerModes.TryParseSafety(parts, out bool enabled, out bool targetable, out string error))
                 {
-                    output("Usage: cli_set_player_safety <true|false>");
+                    output(error);
                     return true;
                 }
 
-                CustomCommands.SetPlayerSafety(enabled, line => output(line));
+                CustomCommands.SetPlayerSafety(enabled, line => output(line), targetable);
                 return true;
             }
 

@@ -308,14 +308,52 @@ namespace valheimCLI
         /// what is actually set instead of trusting what it asked for. The
         /// values print as True/False, like every other flag this mod reports.
         /// </summary>
-        public static string SafetyLine(bool enabled, bool god, bool ghost, bool debugMode, bool cheats)
+        /// <param name="ghostReplicated">Whether the player's ZDO carries the same ghost mode (<see cref="GhostSeenBy"/>), so every
+        /// peer that loads this pack, including one that simulates a creature near the player, reads the player as the local
+        /// game does.</param>
+        /// <param name="targetable">Protection without ghost mode (<c>cli_set_player_safety true targetable</c>): the player
+        /// cannot die but creatures see it, for a test of AI or targeting that opts out of ghost mode on purpose.</param>
+        public static string SafetyLine(bool enabled, bool god, bool ghost, bool debugMode, bool cheats, bool ghostReplicated, bool targetable = false)
         {
-            string prefix = SafetyApplied(enabled, god, ghost, debugMode, cheats) ? "OK:" : "ERROR: code=safety_not_applied";
-            return $"{prefix} playerSafety enabled={enabled} god={god} ghost={ghost} debugMode={debugMode} cheats={cheats}";
+            string prefix = SafetyApplied(enabled, god, ghost, debugMode, cheats, ghostReplicated, targetable) ? "OK:" : "ERROR: code=safety_not_applied";
+            return $"{prefix} playerSafety enabled={enabled} god={god} ghost={ghost} debugMode={debugMode} cheats={cheats} ghostReplicated={ghostReplicated}"
+                + (targetable ? " targetable=True" : "");
         }
 
         /// <summary>Whether the modes read back are the ones cli_set_player_safety asked for. Cheats are only ever switched on, never off.</summary>
-        public static bool SafetyApplied(bool enabled, bool god, bool ghost, bool debugMode, bool cheats) =>
-            god == enabled && ghost == enabled && debugMode == enabled && (!enabled || cheats);
+        public static bool SafetyApplied(bool enabled, bool god, bool ghost, bool debugMode, bool cheats, bool ghostReplicated, bool targetable = false) =>
+            god == enabled && ghost == (enabled && !targetable) && debugMode == enabled && (!enabled || cheats) && ghostReplicated;
+
+        public const string SafetyUsage = "Usage: cli_set_player_safety <true|false> | cli_set_player_safety true targetable";
+
+        /// <summary>The command's arguments: <c>true</c>, <c>false</c>, or <c>true targetable</c>; anything else is refused.</summary>
+        public static bool TryParseSafety(string[] words, out bool enabled, out bool targetable, out string error)
+        {
+            enabled = targetable = false;
+            error = SafetyUsage;
+            if (words.Length is < 2 or > 3 || !bool.TryParse(words[1], out enabled)) return false;
+            if (words.Length == 3)
+            {
+                if (!enabled || !words[2].Equals("targetable", StringComparison.OrdinalIgnoreCase)) return false;
+                targetable = true;
+            }
+            error = "";
+            return true;
+        }
+
+        /// <summary>
+        /// Whether a player is in ghost mode as this process sees it. The game keeps ghost mode in a field of the player's
+        /// own process, so another peer's copy of the player always read false, and a creature that peer simulates could
+        /// see, hear and hunt a player in ghost mode. With this pack loaded, the owner also writes ghost mode to the player's
+        /// ZDO, and every other process reads it from there.
+        /// </summary>
+        /// <param name="localField">The game's own ghost-mode field on this process's copy of the player.</param>
+        /// <param name="ownsPlayer">Whether this process owns the player's ZDO (it is the player's own game).</param>
+        /// <param name="replicated">The ghost mode on the player's ZDO, or null when it carries none.</param>
+        public static bool GhostSeenBy(bool localField, bool ownsPlayer, bool? replicated) =>
+            ownsPlayer || replicated == null ? localField : replicated.Value;
+
+        /// <summary>The ghost mode a player's ZDO carries: 1 is a ghost, 0 is not, anything else (the key is absent) is none.</summary>
+        public static bool? ReplicatedGhost(int zdoValue) => zdoValue switch { 1 => true, 0 => false, _ => (bool?)null };
     }
 }
