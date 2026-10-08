@@ -40,7 +40,7 @@ namespace valheimCLI
                     return;
                 }
                 Player player = Player.m_localPlayer;
-                args.Context.AddString(FormattableString.Invariant($"OK: item={GetItemPrefabName(item)} type={item.m_shared.m_itemType} equippedFlag={item.m_equipped} isEquipped={player.IsItemEquipped(item)} chestItem={player.m_chestItem == item} durability={item.m_durability:F2} maxDurability={item.GetMaxDurability():F2}"));
+                args.Context.AddString(FormattableString.Invariant($"OK: item={GetItemPrefabName(item)} type={item.m_shared.m_itemType} equippedFlag={item.m_equipped} isEquipped={player.IsItemEquiped(item)} chestItem={player.m_chestItem == item} durability={item.m_durability:F2} maxDurability={item.GetMaxDurability():F2}"));
             });
             new Terminal.ConsoleCommand("cli_consume_item", "Consume inventory food or mead through the normal game action: cli_consume_item <prefab-or-display-name>", args =>
             {
