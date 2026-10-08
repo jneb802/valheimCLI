@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -11,7 +12,6 @@ namespace valheimCLI
 {
     public static class CustomCommands
     {
-        private static readonly FieldInfo? PlayerInstanceField = typeof(FejdStartup).GetField("m_playerInstance", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo? ProfilesField = typeof(FejdStartup).GetField("m_profiles", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo? ProfileIndexField = typeof(FejdStartup).GetField("m_profileIndex", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo? WorldField = typeof(FejdStartup).GetField("m_world", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -26,27 +26,29 @@ namespace valheimCLI
         {
             RouteController.Register();
             BuildCommands.Register();
+            CartCommands.Register();
             AsyncCommands.Register();
-
-            new Terminal.ConsoleCommand("cli_create_character", "Create and select a local character: cli_create_character <name> [--replace] [--local]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            new Terminal.ConsoleCommand("cli_create_character", "Create and select a local character: cli_create_character <name> [--replace] [--local] [--skip-intro]. --skip-intro saves it as already spawned once, so it lands at the start without the valkyrie intro", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length < 2)
                 {
-                    args.Context.AddString("Usage: cli_create_character <name> [--replace] [--local]");
+                    args.Context.AddString("Usage: cli_create_character <name> [--replace] [--local] [--skip-intro]");
                     return;
                 }
 
                 string characterName = args[1].Trim();
                 bool replace = false;
                 bool forceLocal = false;
+                bool skipIntro = false;
                 for (int i = 2; i < args.Length; i++)
                 {
                     replace |= args[i].Equals("--replace", StringComparison.OrdinalIgnoreCase);
                     forceLocal |= args[i].Equals("--local", StringComparison.OrdinalIgnoreCase);
+                    skipIntro |= args[i].Equals("--skip-intro", StringComparison.OrdinalIgnoreCase);
                 }
 
                 forceLocal |= replace;
-                CreateCharacter(characterName, replace, forceLocal, args.Context.AddString);
+                CreateCharacter(characterName, replace, forceLocal, skipIntro, args.Context.AddString);
             });
 
             new Terminal.ConsoleCommand("cli_select_character", "Select an existing character: cli_select_character <name-or-filename>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
@@ -271,23 +273,27 @@ namespace valheimCLI
                 SpawnFrozenNear(args[1], count, level, distance, spacing, args.Context.AddString);
             }, isCheat: true);
 
-            new Terminal.ConsoleCommand("cli_nearby_prefabs", "List prefab objects within a radius of the local player: cli_nearby_prefabs [radius]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            new Terminal.ConsoleCommand("cli_nearby_prefabs", "List prefab objects within a radius of the local player, with each one's ZDO id and owner: cli_nearby_prefabs [radius]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 float radius = 2f;
                 if (args.Length >= 2)
                 {
-                    float.TryParse(args[1], out radius);
+                    if (!CommandArguments.TryRadius(args[1], out radius))
+                    {
+                        args.Context.AddString("ERROR: radius must be finite, greater than zero and at most 1024");
+                        return;
+                    }
                 }
 
                 ListNearbyPrefabs(radius, args.Context.AddString);
             }, isCheat: true);
 
-            new Terminal.ConsoleCommand("cli_prefabs_at", "List prefab objects near a world coordinate, independent of where the player stands: cli_prefabs_at <x> <y> <z> [radius=30]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            new Terminal.ConsoleCommand("cli_prefabs_at", "List prefab objects near a world coordinate, independent of where the player stands, with each one's ZDO id and owner: cli_prefabs_at <x> <y> <z> [radius=30]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length < 4 ||
-                    !float.TryParse(args[1], out float atX) ||
-                    !float.TryParse(args[2], out float atY) ||
-                    !float.TryParse(args[3], out float atZ))
+                    !CommandArguments.TryFiniteFloat(args[1], out float atX) ||
+                    !CommandArguments.TryFiniteFloat(args[2], out float atY) ||
+                    !CommandArguments.TryFiniteFloat(args[3], out float atZ))
                 {
                     args.Context.AddString("Usage: cli_prefabs_at <x> <y> <z> [radius=30]");
                     return;
@@ -296,7 +302,11 @@ namespace valheimCLI
                 float atRadius = 30f;
                 if (args.Length >= 5)
                 {
-                    float.TryParse(args[4], out atRadius);
+                    if (!CommandArguments.TryRadius(args[4], out atRadius))
+                    {
+                        args.Context.AddString("ERROR: radius must be finite, greater than zero and at most 1024");
+                        return;
+                    }
                 }
 
                 ListPrefabsAt(new Vector3(atX, atY, atZ), Mathf.Clamp(atRadius, 0.5f, 60f), args.Context.AddString);
@@ -504,17 +514,77 @@ namespace valheimCLI
                 args.Context.AddString($"OK: screenshot queued path={path} size={Screen.width * supersize}x{Screen.height * supersize}");
             }, isCheat: true);
 
-            new Terminal.ConsoleCommand("cli_world_dump", "Sample the world generator to CSV for offline analysis: cli_world_dump [step=50] [dir]. Writes world.csv (x,z,height,biome,river) over the full map and locations.csv (name,x,z,radius)", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            new Terminal.ConsoleCommand("cli_generator_at", "Read the world generator at up to 16 points without creating a dump: cli_generator_at <x> <z> [<x> <z> ...]. Returns height, biome, river, river width and unitless base height at each point", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
-                int step = 50;
-                if (args.Length >= 2 && !int.TryParse(args[1], out step))
+                string[] words = Enumerable.Range(0, args.Length).Select(index => args[index]).ToArray();
+                if (!GeneratorPointRequest.TryParse(words, out List<float[]> points))
                 {
-                    args.Context.AddString("Usage: cli_world_dump [step=50] [dir]");
+                    args.Context.AddString("Usage: cli_generator_at <x> <z> [<x> <z> ...] (1..16 points inside the world square)");
+                    return;
+                }
+                GeneratorAt(points, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_world_dump", "Sample the world generator to CSV for offline analysis: cli_world_dump [step=50] [dir] [--window cx,cz,half]. Writes world.csv (x,z,height,biome,river,river_width,base_height) over the full map plus locations.csv (name,x,z,radius); with --window it writes one window file and no locations. Samples sit on the world lattice (-10000 + i*step), so step 8 lands on the pathfinding cells and step 128 on the island grid", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                const string usage = "Usage: cli_world_dump [step=50] [dir] [--window cx,cz,half]";
+                int step = 50;
+                string? dir = null;
+                float? centerX = null, centerZ = null, half = null;
+                int positional = 0;
+
+                for (int i = 1; i < args.Length; i++)
+                {
+                    string arg = args[i];
+                    if (arg.Equals("--window", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (i + 1 >= args.Length || centerX.HasValue)
+                        {
+                            args.Context.AddString(usage);
+                            return;
+                        }
+
+                        if (!WorldDumpGrid.TryParseWindow(args[++i], out float cx, out float cz, out float halfSize))
+                        {
+                            args.Context.AddString(usage);
+                            return;
+                        }
+
+                        centerX = cx;
+                        centerZ = cz;
+                        half = halfSize;
+                        continue;
+                    }
+
+                    if (positional == 0)
+                    {
+                        if (!int.TryParse(arg, out step))
+                        {
+                            args.Context.AddString(usage);
+                            return;
+                        }
+
+                        positional++;
+                        continue;
+                    }
+
+                    if (positional == 1)
+                    {
+                        dir = arg;
+                        positional++;
+                        continue;
+                    }
+
+                    args.Context.AddString(usage);
                     return;
                 }
 
-                string? dir = args.Length >= 3 ? args[2] : null;
-                WorldDump(Mathf.Clamp(step, 5, 1000), dir, args.Context.AddString);
+                if (step < 5 || step > 1000)
+                {
+                    args.Context.AddString("ERROR: step must be between 5 and 1000 metres");
+                    return;
+                }
+                WorldDump(step, dir, args.Context.AddString, centerX, centerZ, half);
             }, isCheat: true);
 
             new Terminal.ConsoleCommand("cli_zone_ready", "Report whether every zone within a radius of a point is loaded, for scripts that poll after a teleport instead of sleeping: cli_zone_ready <x> <z> [radius=32]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
@@ -623,15 +693,64 @@ namespace valheimCLI
                 args.Context.AddString($"OK: tutorialsEnabled={enabled} dismissedActiveRaven={dismissed}");
             }, isCheat: true);
 
-            new Terminal.ConsoleCommand("cli_set_player_safety", "Set local player god and ghost modes: cli_set_player_safety <true|false>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            new Terminal.ConsoleCommand("cli_set_player_safety", "Set local player god, ghost and debug modes (true also turns cheats on; true targetable leaves ghost off) and report each: cli_set_player_safety <true|false> [targetable]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
-                if (args.Length < 2 || !bool.TryParse(args[1], out bool enabled))
+                if (!PlayerModes.TryParseSafety(args.Args, out bool enabled, out bool targetable, out string error))
                 {
-                    args.Context.AddString("Usage: cli_set_player_safety <true|false>");
+                    args.Context.AddString(error);
                     return;
                 }
 
-                SetPlayerSafety(enabled, args.Context.AddString);
+                SetPlayerSafety(enabled, args.Context.AddString, targetable);
+            }, isCheat: true);
+
+            // Vanilla confirmcheats is a remote server command when this client joined a dedicated server: its
+            // success reply does not mark the local PlayerProfile, so the next local cheat-classified command is
+            // still refused. This explicit local equivalent is for disposable test characters only.
+            new Terminal.ConsoleCommand("cli_acknowledge_local_cheats", "Permanently mark the current local character as having used cheats (disposable test characters only): cli_acknowledge_local_cheats", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length != 1)
+                {
+                    args.Context.AddString("Usage: cli_acknowledge_local_cheats");
+                    return;
+                }
+                if (Player.m_localPlayer == null || Game.instance == null)
+                {
+                    args.Context.AddString("ERROR: code=no_local_player A loaded local character is required");
+                    return;
+                }
+                PlayerProfile profile = Game.instance.GetPlayerProfile();
+                if (!profile.m_usedCheats)
+                {
+                    profile.m_usedCheats = true;
+                    profile.IncrementStat(PlayerStatType.Cheats);
+                }
+                args.Context.AddString("OK: localCharacterCheated=" + profile.m_usedCheats);
+            }, isCheat: false);
+
+            new Terminal.ConsoleCommand("cli_fly", "Report, set or toggle the local player's debug fly without the Z key, which needs cheats in effect and so never works on a client joined to a dedicated server: cli_fly [on|off|toggle]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                Player player = Player.m_localPlayer;
+                if (player == null)
+                {
+                    args.Context.AddString("ERROR: No local player found");
+                    return;
+                }
+
+                bool current = player.InDebugFlyMode();
+                if (!PlayerModes.TryFlyTarget(args.Args, current, out bool target, out _, out string error))
+                {
+                    args.Context.AddString(error);
+                    return;
+                }
+
+                // ToggleDebugFly flips the flag, so it is called only when the state differs.
+                if (target != current)
+                {
+                    player.ToggleDebugFly();
+                }
+                bool fly = player.InDebugFlyMode();
+                args.Context.AddString(PlayerModes.FlyLine(fly, fly != current));
             }, isCheat: true);
 
             new Terminal.ConsoleCommand("cli_give_item", "Add an item directly to the local player inventory: cli_give_item <prefab> [count] [quality]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
@@ -1076,7 +1195,7 @@ namespace valheimCLI
                     SetServerPassword(args[2]);
                 }
 
-                valheimCLIPlugin.RequestAutoStartQueuedJoin();
+                StandardSession.RequestAutoStartQueuedJoin();
                 ZSteamMatchmaking.instance.QueueServerJoin(address);
                 args.Context.AddString($"OK: Queued server join for {address}");
             });
@@ -1131,6 +1250,31 @@ namespace valheimCLI
                 PrintConnectionStatus(args.Context.AddString);
             });
 
+            new Terminal.ConsoleCommand("cli_create_world", "Create a local world with a KNOWN seed, so a terrain report can be reproduced: cli_create_world <worldName> <seed> [--overwrite]. Writes the world metadata and stops; start it with cli_start_local_world. Runs at the main menu, like the other world commands, so it is not cheat-gated", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 3)
+                {
+                    args.Context.AddString("Usage: cli_create_world <worldName> <seed> [--overwrite]");
+                    return;
+                }
+
+                bool overwrite = false;
+                for (int i = 3; i < args.Length; i++)
+                {
+                    if (args[i].Equals("--overwrite", StringComparison.OrdinalIgnoreCase) && !overwrite)
+                    {
+                        overwrite = true;
+                    }
+                    else
+                    {
+                        args.Context.AddString("Usage: cli_create_world <worldName> <seed> [--overwrite]");
+                        return;
+                    }
+                }
+
+                CreateWorldWithSeed(args[1], args[2], overwrite, args.Context.AddString);
+            });
+
             new Terminal.ConsoleCommand("cli_start_local_world", "Create/select and start a local world: cli_start_local_world <worldName>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length < 2)
@@ -1174,228 +1318,7 @@ namespace valheimCLI
                 LogoutSave(args.Context.AddString);
             });
 
-            new Terminal.ConsoleCommand("cli_mwl_port_status", "Print More World Locations port runtime state: cli_mwl_port_status [radius]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
-            {
-                float radius = 80f;
-                if (args.Length >= 2)
-                {
-                    float.TryParse(args[1], out radius);
-                }
-
-                PrintMwlPortStatus(radius, args.Context.AddString);
-            }, isCheat: true);
-
-            new Terminal.ConsoleCommand("cli_mwl_goto_port", "Teleport to an MWL port from ShipmentManager.GetPorts: cli_mwl_goto_port [index]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
-            {
-                int index = 0;
-                if (args.Length >= 2)
-                {
-                    int.TryParse(args[1], out index);
-                }
-
-                GotoMwlPort(Math.Max(0, index), args.Context.AddString);
-            }, isCheat: true);
-
-            new Terminal.ConsoleCommand("cli_mwl_clear_shipments", "Clear all currently synced MWL shipments from the server", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
-            {
-                ClearMwlShipments(args.Context.AddString);
-            }, isCheat: true);
-
-            new Terminal.ConsoleCommand("cli_mwl_port_payment_regression", "Run the MWL port shipment coin-charge regression: cli_mwl_port_payment_regression [itemPrefab] [itemCount]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
-            {
-                string itemPrefab = args.Length >= 2 ? args[1] : "Wood";
-                int itemCount = 10;
-                if (args.Length >= 3)
-                {
-                    int.TryParse(args[2], out itemCount);
-                }
-
-                RunMwlPortPaymentRegression(itemPrefab, Mathf.Max(1, itemCount), args.Context.AddString);
-            }, isCheat: true);
-
-            new Terminal.ConsoleCommand("cli_mwl_port_delivery_regression", "Run the MWL port partial-delivery duplicate regression: cli_mwl_port_delivery_regression [itemPrefab] [itemCount]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
-            {
-                string itemPrefab = args.Length >= 2 ? args[1] : "Wood";
-                int itemCount = 10;
-                if (args.Length >= 3)
-                {
-                    int.TryParse(args[2], out itemCount);
-                }
-
-                RunMwlPortDeliveryRegression(itemPrefab, Mathf.Max(1, itemCount), args.Context.AddString);
-            }, isCheat: true);
-
-            new Terminal.ConsoleCommand("cli_mwl_port_ownership_seed", "Create a delivered MWL ownership test shipment at the nearest loaded port: cli_mwl_port_ownership_seed [itemPrefab] [itemCount]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
-            {
-                string itemPrefab = args.Length >= 2 ? args[1] : "Wood";
-                int itemCount = 10;
-                if (args.Length >= 3)
-                {
-                    int.TryParse(args[2], out itemCount);
-                }
-
-                SeedMwlPortOwnershipShipment(itemPrefab, Mathf.Max(1, itemCount), args.Context.AddString);
-            }, isCheat: true);
-
-            new Terminal.ConsoleCommand("cli_mwl_port_ownership_check", "Check whether this player can access an MWL ownership test shipment: cli_mwl_port_ownership_check <shipmentId> [blocked|allowed]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
-            {
-                if (args.Length < 2)
-                {
-                    args.Context.AddString("Usage: cli_mwl_port_ownership_check <shipmentId> [blocked|allowed]");
-                    return;
-                }
-
-                string expectation = args.Length >= 3 ? args[2] : "blocked";
-                CheckMwlPortOwnershipShipment(args[1], expectation, args.Context.AddString);
-            }, isCheat: true);
-
             valheimCLIPlugin.Log.LogInfo("Custom CLI commands registered");
-        }
-
-        private const BindingFlags MwlReflectionFlags = BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
-
-        private sealed class MwlPortContext
-        {
-            public Type PortType = null!;
-            public Type PortInfoType = null!;
-            public Type PortUiType = null!;
-            public Type ManifestType = null!;
-            public Type ShipmentType = null!;
-            public Type ShipmentItemType = null!;
-            public Type ShipmentStateType = null!;
-            public Type ShipmentManagerType = null!;
-            public Type PortIdType = null!;
-            public FieldInfo PortViewField = null!;
-            public FieldInfo PortIdField = null!;
-            public FieldInfo PortNameField = null!;
-            public FieldInfo PortContainersField = null!;
-            public FieldInfo? PortHasOpenDeliveryField;
-            public FieldInfo? PortSelectedDeliveryField;
-            public MethodInfo SpawnContainerMethod = null!;
-            public MethodInfo LoadDeliveryMethod = null!;
-            public MethodInfo DestroyContainersMethod = null!;
-            public FieldInfo ShipmentsField = null!;
-            public MethodInfo GetPortsMethod = null!;
-            public FieldInfo ManifestManifestsField = null!;
-            public FieldInfo ManifestNameField = null!;
-            public FieldInfo ManifestCostField = null!;
-            public FieldInfo ManifestChestIdField = null!;
-            public FieldInfo PortUiInstanceField = null!;
-            public FieldInfo PortUiSelectedDestinationField = null!;
-            public FieldInfo PortUiCurrentTabField = null!;
-            public MethodInfo PortUiShowMethod = null!;
-            public MethodInfo PortUiOnMainButtonMethod = null!;
-            public MethodInfo? ShipmentSendToServerMethod;
-            public MethodInfo? ShipmentCanAccessMethod;
-            public PropertyInfo? CurrencyItemProperty;
-            public ConstructorInfo PortInfoConstructor = null!;
-            public ConstructorInfo ShipmentConstructor = null!;
-            public ConstructorInfo ShipmentItemConstructor = null!;
-        }
-
-        public static void PrintMwlPortStatus(float radius, Action<string> addOutput)
-        {
-            if (!TryGetMwlPortContext(addOutput, out MwlPortContext? context) || context == null)
-            {
-                return;
-            }
-
-            UnityEngine.Object[] loadedPorts = UnityEngine.Object.FindObjectsByType(context.PortType, FindObjectsSortMode.None);
-            List<ZDO> portZdos = GetMwlPortZdos(context);
-            int serverPortCount = portZdos.Count;
-            int shipmentCount = GetMwlShipmentCount(context);
-            int manifestCount = GetMwlManifestCount(context);
-            object? portUi = context.PortUiInstanceField.GetValue(null);
-            Player player = Player.m_localPlayer;
-
-            string nearestText = "nearest=none";
-            if (player != null && TryFindNearestMwlPort(context, radius, out object? nearestPort, out string nearestName, out float nearestDistance) && nearestPort != null)
-            {
-                nearestText = $"nearest='{nearestName}' distance={nearestDistance:F1}m";
-            }
-            else if (player != null && portZdos.Count > 0)
-            {
-                ZDO nearestZdo = portZdos
-                    .OrderBy(portZdo => Vector3.Distance(player.transform.position, portZdo.GetPosition()))
-                    .First();
-                Vector3 zdoPosition = nearestZdo.GetPosition();
-                nearestText = $"nearestZdo=({zdoPosition.x:F0},{zdoPosition.y:F0},{zdoPosition.z:F0}) distance={Vector3.Distance(player.transform.position, zdoPosition):F1}m";
-            }
-
-            string playerText = player != null
-                ? $"player=({player.transform.position.x:F0},{player.transform.position.y:F0},{player.transform.position.z:F0})"
-                : "player=none";
-
-            addOutput($"OK: MWL_PORT_STATUS loadedPorts={loadedPorts.Length} serverPorts={serverPortCount} shipments={shipmentCount} manifests={manifestCount} portUI={(portUi != null)} {playerText} {nearestText}");
-        }
-
-        public static void GotoMwlPort(int index, Action<string> addOutput)
-        {
-            if (!TryGetMwlPortContext(addOutput, out MwlPortContext? context) || context == null)
-            {
-                return;
-            }
-
-            Player player = Player.m_localPlayer;
-            if (player == null)
-            {
-                addOutput("ERROR: No local player found");
-                return;
-            }
-
-            List<ZDO> portZdos = GetMwlPortZdos(context);
-            if (portZdos.Count == 0)
-            {
-                addOutput("ERROR: ShipmentManager.GetPorts returned no MWL port ZDOs");
-                return;
-            }
-
-            List<ZDO> orderedPorts = portZdos
-                .OrderBy(portZdo => Vector3.Distance(player.transform.position, portZdo.GetPosition()))
-                .ToList();
-            int clampedIndex = Mathf.Clamp(index, 0, orderedPorts.Count - 1);
-            ZDO destination = orderedPorts[clampedIndex];
-            Vector3 position = destination.GetPosition();
-            player.TeleportTo(position + Vector3.up, player.transform.rotation, distantTeleport: true);
-            addOutput($"OK: Teleported to MWL port index={clampedIndex} totalPorts={orderedPorts.Count} pos=({position.x:F0},{position.y:F0},{position.z:F0})");
-        }
-
-        public static void ClearMwlShipments(Action<string> addOutput)
-        {
-            if (!TryGetMwlPortContext(addOutput, out MwlPortContext? context) || context == null)
-            {
-                return;
-            }
-
-            IDictionary? shipments = context.ShipmentsField.GetValue(null) as IDictionary;
-            if (shipments == null)
-            {
-                addOutput("ERROR: MWL shipment dictionary is unavailable");
-                return;
-            }
-
-            MethodInfo? onCollectedMethod = context.ShipmentType.GetMethod("OnCollected", MwlReflectionFlags);
-            if (onCollectedMethod == null)
-            {
-                addOutput("ERROR: MWL Shipment.OnCollected method was not found");
-                return;
-            }
-
-            List<object> snapshot = new List<object>();
-            foreach (DictionaryEntry entry in shipments)
-            {
-                if (entry.Value != null)
-                {
-                    snapshot.Add(entry.Value);
-                }
-            }
-
-            foreach (object shipment in snapshot)
-            {
-                onCollectedMethod.Invoke(shipment, null);
-            }
-
-            addOutput($"OK: MWL_CLEAR_SHIPMENTS requested={snapshot.Count}");
         }
 
         public static void TeleportPlayer(Vector3 position, Action<string> addOutput, bool distant = true)
@@ -1407,8 +1330,54 @@ namespace valheimCLI
                 return;
             }
 
-            player.TeleportTo(position, player.transform.rotation, distantTeleport: distant);
+            TeleportAnswer answer = RequestTeleport(player, position, distant);
+            if (answer != TeleportAnswer.Accepted)
+            {
+                addOutput($"ERROR: code=teleport_refused reason={PlayerModes.DescribeRefusal(answer)} {TeleportStateFields(player)}");
+                return;
+            }
             addOutput($"OK: Teleported to {position.x:F1}, {position.y:F1}, {position.z:F1} distant={distant}");
+        }
+
+        /// <summary>
+        /// Ask the game to teleport the local player and say what it answered.
+        /// Player.TeleportTo returns false, and does nothing, while a teleport
+        /// is running and for 2 s after one finishes; the return value is the
+        /// only sign of that.
+        /// </summary>
+        public static TeleportAnswer RequestTeleport(Player player, Vector3 position, bool distant)
+        {
+            return PlayerModes.RequestTeleport(TeleportBlocker(player),
+                () => player.TeleportTo(position, player.transform.rotation, distantTeleport: distant),
+                () => player.m_nview != null && player.m_nview.IsOwner(),
+                player.IsTeleporting);
+        }
+
+        /// <summary>
+        /// What would undo a teleport right now. TeleportTo itself accepts in
+        /// these states: during the first-spawn intro the valkyrie sets the
+        /// player's position every frame until it drops them, and an
+        /// attachment (seat, bed, helm, saddle) does the same from its attach
+        /// point.
+        /// </summary>
+        public static TeleportBlock TeleportBlocker(Player player)
+        {
+            return PlayerModes.Blocker(player.InIntro(), ValkyrieCarriesPlayer(), player.IsAttached(), player.IsDead());
+        }
+
+        private static bool ValkyrieCarriesPlayer()
+        {
+            Valkyrie valkyrie = Valkyrie.m_instance;
+            return valkyrie != null && valkyrie.enabled && !valkyrie.m_droppedPlayer;
+        }
+
+        /// <summary>The player-state fields a refused or failed teleport reports, named as cli_player_state names them.</summary>
+        public static string TeleportStateFields(Player player)
+        {
+            Vector3 p = player.transform.position;
+            return string.Format(CultureInfo.InvariantCulture,
+                "inIntro={0} valkyrieCarrying={1} attached={2} dead={3} teleporting={4} position={5:F1},{6:F1},{7:F1}",
+                player.InIntro(), ValkyrieCarriesPlayer(), player.IsAttached(), player.IsDead(), player.IsTeleporting(), p.x, p.y, p.z);
         }
 
         public static void GotoLocation(string locationNameOrGroup, Action<string> addOutput)
@@ -1527,738 +1496,7 @@ namespace valheimCLI
             addOutput($"OK: FIND_LOCATIONS query='{query}' matched={matches.Count} shown={emitted}");
         }
 
-        public static void RunMwlPortPaymentRegression(string itemPrefab, int itemCount, Action<string> addOutput)
-        {
-            if (!TryGetMwlPortContext(addOutput, out MwlPortContext? context) || context == null)
-            {
-                return;
-            }
-
-            Player player = Player.m_localPlayer;
-            if (player == null)
-            {
-                addOutput("ERROR: No local player found");
-                return;
-            }
-
-            if (!TryFindNearestMwlPort(context, 160f, out object? port, out string portName, out float portDistance) || port == null)
-            {
-                addOutput("ERROR: No loaded MWL port found within 160m. Teleport to an MWL port and run this again.");
-                return;
-            }
-
-            ZDO? currentPortZdo = GetMwlPortZdo(context, port);
-            if (currentPortZdo == null)
-            {
-                addOutput("ERROR: Nearest MWL port has no valid ZDO");
-                return;
-            }
-
-            ZDO? destinationZdo = FindMwlDestinationZdo(context, currentPortZdo);
-            if (destinationZdo == null)
-            {
-                addOutput("ERROR: Need at least two MWL ports available from ShipmentManager.GetPorts()");
-                return;
-            }
-
-            if (!TryGetCheapestMwlManifest(context, out object? manifest, out string manifestName, out int manifestCost, out _) || manifest == null)
-            {
-                addOutput("ERROR: No MWL manifests are registered");
-                return;
-            }
-
-            Container? container = null;
-            try
-            {
-                container = context.SpawnContainerMethod.Invoke(port, new object[] { manifest }) as Container;
-                if (container == null)
-                {
-                    addOutput("ERROR: Failed to spawn MWL manifest container at nearest port");
-                    return;
-                }
-
-                ItemDrop.ItemData? testItem = container.GetInventory().AddItem(itemPrefab, itemCount, 1, 0, 0L, "", cheated: true);
-                if (testItem == null)
-                {
-                    addOutput($"ERROR: Failed to add test item prefab '{itemPrefab}' to manifest container");
-                    context.DestroyContainersMethod.Invoke(port, null);
-                    return;
-                }
-
-                object? containers = context.PortContainersField.GetValue(port);
-                MethodInfo? getCostMethod = containers?.GetType().GetMethod("GetCost", MwlReflectionFlags);
-                int expectedCost = getCostMethod != null ? Convert.ToInt32(getCostMethod.Invoke(containers, null)) : manifestCost;
-                if (expectedCost <= 0)
-                {
-                    addOutput($"ERROR: Manifest '{manifestName}' produced non-positive shipping cost {expectedCost}");
-                    context.DestroyContainersMethod.Invoke(port, null);
-                    return;
-                }
-
-                string currencySharedName = GetMwlCurrencySharedName(context);
-                string currencyPrefabName = GetMwlCurrencyPrefabName(context);
-                Inventory inventory = player.GetInventory();
-                int beforeGrantCurrency = inventory.CountItems(currencySharedName);
-                inventory.AddItem(currencyPrefabName, expectedCost + 100, 1, 0, 0L, "", cheated: true);
-                int beforeCurrency = inventory.CountItems(currencySharedName);
-                int beforeShipments = GetMwlShipmentCount(context);
-
-                object? destinationInfo = context.PortInfoConstructor.Invoke(new object[] { destinationZdo });
-                object? portUi = context.PortUiInstanceField.GetValue(null);
-                if (portUi == null)
-                {
-                    addOutput("ERROR: MWL PortUI.instance is null");
-                    context.DestroyContainersMethod.Invoke(port, null);
-                    return;
-                }
-
-                context.PortUiShowMethod.Invoke(portUi, new object[] { port });
-                context.PortUiSelectedDestinationField.SetValue(portUi, destinationInfo);
-                object portsTab = Enum.Parse(context.PortUiCurrentTabField.FieldType, "Ports");
-                context.PortUiCurrentTabField.SetValue(portUi, portsTab);
-                context.PortUiOnMainButtonMethod.Invoke(portUi, null);
-
-                int afterCurrency = inventory.CountItems(currencySharedName);
-                int afterShipments = GetMwlShipmentCount(context);
-                int spent = beforeCurrency - afterCurrency;
-                string result = spent == expectedCost ? "FIXED" : "BUG_PRESENT";
-                addOutput($"OK: MWL_PAYMENT_REGRESSION result={result} port='{portName}' distance={portDistance:F1}m manifest='{manifestName}' item={itemPrefab}x{itemCount} expectedCost={expectedCost} currencyBeforeGrant={beforeGrantCurrency} currencyBefore={beforeCurrency} currencyAfter={afterCurrency} paymentSpent={spent} shipmentsBefore={beforeShipments} shipmentsAfter={afterShipments}");
-            }
-            catch (TargetInvocationException ex)
-            {
-                addOutput($"ERROR: MWL payment regression threw {ex.InnerException?.GetType().Name ?? ex.GetType().Name}: {ex.InnerException?.Message ?? ex.Message}");
-                if (container != null)
-                {
-                    context.DestroyContainersMethod.Invoke(port, null);
-                }
-            }
-            catch (Exception ex)
-            {
-                addOutput($"ERROR: MWL payment regression failed: {ex.GetType().Name}: {ex.Message}");
-                if (container != null)
-                {
-                    context.DestroyContainersMethod.Invoke(port, null);
-                }
-            }
-        }
-
-        public static void RunMwlPortDeliveryRegression(string itemPrefab, int itemCount, Action<string> addOutput)
-        {
-            if (!TryGetMwlPortContext(addOutput, out MwlPortContext? context) || context == null)
-            {
-                return;
-            }
-
-            Player player = Player.m_localPlayer;
-            if (player == null)
-            {
-                addOutput("ERROR: No local player found");
-                return;
-            }
-
-            if (!TryFindNearestMwlPort(context, 160f, out object? port, out string portName, out float portDistance) || port == null)
-            {
-                addOutput("ERROR: No loaded MWL port found within 160m. Teleport to an MWL port and run this again.");
-                return;
-            }
-
-            if (!TryGetCheapestMwlManifest(context, out object? manifest, out string manifestName, out _, out int chestId) || manifest == null)
-            {
-                addOutput("ERROR: No MWL manifests are registered");
-                return;
-            }
-
-            object? shipmentsObject = context.ShipmentsField.GetValue(null);
-            IDictionary? shipments = shipmentsObject as IDictionary;
-            if (shipments == null)
-            {
-                addOutput("ERROR: MWL shipment dictionary is unavailable");
-                return;
-            }
-
-            string shipmentId = "cli-mwl-delivery-test-" + Guid.NewGuid().ToString("N");
-            try
-            {
-                object originPortId = Activator.CreateInstance(context.PortIdType);
-                context.PortIdType.GetField("Name")?.SetValue(originPortId, "CLI Origin");
-                context.PortIdType.GetField("GUID")?.SetValue(originPortId, "cli-origin-" + Guid.NewGuid().ToString("N"));
-                object destinationPortId = context.PortIdField.GetValue(port);
-
-                object shipment = context.ShipmentConstructor.Invoke(new object[] { originPortId, destinationPortId, 1f });
-                context.ShipmentType.GetField("ShipmentID")?.SetValue(shipment, shipmentId);
-                context.ShipmentType.GetField("State")?.SetValue(shipment, Enum.Parse(context.ShipmentStateType, "Delivered"));
-                context.ShipmentType.GetField("ArrivalTime")?.SetValue(shipment, 0d);
-                context.ShipmentType.GetField("ExpirationTime")?.SetValue(shipment, ZNet.instance.GetTimeSeconds() + 3600d);
-
-                ItemDrop.ItemData? itemData = CreateDetachedItemData(itemPrefab, itemCount);
-                if (itemData == null)
-                {
-                    addOutput($"ERROR: Failed to create detached test item prefab '{itemPrefab}'");
-                    return;
-                }
-
-                object shipmentItem = context.ShipmentItemConstructor.Invoke(new object[] { chestId, itemData });
-                object? shipmentItemsObject = context.ShipmentType.GetField("Items")?.GetValue(shipment);
-                IList? shipmentItems = shipmentItemsObject as IList;
-                if (shipmentItems == null)
-                {
-                    addOutput("ERROR: MWL shipment Items list is unavailable");
-                    return;
-                }
-
-                shipmentItems.Add(shipmentItem);
-                shipments[shipmentId] = shipment;
-
-                bool loaded = Convert.ToBoolean(context.LoadDeliveryMethod.Invoke(port, new object[] { shipment }));
-                bool selectedDeliveryStillSet = context.PortSelectedDeliveryField?.GetValue(port) != null;
-                bool? hasOpenDelivery = context.PortHasOpenDeliveryField != null
-                    ? Convert.ToBoolean(context.PortHasOpenDeliveryField.GetValue(port))
-                    : null;
-                bool fixedBehavior = loaded && context.PortHasOpenDeliveryField != null && hasOpenDelivery == true && !selectedDeliveryStillSet;
-                string result = fixedBehavior ? "FIXED" : "BUG_PRESENT";
-
-                addOutput($"OK: MWL_DELIVERY_REGRESSION result={result} port='{portName}' distance={portDistance:F1}m manifest='{manifestName}' item={itemPrefab}x{itemCount} loaded={loaded} hasOpenDelivery={(hasOpenDelivery.HasValue ? hasOpenDelivery.Value.ToString() : "missing")} portSelectedDeliveryStillSet={selectedDeliveryStillSet} shipmentDictionaryContainsTest={shipments.Contains(shipmentId)}");
-            }
-            catch (TargetInvocationException ex)
-            {
-                addOutput($"ERROR: MWL delivery regression threw {ex.InnerException?.GetType().Name ?? ex.GetType().Name}: {ex.InnerException?.Message ?? ex.Message}");
-            }
-            catch (Exception ex)
-            {
-                addOutput($"ERROR: MWL delivery regression failed: {ex.GetType().Name}: {ex.Message}");
-            }
-            finally
-            {
-                if (shipments.Contains(shipmentId))
-                {
-                    shipments.Remove(shipmentId);
-                }
-
-                context.DestroyContainersMethod.Invoke(port, null);
-            }
-        }
-
-        public static void SeedMwlPortOwnershipShipment(string itemPrefab, int itemCount, Action<string> addOutput)
-        {
-            if (!TryGetMwlPortContext(addOutput, out MwlPortContext? context) || context == null)
-            {
-                return;
-            }
-
-            Player player = Player.m_localPlayer;
-            if (player == null)
-            {
-                addOutput("ERROR: No local player found");
-                return;
-            }
-
-            if (!TryFindNearestMwlPort(context, 160f, out object? port, out string portName, out float portDistance) || port == null)
-            {
-                addOutput("ERROR: No loaded MWL port found within 160m. Teleport to an MWL port and run this again.");
-                return;
-            }
-
-            if (!TryGetCheapestMwlManifest(context, out object? manifest, out string manifestName, out _, out int chestId) || manifest == null)
-            {
-                addOutput("ERROR: No MWL manifests are registered");
-                return;
-            }
-
-            object? shipmentsObject = context.ShipmentsField.GetValue(null);
-            IDictionary? shipments = shipmentsObject as IDictionary;
-            if (shipments == null)
-            {
-                addOutput("ERROR: MWL shipment dictionary is unavailable");
-                return;
-            }
-
-            string shipmentId = "cli-mwl-ownership-test-" + Guid.NewGuid().ToString("N");
-            try
-            {
-                object originPortId = Activator.CreateInstance(context.PortIdType);
-                context.PortIdType.GetField("Name")?.SetValue(originPortId, "CLI Owner Origin");
-                context.PortIdType.GetField("GUID")?.SetValue(originPortId, "cli-owner-origin-" + Guid.NewGuid().ToString("N"));
-                object destinationPortId = context.PortIdField.GetValue(port);
-
-                object shipment = context.ShipmentConstructor.Invoke(new object[] { originPortId, destinationPortId, 1f });
-                context.ShipmentType.GetField("ShipmentID")?.SetValue(shipment, shipmentId);
-                context.ShipmentType.GetField("State")?.SetValue(shipment, Enum.Parse(context.ShipmentStateType, "Delivered"));
-                context.ShipmentType.GetField("ArrivalTime")?.SetValue(shipment, 0d);
-                context.ShipmentType.GetField("ExpirationTime")?.SetValue(shipment, ZNet.instance.GetTimeSeconds() + 3600d);
-
-                ItemDrop.ItemData? itemData = CreateDetachedItemData(itemPrefab, itemCount);
-                if (itemData == null)
-                {
-                    addOutput($"ERROR: Failed to create detached test item prefab '{itemPrefab}'");
-                    return;
-                }
-
-                object shipmentItem = context.ShipmentItemConstructor.Invoke(new object[] { chestId, itemData });
-                object? shipmentItemsObject = context.ShipmentType.GetField("Items")?.GetValue(shipment);
-                IList? shipmentItems = shipmentItemsObject as IList;
-                if (shipmentItems == null)
-                {
-                    addOutput("ERROR: MWL shipment Items list is unavailable");
-                    return;
-                }
-
-                int beforeShipments = shipments.Count;
-                shipmentItems.Add(shipmentItem);
-                if (context.ShipmentSendToServerMethod != null)
-                {
-                    context.ShipmentSendToServerMethod.Invoke(shipment, null);
-                }
-                else
-                {
-                    shipments[shipmentId] = shipment;
-                }
-
-                string destinationPortGuid = GetMwlPortIdGuid(context, destinationPortId);
-                addOutput($"OK: MWL_OWNERSHIP_SEED shipmentId={shipmentId} owner='{player.GetPlayerName()}' playerId={player.GetPlayerID()} port='{portName}' portGuid={destinationPortGuid} distance={portDistance:F1}m manifest='{manifestName}' item={itemPrefab}x{itemCount} shipmentsBefore={beforeShipments} shipmentsLocalAfter={shipments.Count}");
-            }
-            catch (TargetInvocationException ex)
-            {
-                addOutput($"ERROR: MWL ownership seed threw {ex.InnerException?.GetType().Name ?? ex.GetType().Name}: {ex.InnerException?.Message ?? ex.Message}");
-            }
-            catch (Exception ex)
-            {
-                addOutput($"ERROR: MWL ownership seed failed: {ex.GetType().Name}: {ex.Message}");
-            }
-        }
-
-        public static void CheckMwlPortOwnershipShipment(string shipmentId, string expectation, Action<string> addOutput)
-        {
-            if (!TryGetMwlPortContext(addOutput, out MwlPortContext? context) || context == null)
-            {
-                return;
-            }
-
-            Player player = Player.m_localPlayer;
-            if (player == null)
-            {
-                addOutput("ERROR: No local player found");
-                return;
-            }
-
-            object? shipmentsObject = context.ShipmentsField.GetValue(null);
-            IDictionary? shipments = shipmentsObject as IDictionary;
-            if (shipments == null)
-            {
-                addOutput("ERROR: MWL shipment dictionary is unavailable");
-                return;
-            }
-
-            if (!shipments.Contains(shipmentId))
-            {
-                addOutput($"ERROR: MWL_OWNERSHIP_CHECK shipmentId={shipmentId} found=false shipments={shipments.Count}");
-                return;
-            }
-
-            object? shipment = shipments[shipmentId];
-            if (shipment == null)
-            {
-                addOutput($"ERROR: MWL_OWNERSHIP_CHECK shipmentId={shipmentId} found=true shipment=null shipments={shipments.Count}");
-                return;
-            }
-
-            string normalizedExpectation = expectation.Equals("allowed", StringComparison.OrdinalIgnoreCase) ? "allowed" : "blocked";
-            bool hasOwnershipGate = context.ShipmentCanAccessMethod != null;
-            bool canAccess = true;
-            if (context.ShipmentCanAccessMethod != null)
-            {
-                canAccess = Convert.ToBoolean(context.ShipmentCanAccessMethod.Invoke(shipment, new object[] { player }));
-            }
-
-            string destinationPortId = Convert.ToString(context.ShipmentType.GetField("DestinationPortID")?.GetValue(shipment)) ?? "";
-            bool loaded = false;
-            bool destinationLoaded = false;
-            string portName = "";
-            float portDistance = 0f;
-            object? port = FindLoadedMwlPortByGuid(context, destinationPortId, out portName, out portDistance);
-            if (port != null)
-            {
-                destinationLoaded = true;
-                try
-                {
-                    loaded = Convert.ToBoolean(context.LoadDeliveryMethod.Invoke(port, new object[] { shipment }));
-                }
-                catch (TargetInvocationException ex)
-                {
-                    addOutput($"ERROR: MWL ownership check load threw {ex.InnerException?.GetType().Name ?? ex.GetType().Name}: {ex.InnerException?.Message ?? ex.Message}");
-                    return;
-                }
-                finally
-                {
-                    context.DestroyContainersMethod.Invoke(port, null);
-                    context.PortSelectedDeliveryField?.SetValue(port, null);
-                }
-            }
-            else if (TryGetMwlPortZdoByGuid(context, destinationPortId, out ZDO? destinationZdo) && destinationZdo != null)
-            {
-                Vector3 position = destinationZdo.GetPosition();
-                player.TeleportTo(position + Vector3.up, player.transform.rotation, distantTeleport: true);
-                addOutput($"OK: MWL_OWNERSHIP_CHECK shipmentId={shipmentId} found=true destinationLoaded=false teleported=true destinationPortGuid={destinationPortId} retry=true");
-                return;
-            }
-
-            string result;
-            if (normalizedExpectation == "allowed")
-            {
-                result = canAccess && loaded ? "OWNER_ACCESS_OK" : "OWNER_ACCESS_FAILED";
-            }
-            else
-            {
-                result = !canAccess && !loaded ? "FIXED" : "BUG_PRESENT";
-            }
-
-            addOutput($"OK: MWL_OWNERSHIP_CHECK result={result} expectation={normalizedExpectation} shipmentId={shipmentId} player='{player.GetPlayerName()}' playerId={player.GetPlayerID()} hasOwnershipGate={hasOwnershipGate} canAccess={canAccess} loaded={loaded} destinationLoaded={destinationLoaded} destinationPortGuid={destinationPortId} port='{portName}' distance={portDistance:F1}m shipments={shipments.Count}");
-        }
-
-        private static bool TryGetMwlPortContext(Action<string> addOutput, out MwlPortContext? context)
-        {
-            context = null;
-            Type? portType = FindTypeByFullName("More_World_Locations_AIO.Port");
-            Type? portUiType = FindTypeByFullName("More_World_Locations_AIO.PortUI");
-            Type? manifestType = FindTypeByFullName("More_World_Locations_AIO.Manifest");
-            Type? shipmentType = FindTypeByFullName("More_World_Locations_AIO.Shipment");
-            Type? shipmentItemType = FindTypeByFullName("More_World_Locations_AIO.ShipmentItem");
-            Type? shipmentStateType = FindTypeByFullName("More_World_Locations_AIO.ShipmentState");
-            Type? shipmentManagerType = FindTypeByFullName("More_World_Locations_AIO.ShipmentManager");
-            if (portType == null || portUiType == null || manifestType == null || shipmentType == null || shipmentItemType == null || shipmentStateType == null || shipmentManagerType == null)
-            {
-                addOutput("ERROR: More_World_Locations_AIO port runtime types are not loaded");
-                return false;
-            }
-
-            Type? portInfoType = portType.GetNestedType("PortInfo", MwlReflectionFlags);
-            Type? portIdType = shipmentManagerType.GetNestedType("PortID", MwlReflectionFlags);
-            if (portInfoType == null || portIdType == null)
-            {
-                addOutput("ERROR: MWL PortInfo or ShipmentManager.PortID type was not found");
-                return false;
-            }
-
-            MwlPortContext resolved = new MwlPortContext
-            {
-                PortType = portType,
-                PortInfoType = portInfoType,
-                PortUiType = portUiType,
-                ManifestType = manifestType,
-                ShipmentType = shipmentType,
-                ShipmentItemType = shipmentItemType,
-                ShipmentStateType = shipmentStateType,
-                ShipmentManagerType = shipmentManagerType,
-                PortIdType = portIdType,
-                PortViewField = RequireField(portType, "m_view"),
-                PortIdField = RequireField(portType, "m_portID"),
-                PortNameField = RequireField(portType, "m_name"),
-                PortContainersField = RequireField(portType, "m_containers"),
-                PortHasOpenDeliveryField = portType.GetField("m_hasOpenDelivery", MwlReflectionFlags),
-                PortSelectedDeliveryField = portType.GetField("m_selectedDelivery", MwlReflectionFlags),
-                SpawnContainerMethod = RequireMethod(portType, "SpawnContainer"),
-                LoadDeliveryMethod = RequireMethod(portType, "LoadDelivery"),
-                DestroyContainersMethod = RequireMethod(portType, "DestroyContainers"),
-                ShipmentsField = RequireField(shipmentManagerType, "Shipments"),
-                GetPortsMethod = RequireMethod(shipmentManagerType, "GetPorts"),
-                ManifestManifestsField = RequireField(manifestType, "Manifests"),
-                ManifestNameField = RequireField(manifestType, "Name"),
-                ManifestCostField = RequireField(manifestType, "CostToShip"),
-                ManifestChestIdField = RequireField(manifestType, "ChestStableHashCode"),
-                PortUiInstanceField = RequireField(portUiType, "instance"),
-                PortUiSelectedDestinationField = RequireField(portUiType, "m_selectedDestination"),
-                PortUiCurrentTabField = RequireField(portUiType, "m_currentTab"),
-                PortUiShowMethod = RequireMethod(portUiType, "Show"),
-                PortUiOnMainButtonMethod = RequireMethod(portUiType, "OnMainButton"),
-                ShipmentSendToServerMethod = shipmentType.GetMethod("SendToServer", MwlReflectionFlags),
-                ShipmentCanAccessMethod = shipmentType.GetMethod("CanAccess", MwlReflectionFlags),
-                CurrencyItemProperty = shipmentManagerType.GetProperty("CurrencyItem", MwlReflectionFlags),
-                PortInfoConstructor = RequireConstructor(portInfoType, new Type[] { typeof(ZDO) }),
-                ShipmentConstructor = RequireConstructor(shipmentType, new Type[] { portIdType, portIdType, typeof(float) }),
-                ShipmentItemConstructor = RequireConstructor(shipmentItemType, new Type[] { typeof(int), typeof(ItemDrop.ItemData) })
-            };
-
-            context = resolved;
-            return true;
-        }
-
-        private static Type? FindTypeByFullName(string fullName)
-        {
-            Type? type = Type.GetType(fullName + ", More_World_Locations_AIO");
-            if (type != null)
-            {
-                return type;
-            }
-
-            Assembly[] assemblies = AppDomain.CurrentDomain.GetAssemblies();
-            foreach (Assembly assembly in assemblies)
-            {
-                type = assembly.GetType(fullName);
-                if (type != null)
-                {
-                    return type;
-                }
-            }
-
-            return null;
-        }
-
-        private static FieldInfo RequireField(Type type, string fieldName)
-        {
-            FieldInfo? field = type.GetField(fieldName, MwlReflectionFlags);
-            if (field == null)
-            {
-                throw new MissingFieldException(type.FullName, fieldName);
-            }
-
-            return field;
-        }
-
-        private static MethodInfo RequireMethod(Type type, string methodName)
-        {
-            MethodInfo? method = type.GetMethod(methodName, MwlReflectionFlags);
-            if (method == null)
-            {
-                throw new MissingMethodException(type.FullName, methodName);
-            }
-
-            return method;
-        }
-
-        private static ConstructorInfo RequireConstructor(Type type, Type[] parameterTypes)
-        {
-            ConstructorInfo? constructor = type.GetConstructor(MwlReflectionFlags, null, parameterTypes, null);
-            if (constructor == null)
-            {
-                throw new MissingMethodException(type.FullName, ".ctor");
-            }
-
-            return constructor;
-        }
-
-        private static bool TryFindNearestMwlPort(MwlPortContext context, float radius, out object? nearestPort, out string nearestName, out float nearestDistance)
-        {
-            nearestPort = null;
-            nearestName = "";
-            nearestDistance = float.MaxValue;
-            Player player = Player.m_localPlayer;
-            if (player == null)
-            {
-                return false;
-            }
-
-            UnityEngine.Object[] ports = UnityEngine.Object.FindObjectsByType(context.PortType, FindObjectsSortMode.None);
-            foreach (UnityEngine.Object candidate in ports)
-            {
-                Component? component = candidate as Component;
-                if (component == null)
-                {
-                    continue;
-                }
-
-                float distance = Vector3.Distance(player.transform.position, component.transform.position);
-                if (distance > radius || distance >= nearestDistance)
-                {
-                    continue;
-                }
-
-                nearestPort = candidate;
-                nearestName = Convert.ToString(context.PortNameField.GetValue(candidate)) ?? candidate.name;
-                nearestDistance = distance;
-            }
-
-            return nearestPort != null;
-        }
-
-        private static ZDO? GetMwlPortZdo(MwlPortContext context, object port)
-        {
-            ZNetView? view = context.PortViewField.GetValue(port) as ZNetView;
-            if (view == null || !view.IsValid())
-            {
-                return null;
-            }
-
-            return view.GetZDO();
-        }
-
-        private static ZDO? FindMwlDestinationZdo(MwlPortContext context, ZDO currentPortZdo)
-        {
-            List<ZDO> ports = GetMwlPortZdos(context);
-            foreach (ZDO zdo in ports)
-            {
-                if (!zdo.m_uid.Equals(currentPortZdo.m_uid))
-                {
-                    return zdo;
-                }
-            }
-
-            return null;
-        }
-
-        private static object? FindLoadedMwlPortByGuid(MwlPortContext context, string portGuid, out string portName, out float portDistance)
-        {
-            portName = "";
-            portDistance = 0f;
-            if (string.IsNullOrEmpty(portGuid))
-            {
-                return null;
-            }
-
-            Player player = Player.m_localPlayer;
-            UnityEngine.Object[] ports = UnityEngine.Object.FindObjectsByType(context.PortType, FindObjectsSortMode.None);
-            foreach (UnityEngine.Object candidate in ports)
-            {
-                object? portId = context.PortIdField.GetValue(candidate);
-                if (!string.Equals(GetMwlPortIdGuid(context, portId), portGuid, StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                Component? component = candidate as Component;
-                portName = Convert.ToString(context.PortNameField.GetValue(candidate)) ?? candidate.name;
-                portDistance = player != null && component != null
-                    ? Vector3.Distance(player.transform.position, component.transform.position)
-                    : 0f;
-                return candidate;
-            }
-
-            return null;
-        }
-
-        private static bool TryGetMwlPortZdoByGuid(MwlPortContext context, string portGuid, out ZDO? portZdo)
-        {
-            portZdo = null;
-            foreach (ZDO zdo in GetMwlPortZdos(context))
-            {
-                object portId = Activator.CreateInstance(context.PortIdType);
-                context.PortIdType.GetField("GUID")?.SetValue(portId, zdo.GetString("PortGUID".GetStableHashCode()));
-                if (!string.Equals(GetMwlPortIdGuid(context, portId), portGuid, StringComparison.Ordinal))
-                {
-                    continue;
-                }
-
-                portZdo = zdo;
-                return true;
-            }
-
-            return false;
-        }
-
-        private static string GetMwlPortIdGuid(MwlPortContext context, object? portId)
-        {
-            if (portId == null)
-            {
-                return "";
-            }
-
-            return Convert.ToString(context.PortIdType.GetField("GUID")?.GetValue(portId)) ?? "";
-        }
-
-        private static List<ZDO> GetMwlPortZdos(MwlPortContext context)
-        {
-            List<ZDO> portZdos = new List<ZDO>();
-            object? portsObject = context.GetPortsMethod.Invoke(null, null);
-            IEnumerable? ports = portsObject as IEnumerable;
-            if (ports == null)
-            {
-                return portZdos;
-            }
-
-            foreach (object zdoObject in ports)
-            {
-                ZDO? zdo = zdoObject as ZDO;
-                if (zdo != null)
-                {
-                    portZdos.Add(zdo);
-                }
-            }
-
-            return portZdos;
-        }
-
-        private static bool TryGetCheapestMwlManifest(MwlPortContext context, out object? manifest, out string manifestName, out int manifestCost, out int chestId)
-        {
-            manifest = null;
-            manifestName = "";
-            manifestCost = int.MaxValue;
-            chestId = 0;
-            IDictionary? manifests = context.ManifestManifestsField.GetValue(null) as IDictionary;
-            if (manifests == null || manifests.Count == 0)
-            {
-                return false;
-            }
-
-            foreach (DictionaryEntry entry in manifests)
-            {
-                object? candidate = entry.Value;
-                if (candidate == null)
-                {
-                    continue;
-                }
-
-                int candidateCost = Convert.ToInt32(context.ManifestCostField.GetValue(candidate));
-                if (candidateCost >= manifestCost)
-                {
-                    continue;
-                }
-
-                manifest = candidate;
-                manifestName = Convert.ToString(context.ManifestNameField.GetValue(candidate)) ?? "Manifest";
-                manifestCost = candidateCost;
-                chestId = Convert.ToInt32(context.ManifestChestIdField.GetValue(candidate));
-            }
-
-            return manifest != null;
-        }
-
-        private static int GetMwlShipmentCount(MwlPortContext context)
-        {
-            ICollection? shipments = context.ShipmentsField.GetValue(null) as ICollection;
-            return shipments?.Count ?? -1;
-        }
-
-        private static int GetMwlManifestCount(MwlPortContext context)
-        {
-            ICollection? manifests = context.ManifestManifestsField.GetValue(null) as ICollection;
-            return manifests?.Count ?? -1;
-        }
-
-        private static string GetMwlCurrencySharedName(MwlPortContext context)
-        {
-            ItemDrop.ItemData? itemData = context.CurrencyItemProperty?.GetValue(null) as ItemDrop.ItemData;
-            return itemData?.m_shared?.m_name ?? "$item_coins";
-        }
-
-        private static string GetMwlCurrencyPrefabName(MwlPortContext context)
-        {
-            ItemDrop.ItemData? itemData = context.CurrencyItemProperty?.GetValue(null) as ItemDrop.ItemData;
-            return itemData?.m_dropPrefab != null ? itemData.m_dropPrefab.name : "Coins";
-        }
-
-        private static ItemDrop.ItemData? CreateDetachedItemData(string itemPrefab, int itemCount)
-        {
-            if (ObjectDB.instance == null)
-            {
-                return null;
-            }
-
-            GameObject prefab = ObjectDB.instance.GetItemPrefab(itemPrefab);
-            if (prefab == null)
-            {
-                return null;
-            }
-
-            ItemDrop itemDrop = prefab.GetComponent<ItemDrop>();
-            if (itemDrop == null)
-            {
-                return null;
-            }
-
-            ItemDrop.ItemData itemData = itemDrop.m_itemData.Clone();
-            itemData.m_stack = itemCount;
-            return itemData;
-        }
-
-        public static void CreateCharacter(string characterName, bool replace, bool forceLocal, Action<string> addOutput)
+        public static void CreateCharacter(string characterName, bool replace, bool forceLocal, bool skipIntro, Action<string> addOutput)
         {
             if (characterName.Length < 3)
             {
@@ -2279,50 +1517,78 @@ namespace valheimCLI
                 return;
             }
 
-            GameObject? playerInstance = PlayerInstanceField?.GetValue(fejd) as GameObject;
-            Player? previewPlayer = playerInstance != null ? playerInstance.GetComponent<Player>() : null;
-            if (previewPlayer == null)
-            {
-                addOutput("ERROR: Character preview player is not available");
-                return;
-            }
-
             string filename = characterName.ToLowerInvariant();
             FileHelpers.FileSource fileSource = forceLocal ? FileHelpers.FileSource.Local : FileHelpers.FileSource.Auto;
-            if (PlayerProfile.HaveProfile(filename))
+            bool exists = PlayerProfile.HaveProfile(filename);
+            if (exists)
             {
                 if (!replace)
                 {
                     addOutput($"ERROR: Character '{characterName}' already exists. Use --replace to recreate it.");
                     return;
                 }
-
-                PlayerProfile.RemoveProfile(filename);
-                SaveSystem.InvalidateCache();
             }
 
-            PlayerProfile profile = new PlayerProfile(filename, fileSource);
-            if (forceLocal)
+            // The selected character is also the menu's preview player. Vanilla
+            // resets that preview in OnCharacterNew before saving a new profile;
+            // reusing it copies the selected character's inventory and mod data.
+            fejd.OnCharacterNew();
+            Player? previewPlayer = fejd.GetPreviewPlayer();
+            if (previewPlayer == null)
             {
-                profile.m_fileSource = FileHelpers.FileSource.Local;
-            }
-
-            previewPlayer.GiveDefaultItems();
-            profile.SetName(characterName);
-            profile.SavePlayerData(previewPlayer);
-            if (!profile.Save())
-            {
-                addOutput($"ERROR: Failed to save character '{characterName}'");
+                fejd.OnNewCharacterCancel();
+                addOutput("ERROR: Fresh character preview player is not available");
                 return;
             }
 
-            SaveSystem.InvalidateCache();
+            PlayerProfile profile;
+            try
+            {
+                if (exists && replace)
+                {
+                    PlayerProfile.RemoveProfile(filename);
+                    SaveSystem.InvalidateCache();
+                }
+
+                profile = new PlayerProfile(filename, fileSource);
+                if (forceLocal)
+                {
+                    profile.m_fileSource = FileHelpers.FileSource.Local;
+                }
+
+                // A new profile is marked for the first-spawn intro: the game
+                // queues it when the world starts and spawns the player on a
+                // valkyrie that holds it (and refuses teleports) until someone
+                // dismisses the text. Saved as already spawned once, the character
+                // lands at the start like a returning one; the game clears this
+                // flag itself after the first spawn.
+                if (skipIntro)
+                {
+                    profile.m_firstSpawn = false;
+                }
+
+                previewPlayer.GiveDefaultItems();
+                profile.SetName(characterName);
+                profile.SavePlayerData(previewPlayer);
+                if (!profile.Save())
+                {
+                    addOutput($"ERROR: Failed to save character '{characterName}'");
+                    return;
+                }
+
+                SaveSystem.InvalidateCache();
+            }
+            finally
+            {
+                fejd.OnNewCharacterCancel();
+            }
+
             ProfilesField?.SetValue(fejd, null);
             SetSelectedProfileMethod?.Invoke(fejd, new object[] { filename });
             PlatformPrefs.SetString("profile", filename);
             Game.SetProfile(filename, profile.m_fileSource);
 
-            addOutput($"OK: Created and selected character '{characterName}' ({profile.m_fileSource})");
+            addOutput($"OK: Created and selected character '{characterName}' ({profile.m_fileSource}) intro={(profile.m_firstSpawn ? "on" : "skipped")}");
         }
 
         public static void SelectCharacter(string characterNameOrFilename, Action<string> addOutput)
@@ -2526,6 +1792,7 @@ namespace valheimCLI
         {
             Collider[] colliders = Physics.OverlapSphere(playerPos, radius);
             Dictionary<GameObject, float> found = new();
+            Dictionary<GameObject, ZNetView> views = new();
             foreach (Collider collider in colliders)
             {
                 if (collider.GetComponentInParent<Player>() != null)
@@ -2540,18 +1807,68 @@ namespace valheimCLI
                 {
                     found[root] = distance;
                 }
+
+                if (nview != null && !views.ContainsKey(root))
+                {
+                    views[root] = nview;
+                }
             }
 
             foreach (KeyValuePair<GameObject, float> entry in found.OrderBy(item => item.Value))
             {
                 Vector3 pos = entry.Key.transform.position;
-                addOutput($"PREFAB name={CleanPrefabName(entry.Key.name)} distance={entry.Value:F1} pos={pos.x:F1},{pos.y:F1},{pos.z:F1}");
+                // Positions to the millimetre, not the decimetre. At F1 the
+                // rounding error is 5 cm per axis, which on a crossing at 45
+                // degrees projects to 7 cm along it -- enough to make pieces on
+                // an exact 2 m grid look 6 cm off it. The census is used to
+                // check geometry, so it has to be finer than what it measures.
+                // Rotation as well as position: a piece can be exactly where
+                // it belongs and still be one no player could place, because
+                // the vanilla hammer builds every ghost at Euler(0, yaw, 0)
+                // with yaw a multiple of Player.m_placeRotationDegrees. Euler
+                // angles come back in [0,360); pitch and roll are reported
+                // signed about zero, which is how "level" reads.
+                Vector3 euler = entry.Key.transform.rotation.eulerAngles;
+                float pitch = Mathf.DeltaAngle(0f, euler.x);
+                float roll = Mathf.DeltaAngle(0f, euler.z);
+                addOutput(FormattableString.Invariant($"PREFAB name={CleanPrefabName(entry.Key.name)} distance={entry.Value:F2} pos={pos.x:F3},{pos.y:F3},{pos.z:F3} rot={pitch:F3},{euler.y:F3},{roll:F3} {DescribeNetIdentity(entry.Key, views)}"));
             }
 
-            addOutput($"OK: NEARBY_PREFABS radius={radius:F1} count={found.Count}");
+            addOutput(FormattableString.Invariant($"OK: NEARBY_PREFABS radius={radius:F1} count={found.Count}"));
         }
 
-        private static string CleanPrefabName(string name)
+        /// <summary>
+        /// The networked identity of a listed object, so two clients can be
+        /// compared by WHICH pieces they see rather than by how many.
+        ///
+        /// zdo is ZDOID.ToString() = "userID:id". The userID half is the
+        /// SESSION id of whoever created the object, so a ZDOID is only
+        /// comparable within one server session: after a server restart the
+        /// same piece comes back under a different id and must be matched on
+        /// name+position instead. owner is the peer currently simulating it,
+        /// and 0 means nobody claims it.
+        ///
+        /// An object with no ZNetView is purely local (client-side scenery),
+        /// which is itself worth seeing in a two-client comparison, so it is
+        /// reported as zdo=local rather than dropped.
+        /// </summary>
+        private static string DescribeNetIdentity(GameObject root, Dictionary<GameObject, ZNetView> views)
+        {
+            if (!views.TryGetValue(root, out ZNetView nview) || nview == null)
+            {
+                return "zdo=local owner=none";
+            }
+
+            if (!nview.IsValid())
+            {
+                return "zdo=invalid owner=none";
+            }
+
+            ZDO zdo = nview.GetZDO();
+            return $"zdo={zdo.m_uid} owner={zdo.GetOwner()}";
+        }
+
+        internal static string CleanPrefabName(string name)
         {
             int cloneIndex = name.IndexOf("(Clone)", StringComparison.Ordinal);
             return cloneIndex >= 0 ? name.Substring(0, cloneIndex) : name;
@@ -2766,7 +2083,31 @@ namespace valheimCLI
             addOutput($"OK: freefly camera at {position.x:F1},{position.y:F1},{position.z:F1} yaw={yaw:F1} pitch={pitch:F1}");
         }
 
-        public static void WorldDump(int step, string? directory, Action<string> addOutput)
+        public static void GeneratorAt(IReadOnlyList<float[]> points, Action<string> addOutput)
+        {
+            WorldGenerator world = WorldGenerator.instance;
+            if (world == null || world.m_world == null || ZoneSystem.instance == null)
+            {
+                addOutput("ERROR: GENERATOR_AT no world loaded");
+                return;
+            }
+            CultureInfo invariant = CultureInfo.InvariantCulture;
+            foreach (float[] point in points)
+            {
+                float x = point[0], z = point[1];
+                float height = world.GetHeight(x, z);
+                Heightmap.Biome biome = world.GetBiome(x, z);
+                world.GetRiverWeight(x, z, out float river, out float riverWidth);
+                float baseHeight = world.GetBaseHeight(x, z, menuTerrain: false);
+                addOutput(string.Format(invariant,
+                    "GENERATOR {0:F1},{1:F1} height={2:F1} biome={3} river={4:F2} river_width={5:F1} base_height={6:F5}",
+                    x, z, height, biome, river, riverWidth, baseHeight));
+            }
+            addOutput(FormattableString.Invariant($"OK: GENERATOR_AT samples={points.Count} world={world.m_world.m_name} uid={world.m_world.m_uid}"));
+        }
+
+        public static void WorldDump(int step, string? directory, Action<string> addOutput,
+            float? windowCenterX = null, float? windowCenterZ = null, float? windowHalf = null)
         {
             WorldGenerator world = WorldGenerator.instance;
             if (world == null)
@@ -2775,25 +2116,66 @@ namespace valheimCLI
                 return;
             }
 
+            if (step < 5 || step > 1000)
+            {
+                addOutput("ERROR: step must be between 5 and 1000 metres");
+                return;
+            }
             const float halfExtent = 10000f;
+            bool windowed = windowCenterX.HasValue && windowCenterZ.HasValue && windowHalf.HasValue;
+            bool anyWindow = windowCenterX.HasValue || windowCenterZ.HasValue || windowHalf.HasValue;
+            string windowSpec = string.Format(CultureInfo.InvariantCulture, "{0},{1},{2}", windowCenterX, windowCenterZ, windowHalf);
+            if (anyWindow && (!windowed || !WorldDumpGrid.TryParseWindow(windowSpec, out _, out _, out _)))
+            {
+                addOutput("ERROR: invalid world dump window");
+                return;
+            }
+            float x0 = windowed ? windowCenterX!.Value - windowHalf!.Value : -halfExtent;
+            float x1 = windowed ? windowCenterX!.Value + windowHalf!.Value : halfExtent;
+            float z0 = windowed ? windowCenterZ!.Value - windowHalf!.Value : -halfExtent;
+            float z1 = windowed ? windowCenterZ!.Value + windowHalf!.Value : halfExtent;
+
+            int ixFrom = Mathf.Max(WorldDumpGrid.From(x0, step), WorldDumpGrid.From(-halfExtent, step));
+            int ixTo = Mathf.Min(WorldDumpGrid.To(x1, step), WorldDumpGrid.To(halfExtent, step));
+            int izFrom = Mathf.Max(WorldDumpGrid.From(z0, step), WorldDumpGrid.From(-halfExtent, step));
+            int izTo = Mathf.Min(WorldDumpGrid.To(z1, step), WorldDumpGrid.To(halfExtent, step));
+
+            if (ixTo < ixFrom || izTo < izFrom)
+            {
+                addOutput("ERROR: WORLD_DUMP window holds no lattice sample at this step");
+                return;
+            }
+
+            if (!WorldDumpGrid.TrySampleCount(ixFrom, ixTo, izFrom, izTo, step, out long expectedSamples))
+            {
+                addOutput("ERROR: WORLD_DUMP exceeds 1000000 samples; use --window or a larger step");
+                return;
+            }
             string dir = string.IsNullOrWhiteSpace(directory) ? BuildWorldDumpDirectory() : directory!;
             Directory.CreateDirectory(dir);
-            string worldPath = Path.Combine(dir, "world.csv");
+            CultureInfo invariant = CultureInfo.InvariantCulture;
+            string worldName = windowed
+                ? string.Format(invariant, "world.win_{0:R}_{1:R}_{2:R}_s{3}.csv",
+                    windowCenterX!.Value, windowCenterZ!.Value, windowHalf!.Value, step)
+                : "world.csv";
+            string worldPath = Path.Combine(dir, worldName);
             string locationsPath = Path.Combine(dir, "locations.csv");
-            var invariant = System.Globalization.CultureInfo.InvariantCulture;
             Stopwatch stopwatch = Stopwatch.StartNew();
 
             int samples = 0;
             using (StreamWriter writer = new StreamWriter(worldPath, false, new System.Text.UTF8Encoding(false)))
             {
-                writer.WriteLine("x,z,height,biome,river");
-                for (float z = -halfExtent; z <= halfExtent; z += step)
+                writer.WriteLine("x,z,height,biome,river,river_width,base_height");
+                for (int iz = izFrom; iz <= izTo; iz++)
                 {
-                    for (float x = -halfExtent; x <= halfExtent; x += step)
+                    float z = WorldDumpGrid.At(iz, step);
+                    for (int ix = ixFrom; ix <= ixTo; ix++)
                     {
+                        float x = WorldDumpGrid.At(ix, step);
                         float height = world.GetHeight(x, z);
                         Heightmap.Biome biome = world.GetBiome(x, z);
-                        world.GetRiverWeight(x, z, out float river, out _);
+                        world.GetRiverWeight(x, z, out float river, out float riverWidth);
+                        float baseHeight = world.GetBaseHeight(x, z, menuTerrain: false);
                         writer.Write(x.ToString("F0", invariant));
                         writer.Write(',');
                         writer.Write(z.ToString("F0", invariant));
@@ -2802,10 +2184,25 @@ namespace valheimCLI
                         writer.Write(',');
                         writer.Write(biome.ToString());
                         writer.Write(',');
-                        writer.WriteLine(river.ToString("F2", invariant));
+                        writer.Write(river.ToString("F2", invariant));
+                        writer.Write(',');
+                        writer.Write(riverWidth.ToString("F1", invariant));
+                        writer.Write(',');
+                        writer.WriteLine(baseHeight.ToString("F5", invariant));
                         samples++;
                     }
                 }
+            }
+
+            if (samples != expectedSamples)
+            {
+                addOutput($"ERROR: WORLD_DUMP incomplete: expected={expectedSamples} actual={samples}");
+                return;
+            }
+            if (windowed)
+            {
+                addOutput(FormattableString.Invariant($"OK: WORLD_DUMP samples={samples} step={step} window={windowCenterX!.Value:F0},{windowCenterZ!.Value:F0},{windowHalf!.Value:F0} extent={WorldDumpGrid.At(ixFrom, step):F0},{WorldDumpGrid.At(izFrom, step):F0}..{WorldDumpGrid.At(ixTo, step):F0},{WorldDumpGrid.At(izTo, step):F0} ms={stopwatch.ElapsedMilliseconds} world={worldPath}"));
+                return;
             }
 
             int locations = 0;
@@ -3115,7 +2512,7 @@ namespace valheimCLI
 
             holdSeconds = Mathf.Clamp(holdSeconds, 0.05f, 10f);
             waitLoadedSeconds = Mathf.Clamp(waitLoadedSeconds, 0f, 30f);
-            valheimCLIPlugin.Instance.StartCoroutine(FireCurrentWeaponRoutine(holdSeconds, waitLoadedSeconds));
+            StandardPack.Module.Run(FireCurrentWeaponRoutine(holdSeconds, waitLoadedSeconds));
             addOutput($"OK: Queued fire currentWeapon='{weapon.m_shared.m_name}' holdSeconds={holdSeconds:F2} waitLoadedSeconds={waitLoadedSeconds:F1}");
         }
 
@@ -3142,7 +2539,7 @@ namespace valheimCLI
             }
 
             seconds = Mathf.Clamp(seconds, 0.2f, 15f);
-            valheimCLIPlugin.Instance.StartCoroutine(HoldAttackRoutine(seconds));
+            StandardPack.Module.Run(HoldAttackRoutine(seconds));
             addOutput($"OK: Queued hold attack currentWeapon='{weapon.m_shared.m_name}' seconds={seconds:F1}");
         }
 
@@ -3762,7 +3159,7 @@ namespace valheimCLI
                 return;
             }
 
-            valheimCLIPlugin.Instance.StartCoroutine(WalkRoutine(seconds, run));
+            StandardPack.Module.Run(WalkRoutine(seconds, run));
             addOutput($"OK: Walking forward for {seconds:F1}s (run={run})");
         }
 
@@ -3877,7 +3274,7 @@ namespace valheimCLI
                 return;
             }
 
-            valheimCLIPlugin.Instance.StartCoroutine(ResendDestroyedZdoRoutine(
+            StandardPack.Module.Run(ResendDestroyedZdoRoutine(
                 serverPeer.m_rpc,
                 zdoId,
                 ownerRevision,
@@ -4091,17 +3488,45 @@ namespace valheimCLI
                 return;
             }
 
-            ItemDrop.ItemData? item = FindInventoryItem(player.GetInventory(), requestedName);
-            if (item == null)
+            // An equipped match is preferred, so a second copy of the item
+            // in hand is never swapped in (see ItemSelection).
+            List<ItemDrop.ItemData> items = player.GetInventory().GetAllItems();
+            string requested = requestedName.Trim();
+            List<ItemMatch> matches = items.Select(candidate => MatchItem(candidate, requested)).ToList();
+            List<bool> equippedFlags = items.Select(candidate => player.IsItemEquiped(candidate)).ToList();
+            int index = ItemSelection.Choose(matches, equippedFlags);
+            if (index < 0)
             {
                 addOutput($"ERROR: No inventory item matching '{requestedName}'");
                 return;
             }
 
-            bool equipped = player.EquipItem(item);
-            addOutput(equipped
-                ? $"OK: equipped item prefab={GetItemPrefabName(item)} name={item.m_shared.m_name} type={item.m_shared.m_itemType}"
-                : $"ERROR: Equip failed prefab={GetItemPrefabName(item)} name={item.m_shared.m_name} type={item.m_shared.m_itemType}");
+            ItemDrop.ItemData item = items[index];
+            // Humanoid.EquipItem returns false for an item already equipped;
+            // that is the state asked for, so it is reported, not toggled.
+            bool already = equippedFlags[index];
+            bool accepted = !already && player.EquipItem(item);
+            addOutput($"{ItemSelection.ReplyPrefix(already, accepted)} prefab={GetItemPrefabName(item)} name={item.m_shared.m_name} type={item.m_shared.m_itemType} already={already}");
+        }
+
+        private static ItemMatch MatchItem(ItemDrop.ItemData item, string requested)
+        {
+            string prefabName = GetItemPrefabName(item);
+            string token = item.m_shared.m_name;
+            string display = Localization.instance.Localize(token);
+            if (prefabName.Equals(requested, StringComparison.OrdinalIgnoreCase) ||
+                token.Equals(requested, StringComparison.OrdinalIgnoreCase) ||
+                display.Equals(requested, StringComparison.OrdinalIgnoreCase))
+            {
+                return ItemMatch.Exact;
+            }
+            if (prefabName.IndexOf(requested, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                token.IndexOf(requested, StringComparison.OrdinalIgnoreCase) >= 0 ||
+                display.IndexOf(requested, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return ItemMatch.Partial;
+            }
+            return ItemMatch.None;
         }
 
         public static void ApplyMagicEffect(string requestedItemName, string effectType, string rarityName, float effectValue, Action<string> addOutput)
@@ -4208,7 +3633,7 @@ namespace valheimCLI
             addOutput($"OK: weapon={weaponText} ammo={ammoText} requiresReload={requiresReload} loaded={loaded} inAttack={player.InAttack()}");
         }
 
-        public static void SetPlayerSafety(bool enabled, Action<string> addOutput)
+        public static void SetPlayerSafety(bool enabled, Action<string> addOutput, bool targetable = false)
         {
             Player player = Player.m_localPlayer;
             if (player == null)
@@ -4218,8 +3643,22 @@ namespace valheimCLI
             }
 
             player.SetGodMode(enabled);
-            player.SetGhostMode(enabled);
-            addOutput($"OK: playerSafety enabled={enabled} god={player.InGodMode()} ghost={player.InGhostMode()}");
+            player.SetGhostMode(enabled && !targetable); // Replicated to every peer that loads this pack (GhostReplication).
+            // Debug mode (fly on Z, no-cost building on B) is set, never
+            // toggled: the vanilla debugmode command flips it, so running that
+            // blind is as likely to turn it off as on.
+            Player.m_debugMode = enabled;
+            // Debug mode's keys only work with cheats on, which the game starts
+            // with off. Cheats are switched on here and never off: turning them
+            // off could undo a devcommands the user ran on purpose. A client
+            // joined to a dedicated server never has cheats in effect whatever
+            // this flag says; cli_fly works there.
+            if (enabled && !Terminal.m_cheat)
+            {
+                Terminal.m_cheat = true;
+                Console.instance?.updateCommandList();
+            }
+            addOutput(PlayerModes.SafetyLine(enabled, player.InGodMode(), player.InGhostMode(), Player.m_debugMode, Terminal.m_cheat, GhostReplication.Replicated(player) == player.InGhostMode(), targetable));
         }
 
         private static bool TryGetLocalInventory(Action<string> addOutput, out Inventory inventory)
@@ -5052,6 +4491,62 @@ namespace valheimCLI
             }
 
             return false;
+        }
+
+        /// <summary>
+        /// A world with a seed the caller chose. The game's own dialog is the
+        /// only other way to set one, so a seed named in a bug report cannot
+        /// otherwise be reproduced from a script.
+        /// </summary>
+        public static void CreateWorldWithSeed(string worldName, string seed, bool overwrite, Action<string> addOutput)
+        {
+            bool atMenu = FejdStartup.instance != null && ZNet.instance == null;
+            if (!WorldFixturePolicy.CanCreate(atMenu, false, false, true, out string contextError))
+            {
+                addOutput("ERROR: " + contextError);
+                return;
+            }
+            if (!ValidateWorldName(worldName, out string validationError))
+            {
+                addOutput(validationError);
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(seed))
+            {
+                addOutput("ERROR: Seed must not be empty");
+                return;
+            }
+
+            List<World> existing = SaveSystem.GetWorldList();
+            World? already = existing.Find(candidate => string.Equals(candidate.m_name, worldName, StringComparison.OrdinalIgnoreCase));
+            if (!WorldFixturePolicy.CanCreate(true, already != null, overwrite,
+                    already == null || already.m_fileSource == FileHelpers.FileSource.Local, out string refusal))
+            {
+                addOutput("ERROR: " + refusal);
+                return;
+            }
+
+            if (already != null)
+            {
+                World.RemoveWorld(already.m_name, already.m_fileSource);
+                SaveSystem.InvalidateCache();
+            }
+
+            World world = new World(worldName, seed);
+            world.m_fileSource = FileHelpers.FileSource.Local;
+            // Valheim 1.0 renamed this: the world's .fwl is "FWL data" now.
+            world.SaveWorldFWLData(DateTime.Now);
+            SaveSystem.InvalidateCache();
+
+            World? saved = SaveSystem.GetWorldList().Find(candidate => candidate.m_name == worldName
+                && candidate.m_fileSource == FileHelpers.FileSource.Local);
+            if (saved == null || saved.m_seedName != seed || saved.m_uid != world.m_uid)
+            {
+                addOutput("ERROR: saved world metadata did not verify; inspect the game log");
+                return;
+            }
+            addOutput($"OK: WORLD_CREATED name={world.m_name} seedName={world.m_seedName} seed={world.m_seed} uid={world.m_uid} worldGenVersion={world.m_worldGenVersion}");
         }
 
         private static bool ValidateWorldName(string worldName, out string error)

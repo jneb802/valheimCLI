@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <Import Project="Environment.props" />
 
@@ -29,9 +29,15 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="Toolkit\**" />
+    <Compile Remove="Packs\**" />
+    <Compile Remove="Adapters\**" />
+    <Compile Remove="examples\**" />
     <Compile Remove="CLI\**" />
     <Compile Remove="Tests\**" />
+    <Compile Remove="artifacts\**" />
     <None Remove="CLI\**" />
+    <None Remove="artifacts\**" />
   </ItemGroup>
 
 </Project>

@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Valheim CLI mod that enables controlling Valheim from an external terminal. It consists of two components:
+ValheimCLI enables controlling Valheim from an external terminal. It consists of two components:
 1. **BepInEx mod** (`valheimCLI.dll`) - Runs inside Valheim, provides a TCP server
-2. **CLI tool** (`valheim-cli`) - External .NET 8 console app that connects to the game
+2. **ValheimCLI tool** (`valheim-cli`) - External .NET 9 console app that connects to the game
 
 ## Build Commands
 
@@ -24,7 +24,7 @@ cd CLI && dotnet build -c Release
 
 ## Prerequisites
 
-- .NET SDK 8.0+
+- .NET 10 SDK for the current test suite (external ValheimCLI targets .NET 9)
 - Valheim installed via Steam with BepInEx
 - Publicized assemblies in `Valheim.app/Contents/Resources/Data/Managed/publicized_assemblies/`
 
@@ -36,9 +36,9 @@ CLI (valheim-cli)  <--TCP:5555-->  Mod (valheimCLI.dll)  -->  Console.TryRunComm
 
 **Mod Components** (`Source/`):
 - `Plugin.cs` - BepInEx plugin entry point, processes commands in Unity Update loop
-- `CommandServer.cs` - TCP server that accepts CLI connections, queues commands
+- `CommandServer.cs` - TCP server that accepts ValheimCLI connections, queues commands
 
-**CLI Tool** (`CLI/`):
+**ValheimCLI Tool** (`CLI/`):
 - `Program.cs` - TCP client with interactive REPL and single-command modes
 
 **Key Valheim APIs used**:
@@ -48,11 +48,9 @@ CLI (valheim-cli)  <--TCP:5555-->  Mod (valheimCLI.dll)  -->  Console.TryRunComm
 
 ## Testing
 
-1. Build both projects
-2. Copy `bin/Debug/valheimCLI.dll` to `Valheim/BepInEx/plugins/`
-3. Launch Valheim
-4. Run `./CLI/bin/Debug/net8.0/valheim-cli`
-5. Try commands like `help`, `pos`, `spawn Boar 5`
+Start with local coverage: `dotnet test Tests/RequestBroker.Tests/RequestBroker.Tests.csproj`, which includes the command-pack inventory checks (`CommandPackInventoryTests`). The developer-loop scripts (`dev-loop`, `pin-mods`, `log-summary`) and their tests live in [ValheimTesting's `tools/dev-loop`](https://github.com/tvongaza/ValheimTesting/tree/main/tools/dev-loop), not here. See [AGENTS.md](AGENTS.md) for the shared test pyramid and examples. Game-side builds need the local compile references; external library tests do not need Valheim.
+
+For an authorized disposable native fixture, use matching core and [optional command packs](docs/command-packs.md). Core alone no longer exposes general gameplay commands. Keep core in plugins, use ScriptEngine only for optional packs/adapters, verify strict pins and world readiness, and never test against a server or save that people play on. The external ValheimCLI output is under `CLI/bin/Debug/net9.0/`.
 
 ## Configuration
 
@@ -63,3 +61,7 @@ Config file: `BepInEx/config/valheimCLI.valheimCLI.cfg`
 ## Code Style
 
 - Never use `var` - always write explicit types
+
+## Testing-framework agent guidance
+
+Read [AGENTS.md](AGENTS.md) for test-layer ownership, current package/pack setup and the shared agent workflow. Existing project-specific guidance above remains applicable.
