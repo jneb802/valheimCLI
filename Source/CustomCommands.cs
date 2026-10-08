@@ -25,6 +25,23 @@ namespace valheimCLI
         public static void Register()
         {
             new Terminal.ConsoleCommand("cli_player_vitals", "Read current/max health, stamina, eitr, food count and regeneration timer", args => PrintPlayerVitals(args.Context.AddString));
+            new Terminal.ConsoleCommand("cli_item_state", "Read an inventory item's equipment state: cli_item_state <prefab-or-display-name>", args =>
+            {
+                if (args.Length != 2)
+                {
+                    args.Context.AddString("Usage: cli_item_state <prefab-or-display-name>");
+                    return;
+                }
+                if (!TryGetLocalInventory(args.Context.AddString, out Inventory inventory)) return;
+                ItemDrop.ItemData? item = FindInventoryItem(inventory, args[1]);
+                if (item == null)
+                {
+                    args.Context.AddString($"ERROR: No inventory item matching '{args[1]}'");
+                    return;
+                }
+                Player player = Player.m_localPlayer;
+                args.Context.AddString(FormattableString.Invariant($"OK: item={GetItemPrefabName(item)} type={item.m_shared.m_itemType} equippedFlag={item.m_equipped} isEquipped={player.IsItemEquipped(item)} chestItem={player.m_chestItem == item} durability={item.m_durability:F2} maxDurability={item.GetMaxDurability():F2}"));
+            });
             new Terminal.ConsoleCommand("cli_consume_item", "Consume inventory food or mead through the normal game action: cli_consume_item <prefab-or-display-name>", args =>
             {
                 if (args.Length != 2)

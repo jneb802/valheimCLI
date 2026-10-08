@@ -7,6 +7,7 @@ Run Valheim console commands from your terminal.
 - `cli_player_vitals` reads current and maximum health, stamina and eitr, food count, the food regeneration timer, the status-effect regeneration multiplier, and god/ghost state. The multiplier does not include every mod's regeneration rules; observe health over time to verify healing.
 - `cli_consume_item <prefab-or-display-name>` consumes an inventory item through `Player.ConsumeItem`. Normal food restrictions and mead cooldowns still apply. The returned health is an immediate snapshot; healing over time requires a later vitals check.
 - `cli_unequip_item <prefab-or-display-name>` removes equipped gear through `Player.UnequipItem`. Use `cli_equip_item` to equip it again.
+- `cli_item_state <prefab-or-display-name>` reads the item's equipped flag, the player's equipment check and chest reference, plus durability. This can expose disagreement between a saved item flag and the gear the player actually wears.
 
 These commands require a local player. The two actions require dev commands. Quote names containing spaces; use exact prefab names for repeatable tests. Item lookup follows the existing inventory commands and selects the first matching item, so avoid duplicate matching items when staging a test.
 
