@@ -24,6 +24,42 @@ namespace valheimCLI
 
         public static void Register()
         {
+            new Terminal.ConsoleCommand("cli_player_vitals", "Read current/max health, stamina, eitr, food count and regeneration timer", args => PrintPlayerVitals(args.Context.AddString));
+            new Terminal.ConsoleCommand("cli_item_state", "Read an inventory item's equipment state: cli_item_state <prefab-or-display-name>", args =>
+            {
+                if (args.Length != 2)
+                {
+                    args.Context.AddString("Usage: cli_item_state <prefab-or-display-name>");
+                    return;
+                }
+                if (!TryGetLocalInventory(args.Context.AddString, out Inventory inventory)) return;
+                ItemDrop.ItemData? item = FindInventoryItem(inventory, args[1]);
+                if (item == null)
+                {
+                    args.Context.AddString($"ERROR: No inventory item matching '{args[1]}'");
+                    return;
+                }
+                Player player = Player.m_localPlayer;
+                args.Context.AddString(FormattableString.Invariant($"OK: item={GetItemPrefabName(item)} type={item.m_shared.m_itemType} equippedFlag={item.m_equipped} isEquipped={player.IsItemEquiped(item)} chestItem={player.m_chestItem == item} durability={item.m_durability:F2} maxDurability={item.GetMaxDurability():F2}"));
+            });
+            new Terminal.ConsoleCommand("cli_consume_item", "Consume inventory food or mead through the normal game action: cli_consume_item <prefab-or-display-name>", args =>
+            {
+                if (args.Length != 2)
+                {
+                    args.Context.AddString("Usage: cli_consume_item <prefab-or-display-name>");
+                    return;
+                }
+                ConsumeInventoryItem(args[1], args.Context.AddString);
+            }, isCheat: true);
+            new Terminal.ConsoleCommand("cli_unequip_item", "Unequip an inventory item: cli_unequip_item <prefab-or-display-name>", args =>
+            {
+                if (args.Length != 2)
+                {
+                    args.Context.AddString("Usage: cli_unequip_item <prefab-or-display-name>");
+                    return;
+                }
+                UnequipInventoryItem(args[1], args.Context.AddString);
+            }, isCheat: true);
             RouteController.Register();
             BuildCommands.Register();
             AsyncCommands.Register();
@@ -4102,6 +4138,52 @@ namespace valheimCLI
             addOutput(equipped
                 ? $"OK: equipped item prefab={GetItemPrefabName(item)} name={item.m_shared.m_name} type={item.m_shared.m_itemType}"
                 : $"ERROR: Equip failed prefab={GetItemPrefabName(item)} name={item.m_shared.m_name} type={item.m_shared.m_itemType}");
+        }
+
+        public static void PrintPlayerVitals(Action<string> addOutput)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null)
+            {
+                addOutput("ERROR: No local player found");
+                return;
+            }
+            float regenMultiplier = 1f;
+            player.GetSEMan().ModifyHealthRegen(ref regenMultiplier);
+            addOutput(FormattableString.Invariant($"OK: health={player.GetHealth():F2} maxHealth={player.GetMaxHealth():F2} stamina={player.GetStamina():F2} maxStamina={player.GetMaxStamina():F2} eitr={player.GetEitr():F2} maxEitr={player.GetMaxEitr():F2} foods={player.m_foods.Count} foodRegenTimer={player.m_foodRegenTimer:F2} regenMultiplier={regenMultiplier:F2} dead={player.IsDead()} god={player.InGodMode()} ghost={player.InGhostMode()}"));
+        }
+
+        public static void ConsumeInventoryItem(string requestedName, Action<string> addOutput)
+        {
+            if (!TryGetLocalInventory(addOutput, out Inventory inventory)) return;
+            ItemDrop.ItemData? item = FindInventoryItem(inventory, requestedName);
+            if (item == null)
+            {
+                addOutput($"ERROR: No inventory item matching '{requestedName}'");
+                return;
+            }
+            string prefab = GetItemPrefabName(item);
+            bool consumed = Player.m_localPlayer.ConsumeItem(inventory, item);
+            addOutput(consumed ? $"OK: consumed item={prefab}" : $"ERROR: Game rejected consuming item={prefab}");
+            PrintPlayerVitals(addOutput);
+        }
+
+        public static void UnequipInventoryItem(string requestedName, Action<string> addOutput)
+        {
+            if (!TryGetLocalInventory(addOutput, out Inventory inventory)) return;
+            ItemDrop.ItemData? item = FindInventoryItem(inventory, requestedName);
+            if (item == null)
+            {
+                addOutput($"ERROR: No inventory item matching '{requestedName}'");
+                return;
+            }
+            if (!item.m_equipped)
+            {
+                addOutput($"ERROR: Item is not equipped: {GetItemPrefabName(item)}");
+                return;
+            }
+            Player.m_localPlayer.UnequipItem(item);
+            addOutput(!item.m_equipped ? $"OK: unequipped item={GetItemPrefabName(item)}" : $"ERROR: Unequip failed item={GetItemPrefabName(item)}");
         }
 
         public static void ApplyMagicEffect(string requestedItemName, string effectType, string rarityName, float effectValue, Action<string> addOutput)
