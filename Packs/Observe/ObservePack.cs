@@ -1,33 +1,15 @@
 using System;
-using System.Collections;
-using System.Linq;
-using BepInEx;
 using valheimCLI.Extensions;
 
 namespace valheimCLI.Observe
 {
-    [BepInPlugin("valheimCLI.observe", "CLI Observations", "0.1.0")]
-    [BepInDependency("valheimCLI.valheimCLI", "1.1.0")]
-    public sealed class ObservePack : BaseUnityPlugin
+    internal sealed class ObservePack : IDisposable
     {
         private ExtensionRegistration? _registration;
 
-        private IEnumerator Start()
+        public void Register(valheimCLIPlugin core)
         {
-            float deadline = UnityEngine.Time.realtimeSinceStartup + 30f;
-            while (valheimCLIPlugin.Instance?.Extensions == null)
-            {
-                if (UnityEngine.Time.realtimeSinceStartup > deadline)
-                { Logger.LogError("CLI core 1.1 is not ready."); yield break; }
-                yield return null;
-            }
-            var registry = valheimCLIPlugin.Instance!.Extensions!;
-            while (registry.Registrations.Any(r => r.Id == "valheim.observe"))
-            {
-                if (UnityEngine.Time.realtimeSinceStartup > deadline)
-                { Logger.LogError("Previous Observe pack is active or draining; replacement refused."); yield break; }
-                yield return null;
-            }
+            var registry = core.Extensions!;
             _registration = registry.Register("valheim.observe", "0.1.0", ExtensionRegistry.ApiVersion,
                 new ExtensionCommand("content-census", "List registered items, recipes, pieces, status effects and prefabs by prefix: <owner-guid> <prefix> [<prefix> ...]", ContentCensus.Run, readOnly: true, needsWorld: true),
                 new ExtensionCommand("harmony", "List applied Harmony patches: [owner]", HarmonyCensus.Run, readOnly: true),
@@ -44,13 +26,13 @@ namespace valheimCLI.Observe
                 new ExtensionCommand("review-clip-frames", "Render bounded world-only PNG frames: <review-id> <new-absolute-directory> <width> <height> <fps> <frames>", ReviewClipFrames.Capture, role: ExtensionRole.Client, needsWorld: true));
         }
 
-        private void OnDestroy()
+        public void Dispose()
         {
             ReviewClipFrames.AbortOnUnload();
             ReviewState.RestoreOnUnload();
             _registration?.Dispose();
         }
 
-        private void Update() => ReviewState.RetireChangedWorld();
+        public void Tick() => ReviewState.RetireChangedWorld();
     }
 }

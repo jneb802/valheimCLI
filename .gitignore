@@ -1,6 +1,7 @@
 # Build outputs
 bin/
 obj/
+artifacts/
 
 # Log files
 logoutput.log

@@ -31,6 +31,7 @@
   <ItemGroup>
     <Compile Remove="Toolkit\**" />
     <Compile Remove="Packs\**" />
+    <Compile Include="Packs/**/*.cs" Exclude="Packs/**/obj/**/*.cs;Packs/**/bin/**/*.cs" />
     <Compile Remove="Adapters\**" />
     <Compile Remove="examples\**" />
     <Compile Remove="CLI\**" />

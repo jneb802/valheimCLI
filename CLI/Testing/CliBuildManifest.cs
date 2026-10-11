@@ -6,7 +6,7 @@ using System.Text.Json;
 
 namespace valheim_cli.Testing;
 
-/// <summary>Reads a coherent ValheimCLI core and pack build without loading any game assembly.</summary>
+/// <summary>Reads a pinned ValheimCLI plugin build without loading any game assembly.</summary>
 public static class CliBuildManifest
 {
     private const string ExtensionsNamespace = "valheimCLI.Extensions";
@@ -26,7 +26,7 @@ public static class CliBuildManifest
                 throw new FileNotFoundException($"Give each DLL of the set by its full path; {path} is not a file.", path);
             var plugins = Plugins(path) ?? throw new InvalidDataException($"{path} is not a .NET assembly.");
             if (plugins.Count == 0)
-                throw new InvalidDataException($"{path} declares no [BepInPlugin]; list only the ValheimCLI core and its packs.");
+                throw new InvalidDataException($"{path} declares no [BepInPlugin]; list the ValheimCLI plugin DLL.");
             using var stream = System.IO.File.OpenRead(path);
             string sha256 = Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();
             entries.Add(new FileEntry(Path.GetFileName(path), sha256, plugins, Extensions(path)));
@@ -39,13 +39,13 @@ public static class CliBuildManifest
     {
         if (string.IsNullOrWhiteSpace(build)) throw new ArgumentException("Name the build.", nameof(build));
         var entries = Generate(files);
-        if (entries.Count == 0) throw new ArgumentException("List the ValheimCLI core and at least one pack.", nameof(files));
+        if (entries.Count == 0) throw new ArgumentException("List the ValheimCLI plugin DLL.", nameof(files));
         System.IO.File.WriteAllText(output, JsonSerializer.Serialize(new { schema = 1, build, files = entries.Select(entry =>
             new { file = entry.File, sha256 = entry.Sha256, plugins = entry.Plugins, extensions = entry.Extensions }) },
             new JsonSerializerOptions { WriteIndented = true }) + "\n");
     }
 
-    /// <summary>Whether a plugin GUID belongs to the ValheimCLI core or a command pack.</summary>
+    /// <summary>Whether a plugin GUID belongs to ValheimCLI, including a legacy first-party pack.</summary>
     public static bool IsCliPlugin(string guid) => guid.StartsWith("valheimCLI.", StringComparison.Ordinal);
 
     /// <summary>The GUIDs from an assembly's BepInPlugin attributes, or null if it is not a .NET assembly.</summary>

@@ -13,7 +13,7 @@ namespace valheimCLI
     public class valheimCLIPlugin : BaseUnityPlugin
     {
         private const string ModName = "valheimCLI";
-        internal const string ModVersion = "1.1.0";
+        internal const string ModVersion = "1.2.0";
         private const string Author = "valheimCLI";
         internal const string ModGUID = Author + "." + ModName;
         private static string ConfigFileName = ModGUID + ".cfg";
@@ -24,6 +24,7 @@ namespace valheimCLI
 
         private CommandServer? _commandServer;
         private readonly MainThreadHeartbeat _heartbeat = new();
+        private BuiltInCommands? _builtIns;
         private GameStateTracker? _stateTracker;
         private ConfigEntry<int>? _portConfig;
         private ConfigEntry<bool>? _enabledConfig;
@@ -110,6 +111,8 @@ namespace valheimCLI
         /// </summary>
         private void Start()
         {
+            _builtIns = new BuiltInCommands();
+            _builtIns.Register(this);
             ManifestCommands.StandingProblems();
             ReloadCommands.RecordLoadedBuild(this, _loadedUtc);
         }
@@ -121,6 +124,7 @@ namespace valheimCLI
             ProcessPendingCommands();
             Extensions?.Tick();
             Modules?.Tick();
+            _builtIns?.Tick();
         }
 
         /// <summary>Publish a bounded reason before intentionally blocking the game thread; STATUS reports it off-thread.</summary>
@@ -316,6 +320,8 @@ namespace valheimCLI
         /// </summary>
         private void OnDestroy()
         {
+            _builtIns?.Dispose();
+            _builtIns = null;
             Modules?.Dispose();
             Extensions?.Dispose();
             _commandServer?.Dispose();

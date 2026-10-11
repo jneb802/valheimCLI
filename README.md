@@ -313,9 +313,9 @@ Exit codes:
 - `6`: the game does not match an `--expect` file (or a plan's `game.expect` file)
 - `7`: the game exited, or its plugin stopped answering, during a wait (`game_exited`, `plugin_lost`)
 
-## Testing mods and optional command packs
+## Testing mods and built-in commands
 
-See [pack installation and migration](docs/command-packs.md) for the split core/Standard/World Tools/Reflection/Capture layout, and [the extension API guide](docs/testing-toolkit.md) for mod-owned adapters. External reusable fixtures and assertions live in [ValheimTesting](https://github.com/tvongaza/ValheimTesting), with a [getting-started guide](https://github.com/tvongaza/ValheimTesting/blob/main/docs/getting-started.md) and [runnable example index](https://github.com/tvongaza/ValheimTesting/blob/main/examples/README.md). Keep broad unit tests in your mod repository; use small native checks for save/replication boundaries and a separate human verdict for usability.
+See [built-in command installation and migration](docs/command-packs.md) for the single default `valheimCLI.dll`, and [the extension API guide](docs/testing-toolkit.md) for mod-owned adapters. External reusable fixtures and assertions live in [ValheimTesting](https://github.com/tvongaza/ValheimTesting), with a [getting-started guide](https://github.com/tvongaza/ValheimTesting/blob/main/docs/getting-started.md) and [runnable example index](https://github.com/tvongaza/ValheimTesting/blob/main/examples/README.md). Keep broad unit tests in your mod repository; use small native checks for save/replication boundaries and a separate human verdict for usability.
 
 ## Test Layout And Artifacts
 

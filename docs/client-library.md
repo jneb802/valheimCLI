@@ -10,12 +10,11 @@ No public NuGet release exists yet: build the pinned package from this repositor
 
 Synthetic terrain, test fixtures, game assertions and session ownership live in [ValheimTesting](https://github.com/tvongaza/ValheimTesting). ValheimCLI does not depend on that library.
 
-For a build that ships core and command packs, generate its static capability manifest from the exact built DLLs:
+For a build of the default plugin, generate its static capability manifest from
+the exact built DLL:
 
 ```csharp
-CliBuildManifest.Write("fork commit or release", new[] {
-    coreDll, standardDll, worldToolsDll, observeDll
-}, outputJson);
+CliBuildManifest.Write("fork commit or release", new[] { coreDll }, outputJson);
 ```
 
 `CliBuildManifest` reads plugin GUIDs and literal extension registrations from metadata and IL without loading Valheim. It writes each file's SHA-256 and the schema-1 command list. An unknown registration shape fails instead of claiming a capability. Consumers can pin that manifest and still check the live `cli_extensions` reply after launch; a static manifest is not evidence that a plugin actually loaded.

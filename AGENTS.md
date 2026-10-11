@@ -1,8 +1,8 @@
 # ValheimCLI testing tools: agent entry point
 
-For testing-framework, command-pack or adapter work, read the [local setup guide](docs/command-packs.md), then the shared [agent workflow](https://github.com/tvongaza/ValheimTesting/blob/main/docs/agent-guide.md), [getting-started guide](https://github.com/tvongaza/ValheimTesting/blob/main/docs/getting-started.md) and [example index](https://github.com/tvongaza/ValheimTesting/blob/main/examples/README.md).
+For testing-framework, built-in-command or adapter work, read the [local setup guide](docs/command-packs.md), then the shared [agent workflow](https://github.com/tvongaza/ValheimTesting/blob/main/docs/agent-guide.md), [getting-started guide](https://github.com/tvongaza/ValheimTesting/blob/main/docs/getting-started.md) and [example index](https://github.com/tvongaza/ValheimTesting/blob/main/examples/README.md).
 
-ValheimCLI owns transport, command packs and the extension API. It must not depend on ValheimTesting. Core replacement requires a process restart; optional pack reload must preserve ownership and permissions.
+ValheimCLI owns transport, all first-party commands in `valheimCLI.dll`, and the extension API. It must not depend on ValheimTesting. Replacing the default plugin requires a process restart; mod-owned extension reload must preserve ownership and permissions.
 
 Preserve the test pyramid: unit and controlled integration checks first, a small native check for runtime boundaries, and a separate human usability verdict. Run native checks only against a disposable game install, world and character; back up anything you change and restore it afterwards, and never test against a server or save that people play on. A connected ValheimCLI is not proof of world readiness; transport success is not proof an action succeeded. Require exact pins, discovered capabilities and complete observations. Issue mutations once and poll read-only state. Report unrun checks and teardown failures honestly.
 

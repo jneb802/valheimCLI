@@ -23,7 +23,7 @@ registration = valheimCLIPlugin.Instance.Extensions.Register("my.mod.tests", "0.
 // OnDestroy: registration?.Dispose();
 ```
 
-Registration validates every command before publishing any. Names are namespaced by owner. Each instance has a new token. Dispose removes capabilities immediately and cancels queued/active handlers. Cleanup runs in reverse order after work settles; cleanup failure prevents silent replacement. `Register` refuses an id whose previous owner is still active or draining, so a reloaded revision waits (bounded) until `Registrations` no longer lists its id before registering; [ReloadProbe](../examples/ReloadProbe/Plugin.cs) and the four packs show the loop. Handlers run on the main thread, yield `null` to wait a frame, and must return `context.Succeed(data)` or `context.Fail(code, message)`. Arbitrary Unity yield instructions are not supported in v1.
+Registration validates every command before publishing any. Names are namespaced by owner. Each instance has a new token. Dispose removes capabilities immediately and cancels queued/active handlers. Cleanup runs in reverse order after work settles; cleanup failure prevents silent replacement. `Register` refuses an id whose previous owner is still active or draining, so a reloaded revision waits (bounded) until `Registrations` no longer lists its id before registering; [ReloadProbe](../examples/ReloadProbe/Plugin.cs) shows the loop. Handlers run on the main thread, yield `null` to wait a frame, and must return `context.Succeed(data)` or `context.Fail(code, message)`. Arbitrary Unity yield instructions are not supported in v1.
 
 Mutation is the safe default (`readOnly: false`), requires devcommands, and uses the existing async operation gate. Joined-client mutation also requires the existing opt-in client setting. Trusted adapters can of course mislabel or ignore these rules; this is an API contract, not a sandbox. Tests must serialize other synchronous console mutations themselves.
 
@@ -33,7 +33,7 @@ Closing the calling ValheimCLI connection while an extension runs also cancels i
 
 Use `cli_extensions` to discover commands, instance tokens and result versions. Use `cli_extension owner/command args` over the normal ValheimCLI connection. JSON values are bounded to 256 KiB/16 levels, strings/finite numbers/bools/arrays/string-keyed objects. Unsupported values fail explicitly. The actor rejects stale instance tokens and incomplete measurements. Arguments are single tokens in this preview; adapters validate their own grammar.
 
-The World Tools pack's `valheim.world/terrain x z generator|loaded-ground` observation demonstrates reuse. It distinguishes raw generator height from actual loaded heightmap ground. Missing heightmap returns `complete: false` and null height; it does not invent a zero.
+The built-in `valheim.world/terrain x z generator|loaded-ground` observation demonstrates reuse. It distinguishes raw generator height from actual loaded heightmap ground. Missing heightmap returns `complete: false` and null height; it does not invent a zero.
 
 ## Mod-owned adapters and compatibility commands
 
@@ -67,6 +67,6 @@ The external ReloadCheck driver and terrain/client examples now live in ValheimT
 
 ## General command extraction
 
-Core now registers only transport/extension/build/expectation diagnostics. General
-commands live in the optional [command packs](command-packs.md). Install World
-Tools for the `valheim.world` observers used by external system tests.
+The default `valheimCLI.dll` registers transport, diagnostics, gameplay and
+observation commands. No first-party pack DLL is needed for the `valheim.world`
+observers used by external system tests. See [built-in commands](command-packs.md).
