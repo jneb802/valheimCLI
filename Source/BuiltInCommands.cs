@@ -38,12 +38,10 @@ namespace valheimCLI
         public void Dispose()
         {
             if (_disposed) return;
-            var errors = new System.Collections.Generic.List<Exception>();
+            _disposed = true;
             foreach (IDisposable group in new IDisposable[] { _observe, _capture, _reflection, _worldTools, _standard })
                 try { group.Dispose(); }
-                catch (Exception error) { errors.Add(error); }
-            if (errors.Count != 0) throw new AggregateException("A built-in ValheimCLI command group failed cleanup.", errors);
-            _disposed = true;
+                catch (Exception error) { valheimCLIPlugin.Log.LogError("A built-in ValheimCLI command group failed cleanup: " + error); }
         }
     }
 }
