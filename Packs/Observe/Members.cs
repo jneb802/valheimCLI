@@ -1,4 +1,4 @@
-// Reflection helpers used by the optional Observe pack.
+// Reflection helpers for the built-in Observe commands.
 #nullable enable
 using System;
 using System.Linq;

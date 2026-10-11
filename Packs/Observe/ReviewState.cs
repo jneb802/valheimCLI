@@ -178,7 +178,7 @@ namespace valheimCLI.Observe
                 ["id"] = id, ["state"] = "clutter-off", ["entries"] = system.m_clutter.Count });
         }
 
-        /// <summary>Best effort when the Observe pack is replaced or the game quits; no later command can use this snapshot.</summary>
+        /// <summary>Best effort when ValheimCLI unloads or the game quits; no later command can use this snapshot.</summary>
         public static void RestoreOnUnload()
         {
             var snapshot = _active;

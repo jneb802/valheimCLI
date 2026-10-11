@@ -284,13 +284,13 @@ player while it cannot die. The reply ends in `targetable=True`.
 
 **Ghost mode on every peer.** The game keeps ghost mode in a field of the
 player's own process, while a creature's AI runs in whichever process owns the
-creature, often another client. Without this pack another peer's creatures
-could see, hear and hunt a player in ghost mode. The Standard pack writes the
+creature, often another client. Without ValheimCLI on that peer, its creatures
+could see, hear and hunt a player in ghost mode. ValheimCLI writes the
 player's ghost mode to its ZDO whenever it is set (by this command or by the
-game's `ghost` cheat), and every process that loads the pack reads another
+game's `ghost` cheat), and every process that loads ValheimCLI reads another
 player's ghost mode from there. `ghostReplicated=True` says the ZDO carries the
-same value as the local field. A peer without the pack still reads the local
-field, so give every process the pack when a test relies on it. The game's other
+same value as the local field. A peer without ValheimCLI still reads the local
+field, so load it on every peer when a test relies on it. The game's other
 ghost-mode checks follow on those peers as they would in the player's own game:
 a creature hit by a player in ghost mode is marked cheated, and an egg does not
 hatch next to one. God mode and damage are unchanged: god mode keeps health at 1 or more, it does not stop hits
@@ -323,12 +323,12 @@ covered by it because this plugin registers them.
 
 ## Confirm a world save
 
-`cli_save [timeout=120]` and the Standard pack's `valheim.session/save
+`cli_save [timeout=120]` and the default plugin's `valheim.session/save
 [timeout-seconds]` share one loop. It waits for an earlier save (an autosave)
 first; if that one is still writing when the timeout passes, the reply is
 `save_timeout` and no new save was issued. Once this request has issued its
 save, the timeout no longer decides the reply: the reply, the shared mutation
-gate and the pack owner are held until the write ends, and the reply then
+gate and command owner are held until the write ends, and the reply then
 reports what happened: saved (the save number moved on) or `save_failed`.
 `valheim.session/save` adds `pastTimeout: true` when the write outlived the
 timeout; `cli_save`'s `ms=` shows the same. Give the client request a timeout

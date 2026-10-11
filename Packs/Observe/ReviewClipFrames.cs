@@ -147,7 +147,7 @@ namespace valheimCLI.Observe
             }
         }
 
-        /// <summary>Delete only this capture's incomplete frame directory when the Observe pack is unloaded.</summary>
+        /// <summary>Delete only this capture's incomplete frame directory when ValheimCLI unloads.</summary>
         public static void AbortOnUnload()
         {
             string? path = _activeDirectory;
