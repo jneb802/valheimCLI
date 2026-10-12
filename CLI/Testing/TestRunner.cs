@@ -1,8 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using YamlDotNet.Serialization;
-using YamlDotNet.Serialization.NamingConventions;
 
 namespace valheim_cli.Testing;
 
@@ -13,6 +11,7 @@ public class TestRunner
     private readonly string _host;
     private readonly int _port;
     private ValheimClient? _client;
+    private bool _ownsGame;
     private Dictionary<string, string> _variables = new();
 
     public TestRunner(GameLauncher launcher, TestRunnerOptions? options = null, string host = ConnectionDefaults.Host, int port = ConnectionDefaults.Port)
@@ -45,12 +44,16 @@ public class TestRunner
         };
 
         bool launchedGame = false;
+        bool stopAfter = false;
+        TestPlan? plan = null;
+        bool cleanupAllowed = false;
+        TimeSpan? originalCommandTimeout = null;
 
         try
         {
             // Parse the test file
             string yaml = await File.ReadAllTextAsync(filePath, cancellationToken);
-            TestPlan plan = ParseTestPlan(yaml);
+            plan = ParseTestPlan(yaml);
             planResult.Name = plan.Name;
 
             // Initialize variables (YAML first, then CLI overrides)
@@ -66,9 +69,22 @@ public class TestRunner
             Log($"  Tests: {plan.Tests.Count}", ConsoleColor.Gray);
             Log("");
 
+            // A missing or malformed expectations file stops the run before the game
+            // is launched or asked anything.
+            ExpectationSource? expectSource = PlanExpectations.Resolve(
+                _options.ExpectFile, _options.ExpectStrict, plan.Game.Expect, plan.Game.ExpectStrict, filePath);
+            string expectCommand = "";
+            if (expectSource != null &&
+                !PlanExpectations.TryLoad(expectSource.Path, expectSource.Strict, out expectCommand, out string expectError))
+            {
+                planResult.Expectations = PlanExpectations.Unreadable(expectSource, expectError);
+                LogExpectations(planResult.Expectations);
+                throw new PlanNotStartedException();
+            }
+
             // Determine launch settings (CLI overrides YAML)
             bool shouldLaunch = _options.Launch ?? plan.Game.Launch;
-            bool shouldStopAfter = _options.StopAfter ?? plan.Game.StopAfter;
+            stopAfter = _options.StopAfter ?? plan.Game.StopAfter;
             TimeSpan launchTimeout = _options.LaunchTimeout ?? plan.Game.GetLaunchTimeoutSpan();
 
             // Handle game launching if configured
@@ -84,7 +100,11 @@ public class TestRunner
                 }
 
                 // Create and connect client
-                _client = new ValheimClient(_host, _port);
+                _client = new ValheimClient(_host, _port)
+                {
+                    RetryUnstarted = _options.RetryUnstarted,
+                    OnRetry = line => Console.Error.WriteLine($"    {line}")
+                };
                 if (!_client.Connect())
                 {
                     throw new InvalidOperationException("Failed to connect to Valheim. Is the game running with the mod?");
@@ -93,53 +113,63 @@ public class TestRunner
                 Log("");
             }
 
-            // Run each test case
+            originalCommandTimeout = _client.CommandTimeout;
+            _client.CommandTimeout = plan.Settings.GetTimeoutSpan();
+
+            // Checked once the game answers (after --launch, once the plugin's server
+            // is up) and before the first step: a game that does not match runs no
+            // step and no cleanup, as cleanup is part of the plan too.
+            if (expectSource != null)
+            {
+                planResult.Expectations = PlanExpectations.Judge(expectSource, _client!.SendCommand(expectCommand));
+                LogExpectations(planResult.Expectations);
+                if (!planResult.Expectations.Held)
+                {
+                    throw new PlanNotStartedException();
+                }
+            }
+
+            cleanupAllowed = true;
+            // Unrun cases stay visible in the report, rather than disappearing.
+            bool stopped = false;
             foreach (TestCase testCase in plan.Tests)
             {
-                if (cancellationToken.IsCancellationRequested)
-                    break;
+                if (stopped)
+                {
+                    planResult.TestResults.Add(new TestCaseResult
+                    {
+                        Name = testCase.Name, Result = TestResult.Skipped,
+                        Message = "Not run because an earlier case failed or the plan was cancelled."
+                    });
+                    continue;
+                }
 
                 TestCaseResult result = await RunTestCaseAsync(testCase, plan.Settings, cancellationToken);
                 planResult.TestResults.Add(result);
 
                 // Stop on failure if configured
-                if (result.Result == TestResult.Failed && plan.Settings.StopOnFailure)
+                if (result.Result == TestResult.Cancelled ||
+                    ((result.Result == TestResult.Failed || result.Result == TestResult.Error) &&
+                     (plan.Settings.StopOnFailure || _options.StopOnFirstFailure)))
                 {
-                    Log("Stopping due to test failure (stopOnFailure=true)", ConsoleColor.Yellow);
-                    break;
+                    Log("Stopping after a failed or cancelled case", ConsoleColor.Yellow);
+                    stopped = true;
                 }
             }
 
-            // Run cleanup
-            if (plan.Cleanup.Count > 0)
-            {
-                Log("\nRunning cleanup...", ConsoleColor.Gray);
-                foreach (string command in plan.Cleanup)
-                {
-                    try
-                    {
-                        string expandedCommand = ExpandVariables(command);
-                        _client!.SendCommand(expandedCommand);
-                    }
-                    catch (Exception ex)
-                    {
-                        Log($"  Cleanup error: {ex.Message}", ConsoleColor.Yellow);
-                    }
-                }
-            }
+            // Cleanup is also reached after a case error or cancellation. A second
+            // invocation in finally is prevented by RunCleanup's flag.
+            await RunCleanupAsync();
 
-            // Handle stop-after if all tests passed
-            if (shouldStopAfter && planResult.Failed == 0 && planResult.Errors == 0)
+        }
+        catch (PlanNotStartedException) { /* Expectations are already recorded; finalize only owned resources. */ }
+        catch (OperationCanceledException)
+        {
+            planResult.TestResults.Add(new TestCaseResult
             {
-                Log("\nStopping game (all tests passed)...", ConsoleColor.Gray);
-                _client?.Dispose();
-                _client = null;
-                _launcher.StopGame();
-            }
-            else if (shouldStopAfter && (planResult.Failed > 0 || planResult.Errors > 0))
-            {
-                Log("\nKeeping game running for debugging (tests failed)", ConsoleColor.Yellow);
-            }
+                Name = "Test Plan Cancelled", Result = TestResult.Cancelled,
+                Message = "The test plan was cancelled; it did not complete."
+            });
         }
         catch (Exception ex)
         {
@@ -152,10 +182,98 @@ public class TestRunner
             });
         }
 
+        finally
+        {
+            await RunCleanupAsync();
+            if (_client != null && originalCommandTimeout.HasValue)
+                _client.CommandTimeout = originalCommandTimeout.Value;
+            if (stopAfter && _ownsGame)
+            {
+                if (plan?.Game.PreserveOnFailure == true && (planResult.Errors > 0 || planResult.Failed > 0))
+                    Log("Keeping the owned game running: preserveOnFailure=true", ConsoleColor.Yellow);
+                else
+                {
+                    bool stopped = _launcher.TryStopOwnedGame(out string message);
+                    planResult.CleanupResults.Add(new TestCaseResult
+                    {
+                        Name = "Stop owned game", Result = stopped ? TestResult.Passed : TestResult.Error,
+                        Message = message
+                    });
+                    if (stopped)
+                    {
+                        _ownsGame = false;
+                        _client?.Dispose();
+                        _client = null;
+                    }
+                }
+            }
+            else if (stopAfter)
+                Log("Attached game left running: this runner did not launch it.", ConsoleColor.Gray);
+        }
+
+        return Complete(planResult);
+
+        async Task RunCleanupAsync()
+        {
+            if (!cleanupAllowed || plan == null) return;
+            cleanupAllowed = false;
+            // Cancellation of the test must not cancel its bounded cleanup too.
+            foreach (string command in plan.Cleanup)
+            {
+                var cleanup = new TestCaseResult { Name = "Cleanup", Result = TestResult.Passed };
+                var clock = Stopwatch.StartNew();
+                try
+                {
+                    CommandResult response = await ExecutePlanCommandAsync(ExpandVariables(command),
+                        plan.Settings.GetTimeoutSpan(), CancellationToken.None);
+                    cleanup.Commands.Add(RecordedCommand(response));
+                    cleanup.Output.AddRange(response.Output);
+                    if (!response.Ok)
+                    {
+                        cleanup.Result = TestResult.Error;
+                        cleanup.Message = $"Cleanup failed: {response.ErrorCode}: {response.Message}";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    cleanup.Result = TestResult.Error;
+                    cleanup.Message = $"Cleanup failed: {ex.Message}";
+                }
+                cleanup.Duration = clock.Elapsed;
+                planResult.CleanupResults.Add(cleanup);
+                LogTestResult(cleanup);
+            }
+        }
+    }
+
+    private sealed class PlanNotStartedException : Exception { }
+
+    private TestPlanResult Complete(TestPlanResult planResult)
+    {
         planResult.EndTime = DateTime.Now;
         WriteArtifacts(planResult);
         PrintSummary(planResult);
         return planResult;
+    }
+
+    private void LogExpectations(ExpectationCheck check)
+    {
+        if (check.Held)
+        {
+            Log($"Expectations {check.Summary()}", ConsoleColor.Green);
+            Log("");
+            return;
+        }
+
+        Log($"Expectations {check.Summary()}", ConsoleColor.Red);
+        foreach (string line in check.Output)
+        {
+            Log($"  {line}", ConsoleColor.Red);
+        }
+        if (check.Outcome == ExpectationOutcome.Mismatch && check.Output.Count == 0)
+        {
+            Log($"  {check.Message}", ConsoleColor.Red);
+        }
     }
 
     private async Task<bool> HandleGameLaunchAsync(TimeSpan timeout, CancellationToken cancellationToken)
@@ -171,7 +289,7 @@ public class TestRunner
         if (_launcher.IsGameRunning())
         {
             Log("Game is running, waiting for server...", ConsoleColor.Yellow);
-            bool ready = await _launcher.WaitForReadyAsync(timeout, cancellationToken);
+            bool ready = await WaitForPluginServerAsync(timeout, cancellationToken);
             if (ready)
             {
                 Log("Server ready", ConsoleColor.Green);
@@ -189,8 +307,9 @@ public class TestRunner
             return false;
         }
 
+        _ownsGame = true; // Set before waiting: cancellation/startup failure still needs finalization.
         Log($"Waiting for game to be ready (timeout: {timeout.TotalSeconds}s)...", ConsoleColor.Gray);
-        bool isReady = await _launcher.WaitForReadyAsync(timeout, cancellationToken);
+        bool isReady = await WaitForPluginServerAsync(timeout, cancellationToken);
 
         if (isReady)
         {
@@ -200,6 +319,24 @@ public class TestRunner
 
         Log("Game did not become ready within timeout", ConsoleColor.Red);
         return false;
+    }
+
+    /// <summary>Waits for the plugin's port to answer, printing a heartbeat while the game starts.</summary>
+    private async Task<bool> WaitForPluginServerAsync(TimeSpan timeout, CancellationToken cancellationToken)
+    {
+        GameStatus status = await _launcher.WaitForTargetAsync(
+            WaitTarget.PluginServer,
+            timeout,
+            _options.Interval,
+            cancellationToken,
+            _options.Progress,
+            LogHeartbeat);
+        return status.PluginServerReady;
+    }
+
+    private void LogHeartbeat(WaitHeartbeat beat)
+    {
+        Log($"    {beat.ToLine()}", ConsoleColor.DarkGray);
     }
 
     private bool QueueServerConnectIfRequested()
@@ -237,6 +374,7 @@ public class TestRunner
 
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
             // Handle skipped tests
             if (testCase.Skip)
             {
@@ -251,11 +389,11 @@ public class TestRunner
             // Handle wait condition
             if (testCase.WaitFor != null)
             {
-                bool waitSuccess = await HandleWaitConditionAsync(testCase.WaitFor, settings, cancellationToken);
-                if (!waitSuccess)
+                string waitFailure = await HandleWaitConditionAsync(testCase.WaitFor, cancellationToken);
+                if (waitFailure.Length > 0)
                 {
                     result.Result = TestResult.Failed;
-                    result.Message = $"Wait condition not met: state={testCase.WaitFor.State}";
+                    result.Message = waitFailure;
                     stopwatch.Stop();
                     result.Duration = stopwatch.Elapsed;
                     LogTestResult(result);
@@ -263,53 +401,62 @@ public class TestRunner
                 }
             }
 
-            // Execute commands (with repeat support)
-            int repeatCount = Math.Max(1, testCase.Repeat);
-            for (int i = 0; i < repeatCount; i++)
+            // An assertion belongs to the final command of EACH repetition. Full
+            // case output remains available as evidence, never as an accidental oracle.
+            for (int i = 0; i < testCase.Repeat; i++)
             {
-                foreach (string command in testCase.Commands)
+                var iterationOutput = new List<string>();
+                CommandResult? last = null;
+                for (int j = 0; j < testCase.Commands.Count; j++)
                 {
-                    if (cancellationToken.IsCancellationRequested)
-                        break;
+                    cancellationToken.ThrowIfCancellationRequested();
+                    string command = ExpandVariables(testCase.Commands[j]);
+                    LogVerbose($"    > {command}");
+                    last = await ExecutePlanCommandAsync(command, settings.GetTimeoutSpan(), cancellationToken);
+                    result.Commands.Add(RecordedCommand(last));
+                    result.Output.AddRange(last.Output);
+                    iterationOutput.AddRange(last.Output);
+                    foreach (string line in last.Output) LogVerbose($"      {line}");
+                    cancellationToken.ThrowIfCancellationRequested();
 
-                    string expandedCommand = ExpandVariables(command);
-                    LogVerbose($"    > {expandedCommand}");
-
-                    List<string> output = IsLocalCommand(expandedCommand)
-                        ? await ExecuteLocalCommandAsync(GetLocalCommand(expandedCommand), settings.GetTimeoutSpan(), cancellationToken)
-                        : _client!.SendCommand(expandedCommand);
-                    result.Output.AddRange(output);
-
-                    foreach (string line in output)
+                    bool final = j == testCase.Commands.Count - 1;
+                    string expectedError = final ? testCase.Expect?.ErrorCode ?? "" : "";
+                    if (!last.Ok && (expectedError.Length == 0 || last.ErrorCode != expectedError))
                     {
-                        LogVerbose($"      {line}");
+                        result.Result = TestResult.Error;
+                        result.Message = $"Command failed: {last.ErrorCode}: {last.Message}";
+                        return Finish();
+                    }
+                    if (final && expectedError.Length > 0 && (last.Ok || last.ErrorCode != expectedError))
+                    {
+                        result.Result = TestResult.Failed;
+                        result.Message = $"Expected errorCode={expectedError}, received {(last.Ok ? "success" : last.ErrorCode)}.";
+                        return Finish();
                     }
                 }
 
-                // Wait between iterations if specified
+                if (testCase.Expect != null && !string.IsNullOrWhiteSpace(testCase.Expect.Output))
+                {
+                    List<string> observed = testCase.Expect.Scope == "allCommands" ? iterationOutput : last!.Output;
+                    if (!CheckExpectation(testCase.Expect, observed))
+                    {
+                        result.Result = TestResult.Failed;
+                        result.Message = $"Expectation not met in repetition {i + 1}: {testCase.Expect.Output}";
+                        return Finish();
+                    }
+                }
                 if (testCase.GetWaitDuration() > TimeSpan.Zero)
-                {
                     await Task.Delay(testCase.GetWaitDuration(), cancellationToken);
-                }
             }
-
-            // Check expectations
-            if (testCase.Expect != null)
-            {
-                bool expectationMet = CheckExpectation(testCase.Expect, result.Output);
-                if (!expectationMet)
-                {
-                    result.Result = TestResult.Failed;
-                    result.Message = $"Expectation not met: {testCase.Expect.Output}";
-                    stopwatch.Stop();
-                    result.Duration = stopwatch.Elapsed;
-                    LogTestResult(result);
-                    return result;
-                }
-            }
+            cancellationToken.ThrowIfCancellationRequested();
 
             result.Result = TestResult.Passed;
             result.Message = "OK";
+        }
+        catch (OperationCanceledException)
+        {
+            result.Result = TestResult.Cancelled;
+            result.Message = "Cancelled; remaining commands were not run.";
         }
         catch (Exception ex)
         {
@@ -317,13 +464,19 @@ public class TestRunner
             result.Message = ex.Message;
         }
 
-        stopwatch.Stop();
-        result.Duration = stopwatch.Elapsed;
-        LogTestResult(result);
-        return result;
+        return Finish();
+
+        TestCaseResult Finish()
+        {
+            stopwatch.Stop();
+            result.Duration = stopwatch.Elapsed;
+            LogTestResult(result);
+            return result;
+        }
     }
 
-    private async Task<bool> HandleWaitConditionAsync(WaitCondition condition, TestSettings settings, CancellationToken cancellationToken)
+    /// <summary>Returns "" when the wait condition is met, otherwise why it is not.</summary>
+    private async Task<string> HandleWaitConditionAsync(WaitCondition condition, CancellationToken cancellationToken)
     {
         // Display message if provided
         if (!string.IsNullOrEmpty(condition.Message))
@@ -331,25 +484,62 @@ public class TestRunner
             Log($"    Waiting: {condition.Message}", ConsoleColor.Yellow);
         }
 
-        // Handle state wait
+        // A readiness target (MainMenu, InWorld, ...) is watched through the full status:
+        // heartbeats, stall and unreachable detection, as with `valheim-cli wait`.
+        if (!string.IsNullOrEmpty(condition.State) && WaitTargets.TryParse(condition.State, out WaitTarget target))
+        {
+            if (!WaitPolicy.TryForPlanStep(
+                    condition.GetTimeoutSpan(),
+                    condition.Stall,
+                    condition.AllowUnreachable,
+                    _options.Stall,
+                    _options.AllowUnreachable,
+                    _options.Progress,
+                    out WaitPolicy policy,
+                    out string error))
+            {
+                return $"waitFor: {error}";
+            }
+
+            LogVerbose($"    Waiting for {WaitTargets.ToName(target)} (timeout {WaitDurations.Format(policy.Timeout)}, stall {WaitDurations.Format(policy.Stall)})");
+            WaitResult waited = await _launcher.WaitAsync(target, policy, _options.Interval, LogHeartbeat, cancellationToken);
+            if (waited.Outcome == WaitOutcome.Reached)
+            {
+                return "";
+            }
+
+            GameStatus status = waited.Status;
+            return $"Wait for {condition.State} failed: code={waited.ErrorCode}; " +
+                   $"state={status.State} phase={status.LoadPhase} connection={status.ConnectionStatus}; " +
+                   (waited.Reason.Length > 0 ? waited.Reason : "not reached");
+        }
+
+        // Any other game state name (Loading, InWorldNoPlayer) is matched by name only.
         if (!string.IsNullOrEmpty(condition.State))
         {
             LogVerbose($"    Waiting for state: {condition.State}");
-            return await _client!.WaitForStateAsync(condition.State, condition.GetTimeoutSpan(), cancellationToken);
+            bool reached = await _client!.WaitForStateAsync(condition.State, condition.GetTimeoutSpan(), cancellationToken);
+            return reached ? "" : $"Wait condition not met: state={condition.State}";
         }
 
-        // Handle custom event wait (extensible for future)
-        if (!string.IsNullOrEmpty(condition.Event))
-        {
-            LogVerbose($"    Waiting for event: {condition.Event}");
-            // For now, just wait the timeout duration
-            // This can be extended to support custom events
-            await Task.Delay(condition.GetTimeoutSpan(), cancellationToken);
-            return true;
-        }
-
-        return true;
+        return "waitFor requires a supported state; event waits are not implemented.";
     }
+
+    private Task<CommandResult> ExecutePlanCommandAsync(string command, TimeSpan timeout, CancellationToken cancellation)
+    {
+        cancellation.ThrowIfCancellationRequested();
+        return IsLocalCommand(command)
+            ? ExecuteLocalCommandAsync(GetLocalCommand(command), timeout, cancellation)
+            : Task.FromResult(_client!.ExecuteCommand(command));
+    }
+
+    private static CommandResult RecordedCommand(CommandResult result) => new()
+    {
+        // Persist the command name, not arguments that may include a password.
+        // Output remains the same evidence already recorded by the runner.
+        Command = SilentReply.CommandName(result.Command), Ok = result.Ok,
+        ErrorCode = result.ErrorCode, Message = result.Message, Output = result.Output
+    };
 
     private static bool IsLocalCommand(string command)
     {
@@ -365,7 +555,7 @@ public class TestRunner
         return colonIndex >= 0 ? trimmed[(colonIndex + 1)..].TrimStart() : trimmed;
     }
 
-    private async Task<List<string>> ExecuteLocalCommandAsync(string command, TimeSpan timeout, CancellationToken cancellationToken)
+    private async Task<CommandResult> ExecuteLocalCommandAsync(string command, TimeSpan timeout, CancellationToken cancellationToken)
     {
         List<string> output = new();
         using CancellationTokenSource timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -399,27 +589,33 @@ public class TestRunner
         try
         {
             await process.WaitForExitAsync(timeoutSource.Token);
-            string stdout = await stdoutTask;
-            string stderr = await stderrTask;
-            AddProcessOutput(output, stdout);
-            AddProcessOutput(output, stderr);
+            AddProcessOutput(output, await stdoutTask);
+            AddProcessOutput(output, await stderrTask);
             output.Add($"localExitCode={process.ExitCode}");
+            return new CommandResult
+            {
+                Command = "local: " + command, Ok = process.ExitCode == 0,
+                ErrorCode = process.ExitCode == 0 ? "" : $"local_exit_{process.ExitCode}",
+                Message = $"Local command exited {process.ExitCode}.", Output = output
+            };
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException)
         {
-            try
+            // Disposing Process alone leaves the command running. Kill only the
+            // process tree this step created, on timeout AND caller cancellation.
+            if (!process.HasExited) process.Kill(entireProcessTree: true);
+            await process.WaitForExitAsync(CancellationToken.None).WaitAsync(TimeSpan.FromSeconds(5));
+            try { await Task.WhenAll(stdoutTask, stderrTask); }
+            catch (OperationCanceledException) { }
+            cancellationToken.ThrowIfCancellationRequested();
+            string message = $"Local command timed out after {timeout.TotalSeconds:F3}s";
+            output.Add("ERROR: " + message);
+            return new CommandResult
             {
-                if (!process.HasExited)
-                    process.Kill(entireProcessTree: true);
-            }
-            catch
-            {
-            }
-
-            output.Add($"ERROR: Local command timed out after {timeout.TotalSeconds:F0}s");
+                Command = "local: " + command, Ok = false,
+                ErrorCode = "local_timeout", Message = message, Output = output
+            };
         }
-
-        return output;
     }
 
     private static void AddProcessOutput(List<string> output, string text)
@@ -450,7 +646,7 @@ public class TestRunner
             string pattern = GetExpectationPattern(expectedOutput, "matches");
             try
             {
-                return Regex.IsMatch(combinedOutput, pattern, RegexOptions.IgnoreCase);
+                return Regex.IsMatch(combinedOutput, pattern, RegexOptions.IgnoreCase, TimeSpan.FromSeconds(1));
             }
             catch (RegexParseException)
             {
@@ -459,7 +655,7 @@ public class TestRunner
             }
         }
 
-        // Default: exact match
+        // Legacy unprefixed output means substring matching, as before.
         return combinedOutput.Contains(expectedOutput, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -487,6 +683,7 @@ public class TestRunner
             TestResult.Failed => ConsoleColor.Red,
             TestResult.Skipped => ConsoleColor.Yellow,
             TestResult.Error => ConsoleColor.Magenta,
+            TestResult.Cancelled => ConsoleColor.Yellow,
             _ => ConsoleColor.White
         };
 
@@ -496,6 +693,7 @@ public class TestRunner
             TestResult.Failed => "FAIL",
             TestResult.Skipped => "SKIP",
             TestResult.Error => "ERROR",
+            TestResult.Cancelled => "CANCELLED",
             _ => "????"
         };
 
@@ -523,8 +721,13 @@ public class TestRunner
         Log($"  Failed:  {result.Failed}", result.Failed > 0 ? ConsoleColor.Red : ConsoleColor.Gray);
         Log($"  Skipped: {result.Skipped}", result.Skipped > 0 ? ConsoleColor.Yellow : ConsoleColor.Gray);
         Log($"  Errors:  {result.Errors}", result.Errors > 0 ? ConsoleColor.Magenta : ConsoleColor.Gray);
-        Log($"  Total:   {result.TestResults.Count}", ConsoleColor.White);
+        Log($"  Cases:   {result.TestResults.Count}", ConsoleColor.White);
+        Log($"  Cleanup: {result.CleanupResults.Count} check(s); failures included in Errors", ConsoleColor.Gray);
         Log($"  Duration: {result.TotalDuration.TotalSeconds:F2}s", ConsoleColor.Gray);
+        if (result.Expectations != null)
+        {
+            Log($"  Expectations: {result.Expectations.Summary()}", result.Expectations.Held ? ConsoleColor.Gray : ConsoleColor.Red);
+        }
         Log($"  Artifacts: {result.ArtifactDirectory}", ConsoleColor.Gray);
         Log("═══════════════════════════════════════════════════════", ConsoleColor.Cyan);
     }
@@ -535,7 +738,7 @@ public class TestRunner
             ? _options.ArtifactsDirectory
             : Path.Combine("CLI", "runs");
         string planName = Path.GetFileNameWithoutExtension(filePath);
-        string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss");
+        string stamp = DateTime.Now.ToString("yyyyMMdd-HHmmss") + "-" + Guid.NewGuid().ToString("N")[..8];
         string directory = Path.Combine(root, $"{stamp}-{planName}");
         Directory.CreateDirectory(directory);
         return directory;
@@ -546,7 +749,15 @@ public class TestRunner
         Directory.CreateDirectory(result.ArtifactDirectory);
         string transcriptPath = Path.Combine(result.ArtifactDirectory, "transcript.txt");
         List<string> transcript = new();
-        foreach (TestCaseResult test in result.TestResults)
+        if (result.Expectations != null)
+        {
+            // An unreadable file's summary already carries its message.
+            transcript.Add(result.Expectations.Outcome == ExpectationOutcome.BadFile
+                ? $"[Expectations] {result.Expectations.Summary()}"
+                : $"[Expectations] {result.Expectations.Summary()}: {result.Expectations.Message}");
+            transcript.AddRange(result.Expectations.Output.Select(line => "  " + line));
+        }
+        foreach (TestCaseResult test in result.TestResults.Concat(result.CleanupResults))
         {
             transcript.Add($"[{test.Result}] {test.Name}: {test.Message}");
             transcript.AddRange(test.Output.Select(line => "  " + line));
@@ -574,15 +785,7 @@ public class TestRunner
         }
     }
 
-    public static TestPlan ParseTestPlan(string yaml)
-    {
-        IDeserializer deserializer = new DeserializerBuilder()
-            .WithNamingConvention(CamelCaseNamingConvention.Instance)
-            .IgnoreUnmatchedProperties()
-            .Build();
-
-        return deserializer.Deserialize<TestPlan>(yaml);
-    }
+    public static TestPlan ParseTestPlan(string yaml) => TestPlan.Parse(yaml);
 }
 
 public class TestRunnerOptions
@@ -596,6 +799,19 @@ public class TestRunnerOptions
     public TimeSpan? LaunchTimeout { get; set; } = null;
     public string? ArtifactsDirectory { get; set; } = null;
     public bool Json { get; set; }
+
+    // --expect / --expect-strict (override the plan's game.expect and game.expectStrict)
+    public string? ExpectFile { get; set; } = null;
+    public bool ExpectStrict { get; set; } = false;
+
+    // Waits: poll interval, heartbeat interval, and the defaults a waitFor step can override
+    public TimeSpan Interval { get; set; } = TimeSpan.FromSeconds(2);
+    public TimeSpan Progress { get; set; } = WaitPolicy.DefaultProgress;
+    public TimeSpan? Stall { get; set; } = null;
+    public bool AllowUnreachable { get; set; } = false;
+
+    // Resend a command that expired in the game's queue without running (--retry-unstarted)
+    public int RetryUnstarted { get; set; }
 
     // CLI variables (override YAML variables)
     public Dictionary<string, string> Variables { get; set; } = new();
