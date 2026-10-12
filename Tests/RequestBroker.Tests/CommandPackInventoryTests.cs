@@ -19,7 +19,7 @@ public class CommandPackInventoryTests
         "cli_extension", "cli_extensions", "cli_access", "cli_generator_at",
         "cli_terrain_modifiers_at", "cli_acknowledge_local_cheats",
         "cli_teleport_trace_arm", "cli_teleport_trace_wait",
-        "cli_teleport_test_mode", "cli_wait_teleportable",
+        "cli_teleport_test_mode", "cli_wait_teleportable", "cli_screenshot_path64",
     };
 
     private static readonly Regex Registration = new(@"new Terminal.ConsoleCommand\(""([^""]+)""");
@@ -47,7 +47,7 @@ public class CommandPackInventoryTests
 
         Assert.Equal(expected.OrderBy(name => name, StringComparer.Ordinal),
             found.Keys.OrderBy(name => name, StringComparer.Ordinal));
-        Assert.Equal(138, found.Count);
+        Assert.Equal(139, found.Count);
     }
 
     [Fact]

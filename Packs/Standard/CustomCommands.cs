@@ -514,6 +514,20 @@ namespace valheimCLI
                 args.Context.AddString($"OK: screenshot queued path={path} size={Screen.width * supersize}x{Screen.height * supersize}");
             }, isCheat: true);
 
+            new Terminal.ConsoleCommand("cli_screenshot_path64", "Save a PNG at an absolute UTF-8 path encoded as one base64url token: cli_screenshot_path64 <path64> [supersize=1..4]. For owned test evidence only", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length is < 2 or > 3 || !ScreenshotPath64.TryDecode(args[1], out string path) ||
+                    args.Length == 3 && (!int.TryParse(args[2], out int parsed) || parsed is < 1 or > 4))
+                {
+                    args.Context.AddString("Usage: cli_screenshot_path64 <absolute-png-path64> [supersize=1..4]");
+                    return;
+                }
+                int supersize = args.Length == 3 ? int.Parse(args[2], CultureInfo.InvariantCulture) : 1;
+                Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
+                ScreenCapture.CaptureScreenshot(path, supersize);
+                args.Context.AddString($"OK: screenshot queued path={path} size={Screen.width * supersize}x{Screen.height * supersize}");
+            }, isCheat: true);
+
             new Terminal.ConsoleCommand("cli_generator_at", "Read the world generator at up to 16 points without creating a dump: cli_generator_at <x> <z> [<x> <z> ...]. Returns height, biome, river, river width and unitless base height at each point", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 string[] words = Enumerable.Range(0, args.Length).Select(index => args[index]).ToArray();
