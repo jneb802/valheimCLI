@@ -62,7 +62,14 @@ namespace valheimCLI
         }
 
         /// <summary>Only requests whose callers are still waiting count as queued.</summary>
-        public readonly record struct WorkSnapshot(int Queued, long RunningId, long RunningMs);
+        public readonly struct WorkSnapshot
+        {
+            public WorkSnapshot(int queued, long runningId, long runningMs)
+            { Queued = queued; RunningId = runningId; RunningMs = runningMs; }
+            public int Queued { get; }
+            public long RunningId { get; }
+            public long RunningMs { get; }
+        }
 
         public WorkSnapshot SnapshotWork()
         {
