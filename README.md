@@ -56,6 +56,12 @@ valheim> spawn Boar 5
 ./CLI/bin/Debug/net9.0/valheim-cli commands --search screenshot --json
 ```
 
+## MWL Location Development
+
+After replacing a location bundle on disk, run `mwl_reload MWL_Ruins1` in the game console to replace the current preview without leaving the world. This command is included in valheimCLI; no separate reload plugin is needed.
+
+Use a local development world with one preview spawned during the current session. The command requires Jotunn 2.30.2. See [the workflow, limits, and validation record](docs/mwl-location-reload.md).
+
 ## Command Completion And Capture Helpers
 
 A response carries the whole output of its own command: the server waits for
