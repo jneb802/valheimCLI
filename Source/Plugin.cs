@@ -115,6 +115,11 @@ namespace valheimCLI
 
         private bool TryExecuteBuiltInCommand(string command)
         {
+            if (UiCommands.TryExecute(command, output => _commandServer?.SendOutput(output)))
+            {
+                return true;
+            }
+
             const string trustedPrefix = "cli_run_trusted";
             if (command.Equals(trustedPrefix, StringComparison.OrdinalIgnoreCase) ||
                 command.StartsWith(trustedPrefix + " ", StringComparison.OrdinalIgnoreCase))

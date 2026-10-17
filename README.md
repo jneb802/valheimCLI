@@ -165,6 +165,12 @@ Screenshots, videos, logs, and generated evidence should stay out of source cont
 
 ## Remote Helpers
 
+### Menu button validation
+
+`cli_ui_buttons` lists active Unity UI buttons with their instance IDs, labels, and interaction state. `cli_ui_click <instance-id>` invokes that button's normal click event. `cli_ui_text [filter]` reads active text labels, with an optional case-insensitive substring filter. Run the list command again after a screen change; IDs are valid only for the current objects. Inactive and disabled buttons cannot be invoked. These commands also work before the game console is available.
+
+This covers Unity UI `Button` components, including mod dialogs. It does not simulate mouse input or claim that a button is unobscured by another panel.
+
 Generic wrappers live under `scripts/`:
 
 - `scripts/valheim-cli-local`
