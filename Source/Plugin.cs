@@ -52,6 +52,8 @@ namespace valheimCLI
             HarmonyInstance.PatchAll(assembly);
 
             CustomCommands.Register();
+            EnvironmentCommands.Register();
+            ItemUseCommands.Register();
             new MwlLocationReload(this).Register();
 
             // Initialize state tracker
