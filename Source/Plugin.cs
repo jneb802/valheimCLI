@@ -54,6 +54,8 @@ namespace valheimCLI
             CustomCommands.Register();
             ItemInteractionCommands.Register();
             ComponentCommands.Register();
+            EnvironmentCommands.Register();
+            ItemUseCommands.Register();
             new MwlLocationReload(this).Register();
 
             // Initialize state tracker
