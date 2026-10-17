@@ -11,6 +11,17 @@ internal static class ComponentCommands
 {
     internal static void Register()
     {
+        new Terminal.ConsoleCommand("cli_creature_scaling", "Read nearby creatures' live health, attack level factor, and movement speed", args =>
+        {
+            if (Player.m_localPlayer == null) return;
+            foreach (Character character in Character.GetAllCharacters().Where(c => !c.IsPlayer() && Vector3.Distance(c.transform.position, Player.m_localPlayer.transform.position) < 100))
+            {
+                Attack probe = new();
+                AccessTools.Field(typeof(Attack), "m_character").SetValue(probe, character);
+                float damageFactor = (float)AccessTools.Method(typeof(Attack), "GetLevelDamageFactor").Invoke(probe, null);
+                args.Context.AddString($"creature={character.name} level={character.GetLevel()} maxHealth={character.GetMaxHealth():F2} attackLevelFactor={damageFactor:F4} runSpeed={character.m_runSpeed:F3} faction={character.m_faction} dropComponent={character.GetComponent<CharacterDrop>() != null}");
+            }
+        });
         new Terminal.ConsoleCommand("cli_epicloot_table_level", "Set nearby table feature for test setup: <feature-name> <level>", args =>
         {
             if (args.Length != 3 || Player.m_localPlayer == null || !int.TryParse(args[2], out int level)) return;
