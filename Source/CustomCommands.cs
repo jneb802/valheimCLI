@@ -24,6 +24,7 @@ namespace valheimCLI
 
         public static void Register()
         {
+            ComponentCommands.Register();
             RouteController.Register();
             BuildCommands.Register();
             AsyncCommands.Register();
