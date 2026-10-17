@@ -2716,6 +2716,9 @@ namespace valheimCLI
 
             player.AttackTowardsPlayerLookDir = true;
             player.SetLookDir(direction.normalized);
+            // SetLookDir updates yaw, but Player rebuilds eye rotation from its own pitch.
+            HarmonyLib.AccessTools.Field(typeof(Player), "m_lookPitch").SetValue(player,
+                -Mathf.Asin(direction.normalized.y) * Mathf.Rad2Deg);
             player.FaceLookDirection();
             addOutput($"OK: Aimed at {point.x:F2},{point.y:F2},{point.z:F2}");
         }
