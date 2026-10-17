@@ -11,6 +11,89 @@ internal static class ComponentCommands
 {
     internal static void Register()
     {
+        new Terminal.ConsoleCommand("cli_epicloot_table_level", "Set nearby table feature for test setup: <feature-name> <level>", args =>
+        {
+            if (args.Length != 3 || Player.m_localPlayer == null || !int.TryParse(args[2], out int level)) return;
+            Component? table = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None)
+                .Where(c => c.GetType().FullName == "EpicLoot_UnityLib.EnchantingTable" && Vector3.Distance(c.transform.position, Player.m_localPlayer.transform.position) < 5).FirstOrDefault();
+            MethodInfo? method = table?.GetType().GetMethod("SetFeatureLevel");
+            if (method == null) { args.Context.AddString("ERROR: No nearby table"); return; }
+            object feature = Enum.Parse(method.GetParameters()[0].ParameterType, args[1]);
+            method.Invoke(table, new object[] { feature, level });
+            args.Context.AddString("Set table feature " + args[1] + "=" + level);
+        });
+        new Terminal.ConsoleCommand("cli_epicloot_enchant_ui", "Select a sigil/item in the open enchanting table: <prefab> <rarity> [craft]", args =>
+        {
+            if (args.Length < 3 || !int.TryParse(args[2], out int rarity)) return;
+            Type? uiType = Type.GetType("EpicLoot_UnityLib.EnchantingTableUI, EpicLoot");
+            object? ui = uiType?.GetProperty("instance")?.GetValue(null);
+            if (ui == null) { args.Context.AddString("ERROR: Open the enchanting table first"); return; }
+            Array panels = (Array)uiType!.GetField("Panels")!.GetValue(ui);
+            Component? panel = panels.Cast<Component>().FirstOrDefault(p => p.GetType().Name == "EnchantUI");
+            if (panel == null) return;
+            int index = Array.IndexOf(panels, panel);
+            TabHandler tabs = (TabHandler)uiType.GetField("TabHandler")!.GetValue(ui);
+            tabs.SetActiveTab(index);
+            Type type = panel.GetType();
+            object buttons = type.GetField("RarityButtons")!.GetValue(panel);
+            UnityEngine.UI.Toggle[] toggles = ((System.Collections.IEnumerable)buttons).Cast<UnityEngine.UI.Toggle>().ToArray();
+            if (rarity < 0 || rarity >= toggles.Length) return;
+            toggles[rarity].isOn = true;
+            object list = AccessTools.Field(type, "AvailableItems").GetValue(panel);
+            Transform container = (Transform)list.GetType().GetField("ListContainer")!.GetValue(list);
+            bool selected = false;
+            foreach (Transform row in container)
+            {
+                Component? element = row.GetComponents<Component>().FirstOrDefault(c => c != null && c.GetType().Name == "MultiSelectItemListElement");
+                if (element == null) continue;
+                object data = AccessTools.Field(element.GetType(), "_item").GetValue(element);
+                ItemDrop.ItemData? item = data?.GetType().GetMethod("GetItem")?.Invoke(data, null) as ItemDrop.ItemData;
+                if (item?.m_dropPrefab?.name != args[1]) continue;
+                element.GetType().GetMethod("SelectQuantity")!.Invoke(element, new object[] { 1, true });
+                selected = true; break;
+            }
+            UnityEngine.UI.Button button = (UnityEngine.UI.Button)AccessTools.Field(type, "MainButton").GetValue(panel);
+            args.Context.AddString($"selected={selected} canCraft={button.IsInteractable()}");
+            if (selected && button.IsInteractable() && args.Length > 3 && args[3] == "craft") button.onClick.Invoke();
+        });
+        new Terminal.ConsoleCommand("cli_navigation_to_player", "Report nearby creatures and their full path to the player", args =>
+        {
+            if (Player.m_localPlayer == null || Pathfinding.instance == null) return;
+            foreach (Character character in Character.GetAllCharacters().Where(c => !c.IsPlayer() && Vector3.Distance(c.transform.position, Player.m_localPlayer.transform.position) < 100))
+            {
+                System.Collections.Generic.List<Vector3> path = new();
+                bool found = Pathfinding.instance.GetPath(character.transform.position, Player.m_localPlayer.transform.position,
+                    path, character.GetComponent<BaseAI>()?.m_pathAgentType ?? Pathfinding.AgentType.Humanoid, true);
+                args.Context.AddString($"creature={character.name} position={character.transform.position:F2} hp={character.GetHealth():F1} level={character.GetLevel()} fullPath={found} corners={path.Count}");
+            }
+        });
+        new Terminal.ConsoleCommand("cli_item_custom_data", "Set first matching inventory item's custom data: <prefab> <key> <value>", args =>
+        {
+            if (args.Length != 4 || Player.m_localPlayer == null) return;
+            ItemDrop.ItemData? item = Player.m_localPlayer.GetInventory().GetAllItems().FirstOrDefault(i => i.m_dropPrefab?.name == args[1]);
+            if (item == null) { args.Context.AddString("ERROR: item absent"); return; }
+            item.m_customData[args[2]] = args[3];
+            args.Context.AddString("Updated " + args[2]);
+        });
+        new Terminal.ConsoleCommand("cli_epicloot_item", "Read Epic Loot eligibility and magic data: <prefab>", args =>
+        {
+            if (args.Length != 2 || Player.m_localPlayer == null) return;
+            ItemDrop.ItemData? item = Player.m_localPlayer.GetInventory().GetAllItems().FirstOrDefault(i => i.m_dropPrefab?.name == args[1]);
+            Type? api = Type.GetType("EpicLoot.API, EpicLoot");
+            if (item == null || api == null) { args.Context.AddString("ERROR: item or Epic Loot absent"); return; }
+            args.Context.AddString("eligible=" + api.GetMethod("CanBeMagicItem")?.Invoke(null, new object[] { item }));
+            args.Context.AddString("magic=" + api.GetMethod("GetMagicItemJson")?.Invoke(null, new object[] { item }));
+            args.Context.AddString("tooltip=" + Localization.instance.Localize(item.GetTooltip()).Replace("\n", " | "));
+            args.Context.AddString("custom=" + string.Join(";", item.m_customData.Where(p => p.Key.Contains("ValheimEndgame")).Select(p => p.Key + "=" + p.Value)));
+        });
+        new Terminal.ConsoleCommand("cli_epicloot_roll", "Roll first matching inventory item through Epic Loot API: <prefab> <rarity ordinal>", args =>
+        {
+            if (args.Length != 3 || Player.m_localPlayer == null || !int.TryParse(args[2], out int rarity)) return;
+            ItemDrop.ItemData? item = Player.m_localPlayer.GetInventory().GetAllItems().FirstOrDefault(i => i.m_dropPrefab?.name == args[1]);
+            Type? api = Type.GetType("EpicLoot.API, EpicLoot");
+            if (item == null || api == null) { args.Context.AddString("ERROR: item or Epic Loot absent"); return; }
+            args.Context.AddString("rolled=" + api.GetMethod("TryMakeMagicItem")?.Invoke(null, new object[] { item, rarity, 0f, "" }));
+        });
         new Terminal.ConsoleCommand("cli_hover_state", "Report the player's actual crosshair interaction target", args =>
         {
             GameObject? target = Player.m_localPlayer?.GetHoverObject();
