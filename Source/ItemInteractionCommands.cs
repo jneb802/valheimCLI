@@ -32,7 +32,7 @@ namespace valheimCLI
                     return;
                 }
                 ItemDrop.ItemData item = player.GetInventory().GetAllItems()
-                    .FirstOrDefault(candidate => candidate.m_dropPrefab != null && candidate.m_dropPrefab.name == args[1]);
+                    .FirstOrDefault(candidate => candidate.m_dropPrefab != null && candidate.m_dropPrefab.name.Equals(args[1], StringComparison.OrdinalIgnoreCase));
                 if (item == null)
                 {
                     args.Context.AddString("ERROR: Inventory does not contain " + args[1]);
