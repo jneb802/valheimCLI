@@ -60,6 +60,42 @@ namespace valheimCLI
                 }
                 UnequipInventoryItem(args[1], args.Context.AddString);
             }, isCheat: true);
+            new Terminal.ConsoleCommand("cli_hold_secondary_attack", "Hold special attack through player controls: cli_hold_secondary_attack [seconds]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                float seconds = .3f;
+                if (args.Length > 1) float.TryParse(args[1], out seconds);
+                HoldAttack(seconds, args.Context.AddString, true);
+            }, isCheat: true);
+            new Terminal.ConsoleCommand("cli_grapple_state", "Inspect the local grappling point and player velocity", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                Player player = Player.m_localPlayer;
+                if (player == null) { args.Context.AddString("ERROR: No local player"); return; }
+                GrapplingPoint point = GrapplingPoint.m_localGrappler;
+                args.Context.AddString($"grappling={player.m_grappling:F3} velocity={player.GetVelocity()} point={(point == null ? "none" : point.name)}");
+                if (point != null) args.Context.AddString($"anchor={point.transform.position} method={point.Method} hanging={point.m_secondary} equipCheck={point.m_equipCheck?.name}");
+            });
+            new Terminal.ConsoleCommand("cli_item_attack_state", "Inspect prefab attack settings: cli_item_attack_state <prefab>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                ItemDrop? item = args.Length > 1 ? ObjectDB.instance.GetItemPrefab(args[1])?.GetComponent<ItemDrop>() : null;
+                if (item == null) { args.Context.AddString("ERROR: Item prefab was not found"); return; }
+                foreach (Attack attack in new[] { item.m_itemData.m_shared.m_attack, item.m_itemData.m_shared.m_secondaryAttack })
+                {
+                    args.Context.AddString($"animation={attack.m_attackAnimation} type={attack.m_attackType} reload={attack.m_requiresReload} stamina={attack.m_attackStamina} velocity={attack.m_projectileVel} projectile={attack.m_attackProjectile?.name}");
+                    Projectile? projectile = attack.m_attackProjectile?.GetComponent<Projectile>();
+                    if (projectile != null) args.Context.AddString($"spawnOnTerrain={projectile.m_spawnOnTerrain} spawnOnCharacters={projectile.m_spawnOnCharacters} spawnCount={projectile.m_spawnCount} staticHitOnly={projectile.m_staticHitOnly} groundHitOnly={projectile.m_groundHitOnly} gravity={projectile.m_gravity} facing={attack.m_useCharacterFacing} facingYAim={attack.m_useCharacterFacingYAim}");
+                    GrapplingPoint? point = projectile?.m_spawnOnHit?.GetComponent<GrapplingPoint>();
+                    if (point != null) args.Context.AddString($"grapple={point.name} equipCheck={point.m_equipCheck?.name} method={point.Method} pullForce={point.m_pullForce} replacement={point.m_spawnOnDone?.name}");
+                }
+            });
+            new Terminal.ConsoleCommand("cli_apply_magic_item_json", "Apply Epic Loot item data: cli_apply_magic_item_json <item> <base64-json>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 3)
+                {
+                    args.Context.AddString("Usage: cli_apply_magic_item_json <item> <base64-json>");
+                    return;
+                }
+                ApplyMagicItemJson(args[1], args[2], args.Context.AddString);
+            }, isCheat: true);
             RouteController.Register();
             BuildCommands.Register();
             AsyncCommands.Register();
@@ -692,6 +728,41 @@ namespace valheimCLI
 
                 GiveItem(args[1], Math.Max(1, count), Mathf.Clamp(quality, 1, 4), args.Context.AddString);
             }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_use_item", "Use an inventory item through the normal player action path: cli_use_item <prefab-or-display-name>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                Player player = Player.m_localPlayer;
+                if (player == null || args.Length < 2)
+                {
+                    args.Context.AddString("ERROR: Requires a local player and an item name");
+                    return;
+                }
+                ItemDrop.ItemData? item = FindInventoryItem(player.GetInventory(), args[1]);
+                if (item == null)
+                {
+                    args.Context.AddString("ERROR: Inventory item not found: " + args[1]);
+                    return;
+                }
+                player.UseItem(player.GetInventory(), item, true);
+                args.Context.AddString("OK: Requested normal item use: " + item.m_shared.m_name);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_reload_state", "Print the current reload action, weapon recoil, and attack state", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                Player player = Player.m_localPlayer;
+                if (player == null)
+                {
+                    args.Context.AddString("ERROR: No local player");
+                    return;
+                }
+                PrintWeaponState(args.Context.AddString);
+                ItemDrop.ItemData weapon = player.GetCurrentWeapon();
+                if (weapon != null) args.Context.AddString($"weaponReloadTime={weapon.GetWeaponLoadingTime():F3} recoil={weapon.m_shared.m_attack.m_recoilPushback:F3} bodyMass={player.m_body.mass:F3}");
+                if (player.m_currentAttack != null)
+                    args.Context.AddString($"attackDamageMultiplier={player.m_currentAttack.m_damageMultiplier:F3}");
+                foreach (Player.MinorActionData action in player.m_actionQueue)
+                    args.Context.AddString($"action={action.m_type} item={action.m_item?.m_shared.m_name} time={action.m_time:F3} duration={action.m_duration:F3}");
+            });
 
             new Terminal.ConsoleCommand("cli_equip_item", "Equip an item from the local player inventory: cli_equip_item <prefab-or-display-name>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
@@ -2752,6 +2823,7 @@ namespace valheimCLI
 
             player.AttackTowardsPlayerLookDir = true;
             player.SetLookDir(direction.normalized);
+            player.m_lookPitch = -Mathf.Asin(direction.normalized.y) * Mathf.Rad2Deg;
             player.FaceLookDirection();
             addOutput($"OK: Aimed at {point.x:F2},{point.y:F2},{point.z:F2}");
         }
@@ -3155,7 +3227,7 @@ namespace valheimCLI
             addOutput($"OK: Queued fire currentWeapon='{weapon.m_shared.m_name}' holdSeconds={holdSeconds:F2} waitLoadedSeconds={waitLoadedSeconds:F1}");
         }
 
-        public static void HoldAttack(float seconds, Action<string> addOutput)
+        public static void HoldAttack(float seconds, Action<string> addOutput, bool secondary = false)
         {
             Player player = Player.m_localPlayer;
             if (player == null)
@@ -3178,8 +3250,8 @@ namespace valheimCLI
             }
 
             seconds = Mathf.Clamp(seconds, 0.2f, 15f);
-            valheimCLIPlugin.Instance.StartCoroutine(HoldAttackRoutine(seconds));
-            addOutput($"OK: Queued hold attack currentWeapon='{weapon.m_shared.m_name}' seconds={seconds:F1}");
+            valheimCLIPlugin.Instance.StartCoroutine(HoldAttackRoutine(seconds, secondary));
+            addOutput($"OK: Queued hold {(secondary ? "secondary " : "")}attack currentWeapon='{weapon.m_shared.m_name}' seconds={seconds:F1}");
         }
 
         private static void SpawnPrefabAt(GameObject prefab, string resolvedName, Vector3 basePosition, int count, int level, float radius, string positionLabel, Action<string> addOutput)
@@ -4207,6 +4279,41 @@ namespace valheimCLI
             }
 
             addOutput($"OK: applied magic effect item={GetItemPrefabName(item)} effect={effectType} rarity={rarityName} value={effectValue:F2} details={details}");
+        }
+
+        public static void ApplyMagicItemJson(string requestedName, string encodedJson, Action<string> addOutput)
+        {
+            if (!TryGetLocalInventory(addOutput, out Inventory inventory)) return;
+            ItemDrop.ItemData? item = FindInventoryItem(inventory, requestedName);
+            if (item == null)
+            {
+                addOutput("ERROR: Inventory item was not found");
+                return;
+            }
+
+            try
+            {
+                Assembly? epicLoot = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetName().Name == "EpicLoot");
+                Type? magicType = epicLoot?.GetType("EpicLoot.MagicItem");
+                Type? jsonType = AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetType("Newtonsoft.Json.JsonConvert")).FirstOrDefault(t => t != null);
+                MethodInfo? deserialize = jsonType?.GetMethod("DeserializeObject", new[] { typeof(string), typeof(Type) });
+                MethodInfo? save = epicLoot?.GetType("EpicLoot.ItemDataExtensions")?.GetMethod("SaveMagicItem", BindingFlags.Public | BindingFlags.Static);
+                if (magicType == null || deserialize == null || save == null)
+                {
+                    addOutput("ERROR: Epic Loot JSON support is unavailable");
+                    return;
+                }
+
+                string json = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(encodedJson));
+                object? magicItem = deserialize.Invoke(null, new object[] { json, magicType });
+                if (magicItem == null) throw new ArgumentException("Magic item JSON is null");
+                save.Invoke(null, new object[] { item, magicItem });
+                addOutput($"OK: Applied Epic Loot magic item JSON to {GetItemPrefabName(item)}");
+            }
+            catch (Exception ex)
+            {
+                addOutput($"ERROR: {(ex.InnerException ?? ex).Message}");
+            }
         }
 
         public static void SetupReloadOnKillClip(string crossbowPrefab, string boltPrefab, int boltCount, Action<string> addOutput)
@@ -5472,7 +5579,7 @@ namespace valheimCLI
             }
         }
 
-        private static IEnumerator HoldAttackRoutine(float seconds)
+        private static IEnumerator HoldAttackRoutine(float seconds, bool secondary)
         {
             Player player = Player.m_localPlayer;
             if (player == null)
@@ -5503,7 +5610,7 @@ namespace valheimCLI
                 }
 
                 player.FaceLookDirection();
-                player.SetControls(Vector3.zero, first, true, false, false, false, false, false, false, false, false);
+                player.SetControls(Vector3.zero, first && !secondary, !secondary, first && secondary, secondary, false, false, false, false, false, false);
                 first = false;
                 yield return new WaitForFixedUpdate();
             }
