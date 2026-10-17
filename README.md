@@ -65,6 +65,17 @@ valheim> spawn Boar 5
 ./CLI/bin/Debug/net9.0/valheim-cli commands --search screenshot --json
 ```
 
+## Item Interaction Tests
+
+`cli_use_item_nearest <itemPrefab> <object-or-component-name> [radius]`
+calls `Interactable.UseItem` on the nearest matching loaded component using an
+item already in the local player's inventory. The default radius is 5 metres.
+It does not grant items or bypass the target's payment and event checks.
+
+Use `cli_count_item <itemPrefab>` to check the total across inventory stacks.
+An interaction returning `accepted=True` does not prove that an asynchronous
+event has started. Check inventory and event state after the action completes.
+
 ## MWL Location Development
 
 After replacing a location bundle on disk, run `mwl_reload MWL_Ruins1` in the game console to replace the current preview without leaving the world. This command is included in valheimCLI; no separate reload plugin is needed.
