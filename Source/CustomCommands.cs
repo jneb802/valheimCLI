@@ -96,6 +96,7 @@ namespace valheimCLI
                 }
                 ApplyMagicItemJson(args[1], args[2], args.Context.AddString);
             }, isCheat: true);
+            ComponentCommands.Register();
             RouteController.Register();
             BuildCommands.Register();
             AsyncCommands.Register();
