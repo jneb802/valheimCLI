@@ -4224,6 +4224,8 @@ namespace valheimCLI
             float regenMultiplier = 1f;
             player.GetSEMan().ModifyHealthRegen(ref regenMultiplier);
             addOutput(FormattableString.Invariant($"OK: health={player.GetHealth():F2} maxHealth={player.GetMaxHealth():F2} stamina={player.GetStamina():F2} maxStamina={player.GetMaxStamina():F2} eitr={player.GetEitr():F2} maxEitr={player.GetMaxEitr():F2} foods={player.m_foods.Count} foodRegenTimer={player.m_foodRegenTimer:F2} regenMultiplier={regenMultiplier:F2} dead={player.IsDead()} god={player.InGodMode()} ghost={player.InGhostMode()}"));
+            foreach (Player.Food food in player.m_foods)
+                addOutput(FormattableString.Invariant($"FOOD prefab={GetItemPrefabName(food.m_item)} remaining={food.m_time:F3} health={food.m_health:F3} stamina={food.m_stamina:F3} eitr={food.m_eitr:F3}"));
         }
 
         public static void ConsumeInventoryItem(string requestedName, Action<string> addOutput)
