@@ -26,6 +26,7 @@ namespace valheimCLI
             }, isCheat: true);
             new Terminal.ConsoleCommand("cli_component_state", "Inspect nearest component fields/properties: cli_component_state <full-type-name> [radius]", args => Run(args, false, false), isCheat: true);
             new Terminal.ConsoleCommand("cli_component_interact", "Use normal interaction on nearest component: cli_component_interact <full-type-name> [radius]", args => Run(args, true, false), isCheat: true);
+            new Terminal.ConsoleCommand("cli_component_alt_interact", "Use alternate interaction on nearest component: cli_component_alt_interact <full-type-name> [radius]", args => Run(args, true, false, true), isCheat: true);
             new Terminal.ConsoleCommand("cli_component_use_item", "Use inventory item on nearest component: cli_component_use_item <full-type-name> <item-prefab> [radius]", args => Run(args, true, true), isCheat: true);
             new Terminal.ConsoleCommand("cli_inventory_details", "Print inventory prefab, quality, tooltip and custom data: cli_inventory_details [prefab]", args =>
             {
@@ -42,7 +43,7 @@ namespace valheimCLI
             }, isCheat: true);
         }
 
-        private static void Run(Terminal.ConsoleEventArgs args, bool interact, bool useItem)
+        private static void Run(Terminal.ConsoleEventArgs args, bool interact, bool useItem, bool alt = false)
         {
             Player player = Player.m_localPlayer;
             if (player == null) { args.Context.AddString("ERROR: No local player"); return; }
@@ -66,7 +67,7 @@ namespace valheimCLI
                     if (item == null) { args.Context.AddString("ERROR: Inventory item not found"); return; }
                     args.Context.AddString("UseItem result=" + action.UseItem(player, item));
                 }
-                else args.Context.AddString("Interact result=" + action.Interact(player, false, false));
+                else args.Context.AddString("Interact result=" + action.Interact(player, false, alt));
                 return;
             }
             const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
