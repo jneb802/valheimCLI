@@ -20,6 +20,18 @@ internal static class EncounterValidationCommands
                 AccessTools.Field(typeof(Attack), "m_character").SetValue(probe, character);
                 float damageFactor = (float)AccessTools.Method(typeof(Attack), "GetLevelDamageFactor").Invoke(probe, null);
                 args.Context.AddString($"creature={character.name} level={character.GetLevel()} maxHealth={character.GetMaxHealth():F2} attackLevelFactor={damageFactor:F4} runSpeed={character.m_runSpeed:F3} faction={character.m_faction} dropComponent={character.GetComponent<CharacterDrop>() != null}");
+                Type? sls = Type.GetType("StarLevelSystem.modules.APIReciever, StarLevelSystem", false);
+                MethodInfo? modifiers = sls?.GetMethod("GetAllModifiersForCreature", BindingFlags.Public | BindingFlags.Static);
+                if (modifiers != null)
+                {
+                    try
+                    {
+                        System.Collections.IDictionary? values = modifiers.Invoke(null, new object[] { character }) as System.Collections.IDictionary;
+                        string names = values == null ? "unavailable" : string.Join(",", values.Keys.Cast<object>().Select(key => key + ":" + values[key]));
+                        args.Context.AddString($"creature={character.name} slsModifiers={names}");
+                    }
+                    catch (Exception exception) { args.Context.AddString("ERROR: SLS modifier inspection: " + exception.GetBaseException().Message); }
+                }
             }
         });
         new Terminal.ConsoleCommand("cli_epicloot_table_level", "Set nearby table feature for test setup: <feature-name> <level>", args =>
