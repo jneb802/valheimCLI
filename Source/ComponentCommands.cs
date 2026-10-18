@@ -10,6 +10,21 @@ namespace valheimCLI
     {
         public static void Register()
         {
+            new Terminal.ConsoleCommand("cli_components", "List component paths and positions: cli_components <full-type-name> [radius=100]", args =>
+            {
+                if (args.Length < 2 || Player.m_localPlayer == null) return;
+                float radius = 100;
+                if (args.Length > 2 && (!float.TryParse(args[2], NumberStyles.Float, CultureInfo.InvariantCulture, out radius) ||
+                    !(radius > 0 && radius <= 10000)))
+                { args.Context.AddString("ERROR: Radius must be greater than 0 and at most 10000"); return; }
+                Type type = AppDomain.CurrentDomain.GetAssemblies().Select(assembly => assembly.GetType(args[1], false)).FirstOrDefault(candidate => candidate != null);
+                if (type == null || !typeof(Component).IsAssignableFrom(type))
+                { args.Context.AddString("ERROR: Component type not loaded"); return; }
+                foreach (Component target in UnityEngine.Object.FindObjectsByType(type, FindObjectsSortMode.None).Cast<Component>()
+                    .Where(component => component.gameObject.activeInHierarchy && Vector3.Distance(component.transform.position, Player.m_localPlayer.transform.position) <= radius)
+                    .OrderBy(component => Vector3.Distance(component.transform.position, Player.m_localPlayer.transform.position)))
+                    args.Context.AddString($"path={Path(target.transform)} position={target.transform.position:F3}");
+            }, isCheat: true);
             new Terminal.ConsoleCommand("cli_store_buy", "Buy an available item through the open store: cli_store_buy <prefab>", args =>
             {
                 if (args.Length != 2 || Player.m_localPlayer == null || StoreGui.instance == null || !StoreGui.IsVisible()) { args.Context.AddString("ERROR: Open a store and specify an item prefab"); return; }
