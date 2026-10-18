@@ -82,6 +82,7 @@ namespace valheimCLI
         private static string Format(object value)
         {
             if (value == null) return "null";
+            if (value is UnityEngine.Object unityObject && unityObject == null) return "<destroyed>";
             if (value is Transform transform) return Path(transform) + " position=" + transform.position.ToString("F3");
             if (value is Component component) return Path(component.transform) + " type=" + component.GetType().FullName;
             if (value is Array array) return "[" + string.Join(", ", array.Cast<object>().Select(Format)) + "]";

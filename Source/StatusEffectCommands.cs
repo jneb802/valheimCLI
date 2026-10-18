@@ -27,7 +27,8 @@ internal static class StatusEffectCommands
             foreach (Character character in characters)
             {
                 StatusEffect[] statuses = character.GetSEMan().GetStatusEffects().ToArray();
-                args.Context.AddString($"STATUS_CHARACTER prefab={Utils.GetPrefabName(character.gameObject)} position={character.transform.position:F2} count={statuses.Length}");
+                ZDO? record = character.GetComponent<ZNetView>()?.GetZDO();
+                args.Context.AddString($"STATUS_CHARACTER prefab={Utils.GetPrefabName(character.gameObject)} id={record?.m_uid.ToString() ?? "none"} position={character.transform.position:F2} count={statuses.Length}");
                 foreach (StatusEffect status in statuses)
                 {
                     string shield = status is SE_Shield ? $" absorbed={AccessTools.Field(typeof(SE_Shield), "m_damage").GetValue(status)} capacity={AccessTools.Field(typeof(SE_Shield), "m_totalAbsorbDamage").GetValue(status)}" : "";
