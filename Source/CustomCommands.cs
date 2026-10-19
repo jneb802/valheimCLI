@@ -24,6 +24,7 @@ namespace valheimCLI
 
         public static void Register()
         {
+            DestructibleCommands.Register();
             new Terminal.ConsoleCommand("cli_player_vitals", "Read current/max health, stamina, eitr, food count and regeneration timer", args => PrintPlayerVitals(args.Context.AddString));
             new Terminal.ConsoleCommand("cli_item_state", "Read an inventory item's equipment state: cli_item_state <prefab-or-display-name>", args =>
             {
