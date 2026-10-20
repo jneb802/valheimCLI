@@ -10,6 +10,12 @@ internal static class InspectionCommands
 {
     internal static void Register()
     {
+        new Terminal.ConsoleCommand("cli_asset_bundles", "List loaded Unity asset bundles: [name-filter]", args =>
+        {
+            foreach (AssetBundle bundle in AssetBundle.GetAllLoadedAssetBundles().OrderBy(b => b.name))
+                if (args.Length < 2 || bundle.name.IndexOf(args[1], StringComparison.OrdinalIgnoreCase) >= 0)
+                    args.Context.AddString("ASSET_BUNDLE name=" + bundle.name);
+        });
         new Terminal.ConsoleCommand("cli_components", "List loaded components and positions: <type-name> [radius=100] [name-filter]", args =>
         {
             if (args.Length < 2 || Player.m_localPlayer == null) return;
