@@ -10,15 +10,16 @@ internal static class InspectionCommands
 {
     internal static void Register()
     {
-        new Terminal.ConsoleCommand("cli_components", "List loaded components and positions: <type-name> [radius=100]", args =>
+        new Terminal.ConsoleCommand("cli_components", "List loaded components and positions: <type-name> [radius=100] [name-filter]", args =>
         {
             if (args.Length < 2 || Player.m_localPlayer == null) return;
             float radius = 100;
             if (args.Length > 2 && (!float.TryParse(args[2], NumberStyles.Float, CultureInfo.InvariantCulture, out radius) ||
                 float.IsNaN(radius) || radius <= 0 || radius > 20000))
             { args.Context.AddString("ERROR: Radius must be 0–20000 metres"); return; }
-            foreach (MonoBehaviour component in UnityEngine.Object.FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None)
+            foreach (Component component in UnityEngine.Object.FindObjectsByType<Component>(FindObjectsSortMode.None)
                 .Where(c => c != null && (c.GetType().Name == args[1] || c.GetType().FullName == args[1]))
+                .Where(c => args.Length < 4 || c.name.IndexOf(args[3], StringComparison.OrdinalIgnoreCase) >= 0)
                 .Where(c => Vector3.Distance(c.transform.position, Player.m_localPlayer.transform.position) <= radius)
                 .OrderBy(c => Vector3.Distance(c.transform.position, Player.m_localPlayer.transform.position)).Take(50))
             {
@@ -29,7 +30,7 @@ internal static class InspectionCommands
         new Terminal.ConsoleCommand("cli_component_value", "Read a field/property path: <component-instance-id> <member.path>", args =>
         {
             if (args.Length != 3 || !int.TryParse(args[1], out int id)) return;
-            object? value = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None)
+            object? value = UnityEngine.Object.FindObjectsByType<Component>(FindObjectsSortMode.None)
                 .FirstOrDefault(c => c.GetInstanceID() == id);
             if (value == null) { args.Context.AddString("ERROR: Component not loaded"); return; }
             try
