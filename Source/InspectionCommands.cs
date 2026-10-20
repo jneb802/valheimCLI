@@ -10,6 +10,30 @@ internal static class InspectionCommands
 {
     internal static void Register()
     {
+        new Terminal.ConsoleCommand("cli_raycast", "Inspect solid geometry: <x> <y> <z> <dx> <dy> <dz> [distance=20]", args =>
+        {
+            float[] values = new float[6];
+            if (args.Length < 7 || args.Length > 8)
+            { args.Context.AddString("Usage: cli_raycast <x> <y> <z> <dx> <dy> <dz> [distance=20]"); return; }
+            for (int i = 0; i < values.Length; i++)
+                if (!float.TryParse(args[i + 1], NumberStyles.Float, CultureInfo.InvariantCulture, out values[i]) ||
+                    float.IsNaN(values[i]) || float.IsInfinity(values[i]))
+                { args.Context.AddString("ERROR: Coordinates and direction must be finite numbers"); return; }
+            float distance = 20;
+            if (args.Length == 8 && (!float.TryParse(args[7], NumberStyles.Float, CultureInfo.InvariantCulture, out distance) ||
+                float.IsNaN(distance) || float.IsInfinity(distance) || distance <= 0 || distance > 20000))
+            { args.Context.AddString("ERROR: Distance must be 0–20000 metres"); return; }
+            Vector3 origin = new(values[0], values[1], values[2]);
+            Vector3 direction = new(values[3], values[4], values[5]);
+            if (direction.sqrMagnitude < 0.000001f)
+            { args.Context.AddString("ERROR: Direction must be nonzero"); return; }
+            int mask = LayerMask.GetMask("Default", "static_solid", "Default_small", "piece", "terrain");
+            RaycastHit[] hits = Physics.RaycastAll(origin, direction.normalized, distance, mask, QueryTriggerInteraction.Ignore);
+            foreach (RaycastHit hit in hits.OrderBy(h => h.distance).Take(12))
+                args.Context.AddString(FormattableString.Invariant(
+                    $"RAY_HIT id={hit.collider.GetInstanceID()} name={hit.collider.name} point={hit.point.x:F2},{hit.point.y:F2},{hit.point.z:F2} normal={hit.normal.x:F2},{hit.normal.y:F2},{hit.normal.z:F2} distance={hit.distance:F2}"));
+            args.Context.AddString("OK: solid ray hits=" + hits.Length);
+        });
         new Terminal.ConsoleCommand("cli_asset_bundles", "List loaded Unity asset bundles: [name-filter]", args =>
         {
             foreach (AssetBundle bundle in AssetBundle.GetAllLoadedAssetBundles().OrderBy(b => b.name))
