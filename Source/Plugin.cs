@@ -54,6 +54,7 @@ namespace valheimCLI
             CustomCommands.Register();
             ItemInteractionCommands.Register();
             EncounterValidationCommands.Register();
+            InspectionCommands.Register();
             EnvironmentCommands.Register();
             StatusEffectCommands.Register();
             new MwlLocationReload(this).Register();
