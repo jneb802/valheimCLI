@@ -56,6 +56,7 @@ namespace valheimCLI
             EncounterValidationCommands.Register();
             EnvironmentCommands.Register();
             StatusEffectCommands.Register();
+            PerformanceCommands.Register();
             new MwlLocationReload(this).Register();
 
             // Initialize state tracker
