@@ -199,9 +199,7 @@ Generic wrappers live under `scripts/`:
 
 Configure hosts, executable paths, and game paths with environment variables or script parameters. Do not put real passwords in commands; use `--password-file`.
 
-## Config
-
-### Performance snapshots
+## Performance snapshots
 
 `cli_performance_snapshot` reports scene object, renderer, particle, light,
 character, material, mesh, and memory counts. It also reports the current render
@@ -218,6 +216,8 @@ Validated on both Valnet Linux clients with Praetoris Season 8 8.0.49 on Valdev.
 Both returned fresh measurements at 1920×1080. The in-world scans took about
 1.7–2.1 seconds, so the Endgame investigation excludes their sample windows and
 15 seconds after each scan. Release build: zero warnings and zero errors.
+
+## Config
 
 `BepInEx/config/valheimCLI.valheimCLI.cfg`:
 - `Server.Port` - default 5555
