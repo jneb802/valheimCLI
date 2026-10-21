@@ -22,7 +22,8 @@ internal static class PerformanceCommands
             Light[] lights = SceneComponents<Light>();
             args.Context.AddString("PERFORMANCE utc=" + DateTime.UtcNow.ToString("O", CultureInfo.InvariantCulture) +
                 " sceneObjects=" + objects.Length + " activeObjects=" + objects.Count(item => item.activeInHierarchy) +
-                " renderers=" + renderers.Length + " visibleRenderers=" + renderers.Count(item => item.enabled && item.isVisible) +
+                " renderers=" + renderers.Length + " enabledRenderers=" + renderers.Count(item => item.enabled && item.gameObject.activeInHierarchy) +
+                " visibleRenderers=" + renderers.Count(item => item.enabled && item.isVisible) +
                 " particles=" + particles.Length + " playingParticles=" + particles.Count(item => item.isPlaying) +
                 " particleCount=" + particles.Sum(item => (long)item.particleCount) +
                 " lights=" + lights.Length + " activeLights=" + lights.Count(item => item.enabled && item.gameObject.activeInHierarchy) +

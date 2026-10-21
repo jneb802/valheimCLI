@@ -29,6 +29,14 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Reference Include="UnityEngine.AudioModule">
+      <HintPath>$(VALHEIM_MANAGED)/UnityEngine.AudioModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.AnimationModule">
+      <HintPath>$(VALHEIM_MANAGED)/UnityEngine.AnimationModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Compile Remove="CLI\**" />
     <Compile Remove="Tests\**" />
     <None Remove="CLI\**" />

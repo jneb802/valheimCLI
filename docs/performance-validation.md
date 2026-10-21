@@ -32,3 +32,30 @@ zero errors. Its SHA-256 is
 
 The preliminary encounter measurements were invalidated. Fresh two-encounter
 measurements are tracked in jneb802/ValheimEndgame#87.
+
+## Controlled scene comparisons
+
+`cli_profile_start` records main-thread time, render-thread time, draw calls,
+batches, SetPass calls, triangles, and vertices where the runtime exposes those
+counters. `cli_profile_stop` reports sample count, mean, 95th percentile, and
+maximum, then disposes the recorders. Capacity is 4,096 frames per counter.
+
+`cli_scene_counts <exact-root-name>` reports each matching root's position,
+object and component counts, and enabled script types. It includes inactive
+children and must run outside the measured frame window.
+
+For an empty test room, `cli_scene_presentation <exact-root-name> <x> <y> <z>
+<radius> false` temporarily disables its renderers, lights, animators, and
+scripts and pauses playing particles and audio. Colliders and root objects stay
+active. Repeat with `true` to restore the original enabled and playing state.
+This is an operator-controlled comparison tool, not automatic game behavior.
+Use the same camera position for enabled/disabled/enabled comparisons. Restore
+every changed room before leaving the test.
+
+The profiling commands were validated on both Valnet clients. A controlled
+enabled/disabled/enabled comparison in a four-room Endgame encounter changed
+client 1 from 32.41 to 36.29 to 31.11 FPS. Main-thread means changed from
+31.100 to 27.207 to 31.806 ms. Client 2 was an unchanged control. All manually
+suspended components were restored before the candidate mod was installed.
+Per-room counts also verified that the candidate suspended empty rooms while
+keeping 5,855 active colliders per room and restored presentation on re-entry.
