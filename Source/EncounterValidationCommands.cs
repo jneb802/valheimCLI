@@ -98,6 +98,14 @@ internal static class EncounterValidationCommands
             item.m_customData[args[2]] = args[3];
             args.Context.AddString("Updated " + args[2]);
         });
+        new Terminal.ConsoleCommand("cli_item_remove_custom_data", "Remove one key from the first matching inventory item: <prefab> <key>", args =>
+        {
+            if (args.Length != 3 || Player.m_localPlayer == null)
+            { args.Context.AddString("ERROR: A local player, item prefab, and key are required"); return; }
+            ItemDrop.ItemData? item = Player.m_localPlayer.GetInventory().GetAllItems().FirstOrDefault(i => i.m_dropPrefab?.name == args[1]);
+            if (item == null) { args.Context.AddString("ERROR: item absent"); return; }
+            args.Context.AddString(item.m_customData != null && item.m_customData.Remove(args[2]) ? "Removed " + args[2] : "Key absent: " + args[2]);
+        }, isCheat: true);
         new Terminal.ConsoleCommand("cli_epicloot_item", "Read Epic Loot eligibility and magic data: <prefab>", args =>
         {
             if (args.Length != 2 || Player.m_localPlayer == null) return;

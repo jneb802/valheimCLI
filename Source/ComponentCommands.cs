@@ -24,7 +24,7 @@ namespace valheimCLI
                 int after = inventory.CountItems(store.m_coinPrefab.m_itemData.m_shared.m_name);
                 args.Context.AddString($"purchase prefab={args[1]} price={item.m_price} coinsBefore={before} coinsAfter={after}");
             }, isCheat: true);
-            new Terminal.ConsoleCommand("cli_component_state", "Inspect nearest component fields/properties: cli_component_state <full-type-name> [radius]", args => Run(args, false, false), isCheat: true);
+            new Terminal.ConsoleCommand("cli_component_state", "Inspect nearest component fields/properties: cli_component_state <full-type-name> [radius] [member-name]", args => Run(args, false, false), isCheat: true);
             new Terminal.ConsoleCommand("cli_component_interact", "Use normal interaction on nearest component: cli_component_interact <full-type-name> [radius]", args => Run(args, true, false), isCheat: true);
             new Terminal.ConsoleCommand("cli_component_use_item", "Use inventory item on nearest component: cli_component_use_item <full-type-name> <item-prefab> [radius]", args => Run(args, true, true), isCheat: true);
             new Terminal.ConsoleCommand("cli_inventory_details", "Print inventory prefab, quality, tooltip and custom data: cli_inventory_details [prefab]", args =>
@@ -70,13 +70,18 @@ namespace valheimCLI
                 return;
             }
             const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
-            foreach (FieldInfo field in type.GetFields(flags).OrderBy(field => field.Name)) args.Context.AddString(field.Name + "=" + Format(field.GetValue(target)));
-            foreach (PropertyInfo property in type.GetProperties(flags).Where(property => property.GetIndexParameters().Length == 0 && property.GetGetMethod(true) != null).OrderBy(property => property.Name))
+            string? member = args.Length > 3 ? args[3] : null;
+            bool found = false;
+            foreach (FieldInfo field in type.GetFields(flags).Where(field => member == null || field.Name == member).OrderBy(field => field.Name))
+            { found = true; args.Context.AddString(field.Name + "=" + Format(field.GetValue(target))); }
+            foreach (PropertyInfo property in type.GetProperties(flags).Where(property => (member == null || property.Name == member) && property.GetIndexParameters().Length == 0 && property.GetGetMethod(true) != null).OrderBy(property => property.Name))
             {
+                found = true;
                 try { args.Context.AddString(property.Name + "=" + Format(property.GetValue(target))); }
                 catch (Exception exception) { args.Context.AddString(property.Name + "=<unavailable:" + exception.GetType().Name + ">"); }
             }
-            if (target is Hoverable hoverable) args.Context.AddString("hover=" + hoverable.GetHoverText().Replace("\n", " | "));
+            if (member != null && !found) args.Context.AddString("ERROR: Member not found: " + member);
+            if (member == null && target is Hoverable hoverable) args.Context.AddString("hover=" + hoverable.GetHoverText().Replace("\n", " | "));
         }
 
         private static string Format(object value)
