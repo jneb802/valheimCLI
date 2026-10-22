@@ -2,6 +2,10 @@
 
 Run Valheim console commands from your terminal.
 
+## Renderer Inspection
+
+`cli_renderers <object-name> [radius=30]` inspects the nearest scene object with that exact name. It includes inactive child renderers and reports their mesh vertex counts, world bounds, enabled state, and material shader support. It requires a local player and dev commands. It does not change the object. Output is limited to 100 renderers.
+
 ## Health and Consumable Validation
 
 - `cli_player_vitals` reads current and maximum health, stamina and eitr, food count, the food regeneration timer, the status-effect regeneration multiplier, and god/ghost state. The multiplier does not include every mod's regeneration rules; observe health over time to verify healing.
