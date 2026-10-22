@@ -10,6 +10,7 @@ namespace valheimCLI
     {
         public static void Register()
         {
+            new Terminal.ConsoleCommand("cli_renderers", "Inspect renderers below a scene object: cli_renderers <object-name> [radius=30]", InspectRenderers, isCheat: true);
             new Terminal.ConsoleCommand("cli_store_buy", "Buy an available item through the open store: cli_store_buy <prefab>", args =>
             {
                 if (args.Length != 2 || Player.m_localPlayer == null || StoreGui.instance == null || !StoreGui.IsVisible()) { args.Context.AddString("ERROR: Open a store and specify an item prefab"); return; }
@@ -24,7 +25,7 @@ namespace valheimCLI
                 int after = inventory.CountItems(store.m_coinPrefab.m_itemData.m_shared.m_name);
                 args.Context.AddString($"purchase prefab={args[1]} price={item.m_price} coinsBefore={before} coinsAfter={after}");
             }, isCheat: true);
-            new Terminal.ConsoleCommand("cli_component_state", "Inspect nearest component fields/properties: cli_component_state <full-type-name> [radius]", args => Run(args, false, false), isCheat: true);
+            new Terminal.ConsoleCommand("cli_component_state", "Inspect nearest component fields/properties: cli_component_state <full-type-name> [radius] [member-name]", args => Run(args, false, false), isCheat: true);
             new Terminal.ConsoleCommand("cli_component_interact", "Use normal interaction on nearest component: cli_component_interact <full-type-name> [radius]", args => Run(args, true, false), isCheat: true);
             new Terminal.ConsoleCommand("cli_component_use_item", "Use inventory item on nearest component: cli_component_use_item <full-type-name> <item-prefab> [radius]", args => Run(args, true, true), isCheat: true);
             new Terminal.ConsoleCommand("cli_inventory_details", "Print inventory prefab, quality, tooltip and custom data: cli_inventory_details [prefab]", args =>
@@ -40,6 +41,38 @@ namespace valheimCLI
                     args.Context.AddString("tooltip=" + item.GetTooltip().Replace("\n", " | "));
                 }
             }, isCheat: true);
+        }
+
+        private static void InspectRenderers(Terminal.ConsoleEventArgs args)
+        {
+            Player player = Player.m_localPlayer;
+            if (player == null) { args.Context.AddString("ERROR: No local player"); return; }
+            float radius = 30f;
+            if (args.Length < 2 || args.Length > 3 || (args.Length == 3 &&
+                (!float.TryParse(args[2], NumberStyles.Float, CultureInfo.InvariantCulture, out radius) ||
+                 float.IsNaN(radius) || radius <= 0 || radius > 10000)))
+            { args.Context.AddString("ERROR: Specify an object name and radius greater than 0 and at most 10000"); return; }
+            Transform target = Resources.FindObjectsOfTypeAll<Transform>()
+                .Where(candidate => candidate.gameObject.scene.IsValid() && candidate.name == args[1] &&
+                    Vector3.Distance(candidate.position, player.transform.position) <= radius)
+                .OrderBy(candidate => Vector3.Distance(candidate.position, player.transform.position)).FirstOrDefault();
+            if (target == null) { args.Context.AddString("ERROR: Scene object not found"); return; }
+            args.Context.AddString($"object={Path(target)} position={target.position.ToString("F3")} scale={target.lossyScale.ToString("F3")} active={target.gameObject.activeInHierarchy}");
+            Renderer[] renderers = target.GetComponentsInChildren<Renderer>(true);
+            args.Context.AddString("rendererCount=" + renderers.Length);
+            foreach (Renderer renderer in renderers.Take(100))
+            {
+                MeshFilter filter = renderer.GetComponent<MeshFilter>();
+                Mesh? mesh = filter != null ? filter.sharedMesh : (renderer as SkinnedMeshRenderer)?.sharedMesh;
+                args.Context.AddString($"renderer={Path(renderer.transform)} enabled={renderer.enabled} active={renderer.gameObject.activeInHierarchy} visible={renderer.isVisible} forceOff={renderer.forceRenderingOff} position={renderer.transform.position.ToString("F3")} boundsCenter={renderer.bounds.center.ToString("F3")} boundsSize={renderer.bounds.size.ToString("F3")} mesh={(mesh != null ? mesh.name : "none")} vertices={(mesh != null ? mesh.vertexCount : 0)}");
+                foreach (Material material in renderer.sharedMaterials)
+                {
+                    if (material == null) { args.Context.AddString("material=null"); continue; }
+                    Shader shader = material.shader;
+                    args.Context.AddString($"material={material.name} shader={(shader != null ? shader.name : "null")} supported={(shader != null && shader.isSupported)} queue={material.renderQueue}");
+                }
+            }
+            if (renderers.Length > 100) args.Context.AddString("Renderer output limited to 100 entries");
         }
 
         private static void Run(Terminal.ConsoleEventArgs args, bool interact, bool useItem)
@@ -70,13 +103,18 @@ namespace valheimCLI
                 return;
             }
             const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
-            foreach (FieldInfo field in type.GetFields(flags).OrderBy(field => field.Name)) args.Context.AddString(field.Name + "=" + Format(field.GetValue(target)));
-            foreach (PropertyInfo property in type.GetProperties(flags).Where(property => property.GetIndexParameters().Length == 0 && property.GetGetMethod(true) != null).OrderBy(property => property.Name))
+            string? member = args.Length > 3 ? args[3] : null;
+            bool found = false;
+            foreach (FieldInfo field in type.GetFields(flags).Where(field => member == null || field.Name == member).OrderBy(field => field.Name))
+            { found = true; args.Context.AddString(field.Name + "=" + Format(field.GetValue(target))); }
+            foreach (PropertyInfo property in type.GetProperties(flags).Where(property => (member == null || property.Name == member) && property.GetIndexParameters().Length == 0 && property.GetGetMethod(true) != null).OrderBy(property => property.Name))
             {
+                found = true;
                 try { args.Context.AddString(property.Name + "=" + Format(property.GetValue(target))); }
                 catch (Exception exception) { args.Context.AddString(property.Name + "=<unavailable:" + exception.GetType().Name + ">"); }
             }
-            if (target is Hoverable hoverable) args.Context.AddString("hover=" + hoverable.GetHoverText().Replace("\n", " | "));
+            if (member != null && !found) args.Context.AddString("ERROR: Member not found: " + member);
+            if (member == null && target is Hoverable hoverable) args.Context.AddString("hover=" + hoverable.GetHoverText().Replace("\n", " | "));
         }
 
         private static string Format(object value)
