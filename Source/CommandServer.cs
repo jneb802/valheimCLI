@@ -145,7 +145,7 @@ namespace valheimCLI
                         if (_listener.Pending())
                         {
                             var client = _listener.AcceptTcpClient();
-                            _logger.LogInfo("CLI client connected");
+                            _logger.LogDebug("CLI client connected");
 
                             lock (_clientsLock)
                             {
@@ -330,7 +330,7 @@ namespace valheimCLI
                     _clients.Remove(client);
                 }
                 try { client.Close(); } catch { }
-                _logger.LogInfo("CLI client disconnected");
+                _logger.LogDebug("CLI client disconnected");
             }
         }
 
