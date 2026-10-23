@@ -12,6 +12,7 @@ internal static class RuntimeProfilingCommands
     private static readonly Dictionary<string, ProfilerRecorder> recorders = new();
     private static readonly HashSet<string> timings = new();
     private static readonly Dictionary<GameObject, Presentation> hidden = new();
+    private static readonly Dictionary<string, Component[]> disabledComponents = new();
 
     internal static void Register()
     {
@@ -48,6 +49,7 @@ internal static class RuntimeProfilingCommands
         });
         new Terminal.ConsoleCommand("cli_scene_presentation", "Toggle test scene visuals/effects while preserving colliders: <exact-name> <x> <y> <z> <radius> <true|false>.", args =>
         {
+            if (disabledComponents.Count > 0) throw new InvalidOperationException("Restore component comparisons before changing presentation.");
             if (args.Length != 7) throw new ArgumentException("Expected exact-name x y z radius true|false");
             Vector3 center = new(Parse(args[2]), Parse(args[3]), Parse(args[4]));
             float radius = Parse(args[5]);
@@ -61,6 +63,31 @@ internal static class RuntimeProfilingCommands
                 args.Context.AddString("SCENE presentation=" + active + " name=" + item.name + " position=" + item.transform.position);
             }
             args.Context.AddString("SCENE matched=" + matches.Length);
+        }, isCheat: true);
+        new Terminal.ConsoleCommand("cli_scene_component", "Disable or restore one component type under exact scene roots: <exact-root-name> <full-type-name> <disable|restore>. Preserves originally disabled components.", args =>
+        {
+            if (args.Length != 4 || (args[3] != "disable" && args[3] != "restore"))
+                throw new ArgumentException("Expected exact-root-name full-type-name disable|restore");
+            if (hidden.Count > 0) throw new InvalidOperationException("Restore presentation comparisons before changing components.");
+            string key = args[1] + "|" + args[2];
+            if (args[3] == "restore")
+            {
+                int restored = RestoreComponents(key);
+                args.Context.AddString($"COMPONENT root={args[1]} type={args[2]} restored={restored}");
+                return;
+            }
+            if (disabledComponents.ContainsKey(key)) throw new InvalidOperationException("This comparison is already disabled; restore it first.");
+            // One comparison at a time avoids overlapping base and derived types.
+            if (disabledComponents.Count > 0) throw new InvalidOperationException("Restore the current component comparison first.");
+            Type type = AppDomain.CurrentDomain.GetAssemblies().Select(assembly => assembly.GetType(args[2], false)).FirstOrDefault(candidate => candidate != null)
+                ?? throw new ArgumentException("Component type is not loaded.");
+            if (!typeof(Behaviour).IsAssignableFrom(type) && !typeof(Renderer).IsAssignableFrom(type) && !typeof(Collider).IsAssignableFrom(type))
+                throw new ArgumentException("Type must be a Behaviour, Renderer, or Collider.");
+            GameObject[] roots = Roots(args[1]);
+            Component[] components = roots.SelectMany(root => root.GetComponentsInChildren(type, true)).Where(Enabled).ToArray();
+            disabledComponents.Add(key, components);
+            foreach (Component component in components) if (component != null) SetEnabled(component, false);
+            args.Context.AddString($"COMPONENT root={args[1]} type={args[2]} roots={roots.Length} disabled={components.Length}");
         }, isCheat: true);
         new Terminal.ConsoleCommand("cli_scene_counts", "Count objects and enabled behaviours under exact matching scene roots: <exact-name>", args =>
         {
@@ -106,6 +133,36 @@ internal static class RuntimeProfilingCommands
     {
         foreach (Presentation presentation in hidden.Values) presentation.Restore();
         hidden.Clear();
+        foreach (string key in disabledComponents.Keys.ToArray()) RestoreComponents(key);
+    }
+
+    private static bool Enabled(Component component) => component switch
+    {
+        Behaviour behaviour => behaviour.enabled,
+        Renderer renderer => renderer.enabled,
+        Collider collider => collider.enabled,
+        _ => false
+    };
+
+    private static void SetEnabled(Component component, bool enabled)
+    {
+        if (component is Behaviour behaviour) behaviour.enabled = enabled;
+        else if (component is Renderer renderer) renderer.enabled = enabled;
+        else if (component is Collider collider) collider.enabled = enabled;
+    }
+
+    private static int RestoreComponents(string key)
+    {
+        if (!disabledComponents.TryGetValue(key, out Component[] components)) return 0;
+        int restored = 0;
+        foreach (Component component in components)
+        {
+            if (component == null) continue;
+            SetEnabled(component, true);
+            restored++;
+        }
+        disabledComponents.Remove(key);
+        return restored;
     }
 
     private sealed class Presentation
