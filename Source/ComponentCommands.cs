@@ -101,7 +101,7 @@ namespace valheimCLI
             if (member == null && target is Hoverable hoverable) args.Context.AddString("hover=" + hoverable.GetHoverText().Replace("\n", " | "));
         }
 
-        private static string Format(object value)
+        private static string Format(object? value)
         {
             if (value == null) return "null";
             if (value is UnityEngine.Object unityObject && unityObject == null) return "<destroyed>";
