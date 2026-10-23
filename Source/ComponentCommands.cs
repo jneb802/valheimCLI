@@ -10,6 +10,21 @@ namespace valheimCLI
     {
         public static void Register()
         {
+            new Terminal.ConsoleCommand("cli_components", "List component paths and positions: cli_components <full-type-name> [radius=100]", args =>
+            {
+                if (args.Length < 2 || Player.m_localPlayer == null) return;
+                float radius = 100;
+                if (args.Length > 2 && (!float.TryParse(args[2], NumberStyles.Float, CultureInfo.InvariantCulture, out radius) ||
+                    !(radius > 0 && radius <= 10000)))
+                { args.Context.AddString("ERROR: Radius must be greater than 0 and at most 10000"); return; }
+                Type type = AppDomain.CurrentDomain.GetAssemblies().Select(assembly => assembly.GetType(args[1], false)).FirstOrDefault(candidate => candidate != null);
+                if (type == null || !typeof(Component).IsAssignableFrom(type))
+                { args.Context.AddString("ERROR: Component type not loaded"); return; }
+                foreach (Component target in UnityEngine.Object.FindObjectsByType(type, FindObjectsSortMode.None).Cast<Component>()
+                    .Where(component => component.gameObject.activeInHierarchy && Vector3.Distance(component.transform.position, Player.m_localPlayer.transform.position) <= radius)
+                    .OrderBy(component => Vector3.Distance(component.transform.position, Player.m_localPlayer.transform.position)))
+                    args.Context.AddString($"path={Path(target.transform)} position={target.transform.position:F3}");
+            }, isCheat: true);
             new Terminal.ConsoleCommand("cli_store_buy", "Buy an available item through the open store: cli_store_buy <prefab>", args =>
             {
                 if (args.Length != 2 || Player.m_localPlayer == null || StoreGui.instance == null || !StoreGui.IsVisible()) { args.Context.AddString("ERROR: Open a store and specify an item prefab"); return; }
@@ -26,6 +41,7 @@ namespace valheimCLI
             }, isCheat: true);
             new Terminal.ConsoleCommand("cli_component_state", "Inspect nearest component fields/properties: cli_component_state <full-type-name> [radius]", args => Run(args, false, false), isCheat: true);
             new Terminal.ConsoleCommand("cli_component_interact", "Use normal interaction on nearest component: cli_component_interact <full-type-name> [radius]", args => Run(args, true, false), isCheat: true);
+            new Terminal.ConsoleCommand("cli_component_alt_interact", "Use alternate interaction on nearest component: cli_component_alt_interact <full-type-name> [radius]", args => Run(args, true, false, true), isCheat: true);
             new Terminal.ConsoleCommand("cli_component_use_item", "Use inventory item on nearest component: cli_component_use_item <full-type-name> <item-prefab> [radius]", args => Run(args, true, true), isCheat: true);
             new Terminal.ConsoleCommand("cli_inventory_details", "Print inventory prefab, quality, tooltip and custom data: cli_inventory_details [prefab]", args =>
             {
@@ -42,7 +58,7 @@ namespace valheimCLI
             }, isCheat: true);
         }
 
-        private static void Run(Terminal.ConsoleEventArgs args, bool interact, bool useItem)
+        private static void Run(Terminal.ConsoleEventArgs args, bool interact, bool useItem, bool alt = false)
         {
             Player player = Player.m_localPlayer;
             if (player == null) { args.Context.AddString("ERROR: No local player"); return; }
@@ -66,7 +82,7 @@ namespace valheimCLI
                     if (item == null) { args.Context.AddString("ERROR: Inventory item not found"); return; }
                     args.Context.AddString("UseItem result=" + action.UseItem(player, item));
                 }
-                else args.Context.AddString("Interact result=" + action.Interact(player, false, false));
+                else args.Context.AddString("Interact result=" + action.Interact(player, false, alt));
                 return;
             }
             const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
