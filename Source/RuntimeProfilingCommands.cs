@@ -64,12 +64,13 @@ internal static class RuntimeProfilingCommands
             }
             args.Context.AddString("SCENE matched=" + matches.Length);
         }, isCheat: true);
-        new Terminal.ConsoleCommand("cli_scene_component", "Disable or restore one component type under exact scene roots: <exact-root-name> <full-type-name> <disable|restore>. Preserves originally disabled components.", args =>
+        new Terminal.ConsoleCommand("cli_scene_component", "Disable or restore one component type under exact scene roots: <exact-root-name> <full-type-name> <disable|restore> [exact-child-name]. Particle systems pause/resume. Preserves originally disabled components.", args =>
         {
-            if (args.Length != 4 || (args[3] != "disable" && args[3] != "restore"))
-                throw new ArgumentException("Expected exact-root-name full-type-name disable|restore");
+            if ((args.Length != 4 && args.Length != 5) || (args[3] != "disable" && args[3] != "restore"))
+                throw new ArgumentException("Expected exact-root-name full-type-name disable|restore [exact-child-name]");
             if (hidden.Count > 0) throw new InvalidOperationException("Restore presentation comparisons before changing components.");
-            string key = args[1] + "|" + args[2];
+            string child = args.Length == 5 ? args[4] : "";
+            string key = args[1] + "|" + args[2] + "|" + child;
             if (args[3] == "restore")
             {
                 int restored = RestoreComponents(key);
@@ -81,14 +82,27 @@ internal static class RuntimeProfilingCommands
             if (disabledComponents.Count > 0) throw new InvalidOperationException("Restore the current component comparison first.");
             Type type = AppDomain.CurrentDomain.GetAssemblies().Select(assembly => assembly.GetType(args[2], false)).FirstOrDefault(candidate => candidate != null)
                 ?? throw new ArgumentException("Component type is not loaded.");
-            if (!typeof(Behaviour).IsAssignableFrom(type) && !typeof(Renderer).IsAssignableFrom(type) && !typeof(Collider).IsAssignableFrom(type))
-                throw new ArgumentException("Type must be a Behaviour, Renderer, or Collider.");
+            if (!typeof(Behaviour).IsAssignableFrom(type) && !typeof(Renderer).IsAssignableFrom(type) && !typeof(Collider).IsAssignableFrom(type) && type != typeof(ParticleSystem))
+                throw new ArgumentException("Type must be a Behaviour, Renderer, Collider, or ParticleSystem.");
             GameObject[] roots = Roots(args[1]);
-            Component[] components = roots.SelectMany(root => root.GetComponentsInChildren(type, true)).Where(Enabled).ToArray();
+            Component[] components = roots.SelectMany(root => root.GetComponentsInChildren(type, true))
+                .Where(component => Enabled(component) && (child.Length == 0 || component.gameObject.name == child)).ToArray();
             disabledComponents.Add(key, components);
             foreach (Component component in components) if (component != null) SetEnabled(component, false);
             args.Context.AddString($"COMPONENT root={args[1]} type={args[2]} roots={roots.Length} disabled={components.Length}");
         }, isCheat: true);
+        new Terminal.ConsoleCommand("cli_scene_particles", "Inspect particle simulation and renderer settings under exact scene roots: <exact-root-name>.", args =>
+        {
+            if (args.Length != 2) throw new ArgumentException("Expected exact-root-name");
+            foreach (GameObject root in Roots(args[1]))
+            foreach (ParticleSystem particles in root.GetComponentsInChildren<ParticleSystem>(true))
+            {
+                ParticleSystemRenderer renderer = particles.GetComponent<ParticleSystemRenderer>();
+                args.Context.AddString($"PARTICLES name={particles.name} active={particles.gameObject.activeInHierarchy} playing={particles.isPlaying} paused={particles.isPaused} count={particles.particleCount} maximum={particles.main.maxParticles} space={particles.main.simulationSpace} collision={particles.collision.enabled} noise={particles.noise.enabled}");
+                if (renderer != null)
+                    args.Context.AddString($"PARTICLE_RENDERER name={particles.name} enabled={renderer.enabled} visible={renderer.isVisible} mode={renderer.renderMode} bounds={renderer.bounds} shadows={renderer.shadowCastingMode} receiveShadows={renderer.receiveShadows} materials=" + string.Join(",", renderer.sharedMaterials.Where(material => material != null).Select(material => material.name + ":" + material.shader.name)));
+            }
+        });
         new Terminal.ConsoleCommand("cli_scene_counts", "Count objects and enabled behaviours under exact matching scene roots: <exact-name>", args =>
         {
             if (args.Length != 2) throw new ArgumentException("Expected exact-name");
@@ -141,6 +155,7 @@ internal static class RuntimeProfilingCommands
         Behaviour behaviour => behaviour.enabled,
         Renderer renderer => renderer.enabled,
         Collider collider => collider.enabled,
+        ParticleSystem particles => particles.isPlaying,
         _ => false
     };
 
@@ -149,6 +164,11 @@ internal static class RuntimeProfilingCommands
         if (component is Behaviour behaviour) behaviour.enabled = enabled;
         else if (component is Renderer renderer) renderer.enabled = enabled;
         else if (component is Collider collider) collider.enabled = enabled;
+        else if (component is ParticleSystem particles)
+        {
+            if (enabled) particles.Play(false);
+            else particles.Pause(false);
+        }
     }
 
     private static int RestoreComponents(string key)
