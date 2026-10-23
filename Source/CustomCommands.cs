@@ -159,6 +159,17 @@ namespace valheimCLI
                 TeleportPlayer(new Vector3(teleportX, teleportY, teleportZ), args.Context.AddString, !instant);
             }, isCheat: true);
 
+            new Terminal.ConsoleCommand("cli_spawn_location", "Create a saved test location at the player: cli_spawn_location <name>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length != 2 || Player.m_localPlayer == null)
+                    throw new System.InvalidOperationException("Use cli_spawn_location <name> while in a world.");
+                ZoneSystem.ZoneLocation location = ZoneSystem.instance.GetLocation(args[1]);
+                if (location == null) throw new System.InvalidOperationException("Unknown location: " + args[1]);
+                System.Reflection.MethodInfo spawn = typeof(ZoneSystem).GetMethod("SpawnLocation", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
+                spawn.Invoke(ZoneSystem.instance, new object[] { location, 12345, Player.m_localPlayer.transform.position, Quaternion.identity, ZoneSystem.SpawnMode.Full, new System.Collections.Generic.List<GameObject>(), true });
+                args.Context.AddString("Created test location " + args[1]);
+            }, isCheat: true);
+
             new Terminal.ConsoleCommand("cli_find_locations", "Find placed locations by prefab or group text: cli_find_locations <text> [limit]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length < 2)
