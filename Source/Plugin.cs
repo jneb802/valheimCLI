@@ -56,6 +56,9 @@ namespace valheimCLI
             EncounterValidationCommands.Register();
             EnvironmentCommands.Register();
             StatusEffectCommands.Register();
+            PerformanceCommands.Register();
+            RuntimeProfilingCommands.Register();
+            MethodProfilingCommands.Register();
             new MwlLocationReload(this).Register();
 
             // Initialize state tracker
@@ -949,6 +952,9 @@ namespace valheimCLI
 
         private void OnDestroy()
         {
+            RuntimeProfilingCommands.Dispose();
+            MethodProfilingCommands.Dispose();
+            RuntimeProfilingCommands.RestorePresentation();
             _commandServer?.Dispose();
             Config.Save();
         }

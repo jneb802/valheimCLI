@@ -199,6 +199,24 @@ Generic wrappers live under `scripts/`:
 
 Configure hosts, executable paths, and game paths with environment variables or script parameters. Do not put real passwords in commands; use `--password-file`.
 
+## Performance snapshots
+
+`cli_performance_snapshot` reports scene object, renderer, particle, light,
+character, material, mesh, and memory counts. It also reports the current render
+size, frame limit, vertical synchronization setting, and scan duration.
+
+Use it between measured gameplay intervals. The scan can take seconds in a large
+modded world. Exclude the scan and subsequent settling period from frame-rate
+comparisons. It does not force garbage collection or change game settings.
+Scene counts include inactive objects and registered prefab holders in loaded
+scenes; they are not counts of spawned network objects. Material and mesh counts
+include loaded assets. Reserved memory alone does not prove a leak.
+
+Validated on both Valnet Linux clients with Praetoris Season 8 8.0.49 on Valdev.
+Both returned fresh measurements at 1920×1080. The in-world scans took about
+1.7–2.1 seconds, so the Endgame investigation excludes their sample windows and
+15 seconds after each scan. Release build: zero warnings and zero errors.
+
 ## Config
 
 `BepInEx/config/valheimCLI.valheimCLI.cfg`:

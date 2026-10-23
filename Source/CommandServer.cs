@@ -170,6 +170,10 @@ namespace valheimCLI
                     {
                         if (!stream.DataAvailable)
                         {
+                            // Connected retains its last known state after a peer closes.
+                            // A readable socket with no bytes means the peer has disconnected.
+                            if (client.Client.Poll(0, SelectMode.SelectRead) && client.Client.Available == 0)
+                                break;
                             Thread.Sleep(50);
                             continue;
                         }
