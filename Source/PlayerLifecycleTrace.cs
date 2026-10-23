@@ -4,6 +4,7 @@ using UnityEngine;
 
 namespace valheimCLI;
 
+[HarmonyPatch]
 internal static class PlayerLifecycleTrace
 {
     private static bool enabled;
@@ -16,7 +17,7 @@ internal static class PlayerLifecycleTrace
             { args.Context.AddString("Usage: cli_trace_player_lifecycle <true|false>"); return; }
             enabled = value;
             args.Context.AddString("Player lifecycle trace=" + enabled);
-        }, isCheat: true);
+        });
     }
 
     private static void Write(string message) => valheimCLIPlugin.Log.LogInfo($"LIFECYCLE frame={Time.frameCount} time={Time.unscaledTime:F3} {message}");
