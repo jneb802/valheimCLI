@@ -24,6 +24,23 @@ namespace valheimCLI
 
         public static void Register()
         {
+            StateInspectionCommands.Register();
+            new Terminal.ConsoleCommand("cli_freeze_characters", "Freeze matching nearby creatures locally: <prefab|*> [radius=30]. Run on each client. Reload to restore.", args =>
+            {
+                float radius = 30;
+                if (args.Length < 2 || args.Length > 3 || (args.Length == 3 &&
+                    !float.TryParse(args[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out radius)) ||
+                    float.IsNaN(radius) || float.IsInfinity(radius) || radius <= 0 || radius > 200)
+                { args.Context.AddString("ERROR: Specify prefab or * and a radius greater than 0 and at most 200"); return; }
+                Player player = Player.m_localPlayer;
+                if (player == null) { args.Context.AddString("ERROR: Local player required"); return; }
+                Character[] targets = Character.GetAllCharacters().Where(character => character != null && !character.IsPlayer() &&
+                    !character.IsDead() && Vector3.Distance(character.transform.position, player.transform.position) <= radius &&
+                    (args[1] == "*" || CharacterMatches(character, args[1]))).ToArray();
+                foreach (Character character in targets)
+                    FreezeCharacter(character.gameObject, character.transform.position, character.transform.rotation);
+                args.Context.AddString($"OK: frozenLocalCharacters={targets.Length} radius={radius:F1}; reload to restore");
+            }, isCheat: true);
             new Terminal.ConsoleCommand("cli_player_vitals", "Read current/max health, stamina, eitr, food count and regeneration timer", args => PrintPlayerVitals(args.Context.AddString));
             new Terminal.ConsoleCommand("cli_item_state", "Read an inventory item's equipment state: cli_item_state <prefab-or-display-name>", args =>
             {
