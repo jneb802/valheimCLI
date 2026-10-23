@@ -29,6 +29,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Reference Include="UnityEngine.AnimationModule">
+      <HintPath>$(VALHEIM_MANAGED)/UnityEngine.AnimationModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
     <Compile Remove="CLI\**" />
     <Compile Remove="Tests\**" />
     <None Remove="CLI\**" />
