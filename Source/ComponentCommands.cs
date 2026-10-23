@@ -70,13 +70,35 @@ namespace valheimCLI
                 return;
             }
             const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
-            foreach (FieldInfo field in type.GetFields(flags).OrderBy(field => field.Name)) args.Context.AddString(field.Name + "=" + Format(field.GetValue(target)));
-            foreach (PropertyInfo property in type.GetProperties(flags).Where(property => property.GetIndexParameters().Length == 0 && property.GetGetMethod(true) != null).OrderBy(property => property.Name))
+            string? member = args.Length > 3 ? args[3] : null;
+            if (member != null && member.Contains('.'))
             {
+                object value = target;
+                foreach (string part in member.Split('.'))
+                {
+                    if (value == null) break;
+                    Type current = value.GetType();
+                    const BindingFlags nestedFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+                    FieldInfo field = current.GetField(part, nestedFlags);
+                    PropertyInfo property = current.GetProperty(part, nestedFlags);
+                    if (field == null && (property == null || property.GetIndexParameters().Length != 0))
+                    { args.Context.AddString("ERROR: Member not found: " + part); return; }
+                    value = field != null ? field.GetValue(value) : property.GetValue(value);
+                }
+                args.Context.AddString(member + "=" + Format(value));
+                return;
+            }
+            bool found = false;
+            foreach (FieldInfo field in type.GetFields(flags).Where(field => member == null || field.Name == member).OrderBy(field => field.Name))
+            { found = true; args.Context.AddString(field.Name + "=" + Format(field.GetValue(target))); }
+            foreach (PropertyInfo property in type.GetProperties(flags).Where(property => (member == null || property.Name == member) && property.GetIndexParameters().Length == 0 && property.GetGetMethod(true) != null).OrderBy(property => property.Name))
+            {
+                found = true;
                 try { args.Context.AddString(property.Name + "=" + Format(property.GetValue(target))); }
                 catch (Exception exception) { args.Context.AddString(property.Name + "=<unavailable:" + exception.GetType().Name + ">"); }
             }
-            if (target is Hoverable hoverable) args.Context.AddString("hover=" + hoverable.GetHoverText().Replace("\n", " | "));
+            if (member != null && !found) args.Context.AddString("ERROR: Member not found: " + member);
+            if (member == null && target is Hoverable hoverable) args.Context.AddString("hover=" + hoverable.GetHoverText().Replace("\n", " | "));
         }
 
         private static string Format(object value)
@@ -86,6 +108,8 @@ namespace valheimCLI
             if (value is Transform transform) return Path(transform) + " position=" + transform.position.ToString("F3");
             if (value is Component component) return Path(component.transform) + " type=" + component.GetType().FullName;
             if (value is Array array) return "[" + string.Join(", ", array.Cast<object>().Select(Format)) + "]";
+            if (value is System.Collections.IEnumerable items && !(value is string))
+                return "[" + string.Join(", ", items.Cast<object>().Take(1000).Select(Format)) + "]";
             return value.ToString();
         }
 
