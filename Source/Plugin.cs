@@ -54,6 +54,7 @@ namespace valheimCLI
             CustomCommands.Register();
             ItemInteractionCommands.Register();
             EncounterValidationCommands.Register();
+            NavigationCommands.Register();
             EnvironmentCommands.Register();
             StatusEffectCommands.Register();
             new MwlLocationReload(this).Register();
@@ -74,6 +75,7 @@ namespace valheimCLI
 
         private void Update()
         {
+            NavigationCommands.Update();
             _stateTracker?.Update();
             ProcessPendingCommands();
             TryQueuePendingServerConnect();
@@ -949,6 +951,7 @@ namespace valheimCLI
 
         private void OnDestroy()
         {
+            NavigationCommands.Shutdown();
             _commandServer?.Dispose();
             Config.Save();
         }
