@@ -35,6 +35,7 @@ internal static class NavigationCommands
 
     internal static void Register()
     {
+        NavigationTraceCommands.Register();
         new Terminal.ConsoleCommand("cli_nav_probe", "Opt-in navigation timing and counters: start | reset | status | stop", args =>
         {
             try
@@ -115,6 +116,7 @@ internal static class NavigationCommands
 
     internal static void Shutdown()
     {
+        NavigationTraceCommands.Stop();
         Patches.UnpatchSelf();
         active = false;
         Restore();
