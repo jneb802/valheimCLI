@@ -57,6 +57,8 @@ namespace valheimCLI
                 .OrderBy(component => Vector3.Distance(component.transform.position, player.transform.position)).FirstOrDefault();
             if (target == null) { args.Context.AddString("ERROR: No matching active component in radius"); return; }
             args.Context.AddString($"target={Path(target.transform)} type={type.FullName} position={target.transform.position.ToString("F3")} distance={Vector3.Distance(target.transform.position, player.transform.position):F3}");
+            ZNetView view = target.GetComponent<ZNetView>();
+            if (view != null && view.IsValid()) args.Context.AddString("zdo=" + view.GetZDO().m_uid);
             if (interact)
             {
                 if (!(target is Interactable action)) { args.Context.AddString("ERROR: Component does not implement Interactable"); return; }
