@@ -24,6 +24,24 @@ namespace valheimCLI
 
         public static void Register()
         {
+            DestructibleCommands.Register();
+            StateInspectionCommands.Register();
+            new Terminal.ConsoleCommand("cli_freeze_characters", "Freeze matching nearby creatures locally: <prefab|*> [radius=30]. Run on each client. Reload to restore.", args =>
+            {
+                float radius = 30;
+                if (args.Length < 2 || args.Length > 3 || (args.Length == 3 &&
+                    !float.TryParse(args[2], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out radius)) ||
+                    float.IsNaN(radius) || float.IsInfinity(radius) || radius <= 0 || radius > 200)
+                { args.Context.AddString("ERROR: Specify prefab or * and a radius greater than 0 and at most 200"); return; }
+                Player player = Player.m_localPlayer;
+                if (player == null) { args.Context.AddString("ERROR: Local player required"); return; }
+                Character[] targets = Character.GetAllCharacters().Where(character => character != null && !character.IsPlayer() &&
+                    !character.IsDead() && Vector3.Distance(character.transform.position, player.transform.position) <= radius &&
+                    (args[1] == "*" || CharacterMatches(character, args[1]))).ToArray();
+                foreach (Character character in targets)
+                    FreezeCharacter(character.gameObject, character.transform.position, character.transform.rotation);
+                args.Context.AddString($"OK: frozenLocalCharacters={targets.Length} radius={radius:F1}; reload to restore");
+            }, isCheat: true);
             new Terminal.ConsoleCommand("cli_player_vitals", "Read current/max health, stamina, eitr, food count and regeneration timer", args => PrintPlayerVitals(args.Context.AddString));
             new Terminal.ConsoleCommand("cli_item_state", "Read an inventory item's equipment state: cli_item_state <prefab-or-display-name>", args =>
             {
@@ -157,6 +175,17 @@ namespace valheimCLI
 
                 bool instant = args.Length > 4 && string.Equals(args[4], "instant", StringComparison.OrdinalIgnoreCase);
                 TeleportPlayer(new Vector3(teleportX, teleportY, teleportZ), args.Context.AddString, !instant);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_spawn_location", "Create a saved test location at the player: cli_spawn_location <name>", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length != 2 || Player.m_localPlayer == null)
+                    throw new System.InvalidOperationException("Use cli_spawn_location <name> while in a world.");
+                ZoneSystem.ZoneLocation location = ZoneSystem.instance.GetLocation(args[1]);
+                if (location == null) throw new System.InvalidOperationException("Unknown location: " + args[1]);
+                System.Reflection.MethodInfo spawn = typeof(ZoneSystem).GetMethod("SpawnLocation", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public);
+                spawn.Invoke(ZoneSystem.instance, new object[] { location, 12345, Player.m_localPlayer.transform.position, Quaternion.identity, ZoneSystem.SpawnMode.Full, new System.Collections.Generic.List<GameObject>(), true });
+                args.Context.AddString("Created test location " + args[1]);
             }, isCheat: true);
 
             new Terminal.ConsoleCommand("cli_find_locations", "Find placed locations by prefab or group text: cli_find_locations <text> [limit]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)

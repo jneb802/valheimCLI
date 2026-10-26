@@ -52,11 +52,15 @@ namespace valheimCLI
             HarmonyInstance.PatchAll(assembly);
 
             CustomCommands.Register();
+            ZdoInspectionCommands.Register();
             ItemInteractionCommands.Register();
             EncounterValidationCommands.Register();
             NavigationCommands.Register();
             EnvironmentCommands.Register();
             StatusEffectCommands.Register();
+            PerformanceCommands.Register();
+            RuntimeProfilingCommands.Register();
+            MethodProfilingCommands.Register();
             new MwlLocationReload(this).Register();
 
             // Initialize state tracker
@@ -952,6 +956,9 @@ namespace valheimCLI
         private void OnDestroy()
         {
             NavigationCommands.Shutdown();
+            RuntimeProfilingCommands.Dispose();
+            MethodProfilingCommands.Dispose();
+            RuntimeProfilingCommands.RestorePresentation();
             _commandServer?.Dispose();
             Config.Save();
         }

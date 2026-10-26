@@ -109,6 +109,31 @@ internal static class EncounterValidationCommands
             args.Context.AddString("tooltip=" + Localization.instance.Localize(item.GetTooltip()).Replace("\n", " | "));
             args.Context.AddString("custom=" + string.Join(";", item.m_customData.Where(p => p.Key.Contains("ValheimEndgame")).Select(p => p.Key + "=" + p.Value)));
         });
+        new Terminal.ConsoleCommand("cli_epicloot_socket_check", "Inspect live socket/chisel checks: <target> <input> <chisel> [apply]", args =>
+        {
+            if (args.Length < 4 || Player.m_localPlayer == null) return;
+            Inventory inventory = Player.m_localPlayer.GetInventory();
+            ItemDrop.ItemData? Find(string name) => inventory.GetAllItems().FirstOrDefault(item => item.m_dropPrefab?.name == name);
+            ItemDrop.ItemData? target = Find(args[1]);
+            ItemDrop.ItemData? input = Find(args[2]);
+            ItemDrop.ItemData? chisel = Find(args[3]);
+            Type? sockets = Type.GetType("EpicLoot.ShardStones.ShardSocketManager, EpicLoot");
+            Type? chisels = Type.GetType("EpicLoot.ShardStones.ShardSlotChisel, EpicLoot");
+            if (target == null || input == null || chisel == null || sockets == null || chisels == null)
+            { args.Context.AddString("ERROR: Required inventory item or Epic Loot type absent"); return; }
+            object[] placement = { target, input, null! };
+            object[] coexist = { target, input, Array.Empty<ItemDrop.ItemData>(), null! };
+            object[] slots = { chisel, target, 0, null! };
+            args.Context.AddString($"canSocket={sockets.GetMethod("CanSocket")!.Invoke(null, placement)} reason={placement[2]}");
+            args.Context.AddString($"canCoexist={sockets.GetMethod("CanCoexist")!.Invoke(null, coexist)} reason={coexist[3]}");
+            args.Context.AddString($"canChisel={chisels.GetMethod("CanApply")!.Invoke(null, slots)} slots={slots[2]} reason={slots[3]}");
+            if (args.Length != 5 || args[4] != "apply") return;
+            int inputBefore = input.m_stack;
+            int chiselBefore = chisel.m_stack;
+            args.Context.AddString("addShard=" + sockets.GetMethod("AddShard")!.Invoke(null, new object[] { target, input }));
+            AccessTools.Method(chisels, "Apply").Invoke(null, new object[] { InventoryGui.instance, inventory, chisel, target });
+            args.Context.AddString($"inputStack={inputBefore}->{input.m_stack} chiselStack={chiselBefore}->{chisel.m_stack}");
+        });
         new Terminal.ConsoleCommand("cli_epicloot_roll", "Roll first matching inventory item through Epic Loot API: <prefab> <rarity ordinal>", args =>
         {
             if (args.Length != 3 || Player.m_localPlayer == null || !int.TryParse(args[2], out int rarity)) return;
