@@ -10,6 +10,16 @@ internal static class StateInspectionCommands
 {
     internal static void Register()
     {
+        new Terminal.ConsoleCommand("cli_player_custom_data", "Read saved custom player fields by key prefix: [prefix]", args =>
+        {
+            if (Player.m_localPlayer == null) { args.Context.AddString("ERROR: No local player"); return; }
+            string prefix = args.Length > 1 ? args[1] : "";
+            System.Collections.Generic.KeyValuePair<string, string>[] entries = Player.m_localPlayer.m_customData
+                .Where(pair => pair.Key.StartsWith(prefix, StringComparison.Ordinal)).OrderBy(pair => pair.Key).ToArray();
+            args.Context.AddString("entries=" + entries.Length);
+            foreach (System.Collections.Generic.KeyValuePair<string, string> entry in entries)
+                args.Context.AddString(entry.Key + "=" + Format(entry.Value));
+        }, isCheat: true);
         new Terminal.ConsoleCommand("cli_status_detail", "Read scalar fields and properties of a local player's named status: <status-name>", args =>
         {
             if (args.Length != 2 || Player.m_localPlayer == null)
