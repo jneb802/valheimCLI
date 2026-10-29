@@ -43,6 +43,23 @@ internal static class DungeonTraceCommands
 
     private static void Write(string message) => valheimCLIPlugin.Log.LogInfo("DUNGEON_TRACE " + message);
 
+    [HarmonyPatch(typeof(ZoneSystem), nameof(ZoneSystem.PokeCanSpawnLocation))]
+    private static class LocationReadiness
+    {
+        [HarmonyPostfix, HarmonyPriority(Priority.Last)]
+        private static void Postfix(ZoneSystem __instance, ZoneSystem.ZoneLocation location, bool isFirstSpawn, bool __result)
+        {
+            if (!Enabled || !isFirstSpawn || !__result || location == null) return;
+            foreach (ZoneSystem.LocationPrefabLoadData record in __instance.m_locationPrefabs)
+            {
+                if (record.PrefabAssetID != location.m_prefab.m_assetID) continue;
+                if (!record.IsLoaded || record.m_roomsToLoad > 0)
+                    Write("ALLOWED_PENDING location=" + location.m_prefabName + " loaded=" + record.IsLoaded + " roomsPending=" + record.m_roomsToLoad);
+                return;
+            }
+        }
+    }
+
     [HarmonyPatch(typeof(DungeonGenerator), nameof(DungeonGenerator.Generate), typeof(int), typeof(ZoneSystem.SpawnMode))]
     private static class Generation
     {
