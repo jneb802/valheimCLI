@@ -52,6 +52,7 @@ namespace valheimCLI
             HarmonyInstance.PatchAll(assembly);
 
             CustomCommands.Register();
+            DungeonTraceCommands.Register(Config);
             ItemInteractionCommands.Register();
             EncounterValidationCommands.Register();
             EnvironmentCommands.Register();
