@@ -21,7 +21,8 @@ namespace valheimCLI
                 foreach (DungeonGenerator dungeon in dungeons)
                 {
                     Room[] rooms = dungeon.GetComponentsInChildren<Room>(true);
-                    args.Context.AddString(FormattableString.Invariant($"DUNGEON name={dungeon.name} position={dungeon.transform.position.ToString("F3")} seed={dungeon.m_generatedSeed} theme={dungeon.m_themes} rooms={rooms.Length} maxRooms={dungeon.m_maxRooms}"));
+                    string seed = dungeon.m_hasGeneratedSeed ? dungeon.m_generatedSeed.ToString(CultureInfo.InvariantCulture) : "unknown-loaded-from-save";
+                    args.Context.AddString(FormattableString.Invariant($"DUNGEON name={dungeon.name} position={dungeon.transform.position.ToString("F3")} seed={seed} theme={dungeon.m_themes} rooms={rooms.Length} roomsPending={dungeon.m_roomsToLoad} maxRooms={dungeon.m_maxRooms}"));
                     foreach (IGrouping<string, Room> group in rooms.GroupBy(room => room.name).OrderBy(group => group.Key))
                         args.Context.AddString($"ROOM name={group.Key} count={group.Count()}");
                 }
