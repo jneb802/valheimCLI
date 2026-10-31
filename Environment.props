@@ -38,6 +38,10 @@
 
     <!-- Unity Engine -->
     <ItemGroup>
+        <Reference Include="UnityEngine.AIModule">
+            <HintPath>$(VALHEIM_MANAGED)/UnityEngine.AIModule.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
         <Reference Include="UnityEngine">
             <HintPath>$(VALHEIM_MANAGED)/UnityEngine.dll</HintPath>
             <Private>false</Private>
