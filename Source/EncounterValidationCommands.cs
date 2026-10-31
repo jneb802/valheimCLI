@@ -11,6 +11,39 @@ internal static class EncounterValidationCommands
 {
     internal static void Register()
     {
+        new Terminal.ConsoleCommand("cli_spawn_location", "Create a saved test location at the player: <name>", args =>
+        {
+            if (args.Length != 2 || Player.m_localPlayer == null)
+                throw new InvalidOperationException("Use cli_spawn_location <name> while in a world.");
+            ZoneSystem.ZoneLocation location = ZoneSystem.instance.GetLocation(args[1]);
+            if (location == null) throw new InvalidOperationException("Unknown location: " + args[1]);
+            MethodInfo spawn = typeof(ZoneSystem).GetMethod("SpawnLocation", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public)!;
+            spawn.Invoke(ZoneSystem.instance, new object[] { location, 12345, Player.m_localPlayer.transform.position,
+                Quaternion.identity, ZoneSystem.SpawnMode.Full, new System.Collections.Generic.List<GameObject>(), true });
+            args.Context.AddString("Created test location " + args[1]);
+        }, isCheat: true);
+        new Terminal.ConsoleCommand("cli_recipe_state", "Inspect registered recipes for an item: <prefab>", args =>
+        {
+            if (args.Length != 2 || ObjectDB.instance == null) return;
+            Recipe[] recipes = ObjectDB.instance.m_recipes.Where(r => r != null && r.m_item != null && r.m_item.name == args[1]).ToArray();
+            args.Context.AddString("recipes=" + recipes.Length);
+            foreach (Recipe recipe in recipes)
+                args.Context.AddString($"recipe={recipe.name} enabled={recipe.m_enabled} station={recipe.m_craftingStation?.name} level={recipe.m_minStationLevel} resources=" +
+                    string.Join(",", recipe.m_resources.Select(r => r.m_resItem.name + ":" + r.m_amount)));
+        });
+        new Terminal.ConsoleCommand("cli_craft_ui", "Select an available recipe in the open crafting UI: <prefab> [craft]", args =>
+        {
+            if (args.Length < 2 || Player.m_localPlayer == null || !InventoryGui.IsVisible())
+            { args.Context.AddString("ERROR: Open a crafting station first"); return; }
+            InventoryGui gui = InventoryGui.instance;
+            int index = gui.m_availableRecipes.FindIndex(pair => pair.Recipe != null && pair.Recipe.m_item.name == args[1] && pair.ItemData == null);
+            if (index < 0) { args.Context.AddString("ERROR: Recipe is not available in the current crafting UI"); return; }
+            gui.SetRecipe(index, true);
+            gui.UpdateRecipe(Player.m_localPlayer, 0);
+            bool allowed = gui.m_craftButton.IsInteractable();
+            args.Context.AddString($"selected={args[1]} canCraft={allowed}");
+            if (allowed && args.Length > 2 && args[2] == "craft") gui.m_craftButton.onClick.Invoke();
+        });
         new Terminal.ConsoleCommand("cli_creature_scaling", "Read nearby creatures' live health, attack level factor, and movement speed", args =>
         {
             if (Player.m_localPlayer == null) return;
