@@ -20,12 +20,22 @@ internal static class StateInspectionCommands
             foreach (System.Collections.Generic.KeyValuePair<string, string> entry in entries)
                 args.Context.AddString(entry.Key + "=" + Format(entry.Value));
         }, isCheat: true);
-        new Terminal.ConsoleCommand("cli_status_detail", "Read scalar fields and properties of a local player's named status: <status-name>", args =>
+        new Terminal.ConsoleCommand("cli_status_detail", "Read scalar fields and properties of a named status on the local player, or on the nearest matching creature: <status-name> [prefab] [radius=30]", args =>
         {
-            if (args.Length != 2 || Player.m_localPlayer == null)
-            { args.Context.AddString("ERROR: Local player and exact status name required"); return; }
-            StatusEffect? status = Player.m_localPlayer.GetSEMan().GetStatusEffect(args[1].GetStableHashCode());
+            float radius = 30;
+            if (args.Length < 2 || args.Length > 4 || Player.m_localPlayer == null || (args.Length == 4 &&
+                !float.TryParse(args[3], NumberStyles.Float, CultureInfo.InvariantCulture, out radius)))
+            { args.Context.AddString("ERROR: Local player and exact status name required: <status-name> [prefab] [radius]"); return; }
+            Player player = Player.m_localPlayer;
+            Character? target = args.Length == 2 ? player : Character.GetAllCharacters()
+                .Where(character => character != null && !character.IsPlayer() &&
+                    string.Equals(Utils.GetPrefabName(character.gameObject), args[2], StringComparison.OrdinalIgnoreCase) &&
+                    Vector3.Distance(character.transform.position, player.transform.position) <= radius)
+                .OrderBy(character => Vector3.Distance(character.transform.position, player.transform.position)).FirstOrDefault();
+            if (target == null) { args.Context.AddString("ERROR: No matching character in range"); return; }
+            StatusEffect? status = target.GetSEMan().GetStatusEffect(args[1].GetStableHashCode());
             if (status == null) { args.Context.AddString("ERROR: Status is not active"); return; }
+            if (target != player) args.Context.AddString(FormattableString.Invariant($"STATUS_TARGET prefab={Utils.GetPrefabName(target.gameObject)} position={target.transform.position:F2}"));
             args.Context.AddString("STATUS_DETAIL name=" + status.name + " type=" + status.GetType().FullName);
             args.Context.AddString("iconText=" + Format(status.GetIconText()));
             args.Context.AddString("tooltip=" + Format(status.GetTooltipString()));
