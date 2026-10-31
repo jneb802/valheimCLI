@@ -27,6 +27,8 @@ internal static class StateInspectionCommands
             StatusEffect? status = Player.m_localPlayer.GetSEMan().GetStatusEffect(args[1].GetStableHashCode());
             if (status == null) { args.Context.AddString("ERROR: Status is not active"); return; }
             args.Context.AddString("STATUS_DETAIL name=" + status.name + " type=" + status.GetType().FullName);
+            args.Context.AddString("iconText=" + Format(status.GetIconText()));
+            args.Context.AddString("tooltip=" + Format(status.GetTooltipString()));
             const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
             for (Type? type = status.GetType(); type != null && typeof(StatusEffect).IsAssignableFrom(type); type = type.BaseType)
             {
@@ -39,6 +41,16 @@ internal static class StateInspectionCommands
                     catch (Exception exception) { args.Context.AddString(property.Name + "=<unavailable:" + exception.GetBaseException().GetType().Name + ">"); }
                 }
             }
+        }, isCheat: true);
+        new Terminal.ConsoleCommand("cli_animator_state", "Read the local player's animator speed and attack state", args =>
+        {
+            Player? player = Player.m_localPlayer;
+            if (player == null) { args.Context.AddString("ERROR: No local player"); return; }
+            // Read through reflection so this plugin does not need the Unity animation module reference.
+            object? animator = typeof(Character).GetField("m_animator", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(player);
+            object? speed = animator?.GetType().GetProperty("speed")?.GetValue(animator);
+            args.Context.AddString(FormattableString.Invariant(
+                $"ANIMATOR speed={Format(speed)} inAttack={player.InAttack()} attack={player.m_currentAttack?.m_attackAnimation ?? "none"} weapon={player.GetCurrentWeapon()?.m_dropPrefab?.name ?? "none"}"));
         }, isCheat: true);
         new Terminal.ConsoleCommand("cli_zdo_value", "Read one replicated field: <user:id|self> <string|int|long|float|bool|vector|zdoid> <key>. Missing fields return the game's default.", args =>
         {

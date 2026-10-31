@@ -32,7 +32,7 @@ internal static class StatusEffectCommands
                 foreach (StatusEffect status in statuses)
                 {
                     string shield = status is SE_Shield ? $" absorbed={AccessTools.Field(typeof(SE_Shield), "m_damage").GetValue(status)} capacity={AccessTools.Field(typeof(SE_Shield), "m_totalAbsorbDamage").GetValue(status)}" : "";
-                    args.Context.AddString(FormattableString.Invariant($"STATUS name={status.name} ttl={status.m_ttl:F3} elapsed={status.GetDuration():F3} remaining={status.GetRemaningTime():F3} cooldown={status.m_cooldownIcon}{shield}"));
+                    args.Context.AddString(FormattableString.Invariant($"STATUS name={status.name} ttl={status.m_ttl:F3} elapsed={status.GetDuration():F3} remaining={status.GetRemaningTime():F3} cooldown={status.m_cooldownIcon} icon={status.GetIconText().Replace(" ", "_")}{shield}"));
                 }
             }
         });

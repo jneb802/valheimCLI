@@ -875,11 +875,11 @@ namespace valheimCLI
                 DamageNearestCharacter(args[1], damage, radius, args.Context.AddString);
             }, isCheat: true);
 
-            new Terminal.ConsoleCommand("cli_rpc_damage_nearest_character", "Send RPC_Damage to the nearest non-player character: cli_rpc_damage_nearest_character <name> [damage] [radius]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            new Terminal.ConsoleCommand("cli_rpc_damage_nearest_character", "Send RPC_Damage to the nearest non-player character: cli_rpc_damage_nearest_character <name> [damage] [radius] [blunt|slash|pierce|fire|frost|lightning|poison|spirit]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length < 2)
                 {
-                    args.Context.AddString("Usage: cli_rpc_damage_nearest_character <name> [damage] [radius]");
+                    args.Context.AddString("Usage: cli_rpc_damage_nearest_character <name> [damage] [radius] [blunt|slash|pierce|fire|frost|lightning|poison|spirit]");
                     return;
                 }
 
@@ -895,7 +895,8 @@ namespace valheimCLI
                     float.TryParse(args[3], out radius);
                 }
 
-                SendDamageRpcToNearestCharacter(args[1], damage, radius, args.Context.AddString);
+                string damageType = args.Length >= 5 ? args[4] : "blunt";
+                SendDamageRpcToNearestCharacter(args[1], damage, radius, args.Context.AddString, damageType);
             }, isCheat: true);
 
             new Terminal.ConsoleCommand("cli_rpc_damage_burst_nearest_character", "Send repeated RPC_Damage messages and report client send timing: cli_rpc_damage_burst_nearest_character <name> [damage] [radius] [count]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
@@ -3459,7 +3460,7 @@ namespace valheimCLI
             addOutput("OK: Sent ChatMessage routed RPC");
         }
 
-        public static void SendDamageRpcToNearestCharacter(string requestedName, float damage, float radius, Action<string> addOutput)
+        public static void SendDamageRpcToNearestCharacter(string requestedName, float damage, float radius, Action<string> addOutput, string damageType = "blunt")
         {
             Player player = Player.m_localPlayer;
             if (player == null)
@@ -3495,8 +3496,13 @@ namespace valheimCLI
             }
 
             HitData hit = BuildPlayerHit(player, character.transform.position, damage);
+            if (!SetDamageType(hit, damageType, damage))
+            {
+                addOutput($"ERROR: Unknown damage type '{damageType}'");
+                return;
+            }
             ZRoutedRpc.instance.InvokeRoutedRPC(ZRoutedRpc.Everybody, nview.GetZDO().m_uid, "RPC_Damage", hit);
-            addOutput($"OK: Sent RPC_Damage for {bestName} at distance {bestDistance:F1}m");
+            addOutput($"OK: Sent RPC_Damage ({damage:F1} {damageType}) for {bestName} at distance {bestDistance:F1}m health={character.GetHealth():F1}");
         }
 
         public static void SendDamageRpcBurstToNearestCharacter(string requestedName, float damage, float radius, int count, Action<string> addOutput)
@@ -3773,6 +3779,23 @@ namespace valheimCLI
                    objectName.Equals(requested, StringComparison.OrdinalIgnoreCase) ||
                    prefabName.IndexOf(requested, StringComparison.OrdinalIgnoreCase) >= 0 ||
                    objectName.IndexOf(requested, StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static bool SetDamageType(HitData hit, string damageType, float damage)
+        {
+            hit.m_damage = new HitData.DamageTypes();
+            switch (damageType.ToLowerInvariant())
+            {
+                case "blunt": hit.m_damage.m_blunt = damage; return true;
+                case "slash": hit.m_damage.m_slash = damage; return true;
+                case "pierce": hit.m_damage.m_pierce = damage; return true;
+                case "fire": hit.m_damage.m_fire = damage; return true;
+                case "frost": hit.m_damage.m_frost = damage; return true;
+                case "lightning": hit.m_damage.m_lightning = damage; return true;
+                case "poison": hit.m_damage.m_poison = damage; return true;
+                case "spirit": hit.m_damage.m_spirit = damage; return true;
+                default: return false;
+            }
         }
 
         private static HitData BuildPlayerHit(Player player, Vector3 targetPosition, float damage)
