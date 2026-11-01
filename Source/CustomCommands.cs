@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -441,6 +442,41 @@ namespace valheimCLI
                 }
 
                 SetNearbyCharacterHealth(args[1], health, radius, args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_move_nearest_character", "Move the nearest non-player character by an offset and set its velocity: cli_move_nearest_character <name> <dx> <dy> <dz> [vx] [vy] [vz] [radius]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 5 ||
+                    !float.TryParse(args[2], NumberStyles.Float, CultureInfo.InvariantCulture, out float dx) ||
+                    !float.TryParse(args[3], NumberStyles.Float, CultureInfo.InvariantCulture, out float dy) ||
+                    !float.TryParse(args[4], NumberStyles.Float, CultureInfo.InvariantCulture, out float dz))
+                {
+                    args.Context.AddString("Usage: cli_move_nearest_character <name> <dx> <dy> <dz> [vx] [vy] [vz] [radius]");
+                    return;
+                }
+
+                float[] extra = new float[] { 0f, 0f, 0f, 30f };
+                for (int index = 0; index < extra.Length && index + 5 < args.Length; index++)
+                {
+                    if (!float.TryParse(args[index + 5], NumberStyles.Float, CultureInfo.InvariantCulture, out extra[index]))
+                    {
+                        args.Context.AddString($"ERROR: Invalid number '{args[index + 5]}'");
+                        return;
+                    }
+                }
+
+                MoveNearestCharacter(args[1], new Vector3(dx, dy, dz), new Vector3(extra[0], extra[1], extra[2]), extra[3], args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_characters", "List loaded non-player characters by name at any distance, with position, velocity, ownership, and an optional ZDO string field: cli_characters <name|*> [zdoStringKey]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (args.Length < 2)
+                {
+                    args.Context.AddString("Usage: cli_characters <name|*> [zdoStringKey]");
+                    return;
+                }
+
+                ListCharacters(args[1], args.Length >= 3 ? args[2] : "", args.Context.AddString);
             }, isCheat: true);
 
             new Terminal.ConsoleCommand("cli_freeze_nearest_character", "Freeze the nearest damageable non-player character: cli_freeze_nearest_character <name> [radius]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
@@ -2807,6 +2843,60 @@ namespace valheimCLI
             }
 
             addOutput($"OK: setHealthCharacters={characters.Count} match={requestedName} health={health:F1} radius={radius:F1}");
+        }
+
+        public static void MoveNearestCharacter(string requestedName, Vector3 offset, Vector3 velocity, float radius, Action<string> addOutput)
+        {
+            Character? character = FindNearestCharacter(requestedName, radius, out string bestName, out float bestDistance);
+            if (character == null)
+            {
+                addOutput($"ERROR: No non-player character matching '{requestedName}' found within {radius:F1}m");
+                return;
+            }
+
+            ZNetView view = character.GetComponent<ZNetView>();
+            if (view == null || !view.IsValid())
+            {
+                addOutput($"ERROR: {bestName} has no valid network view");
+                return;
+            }
+
+            // Only the owner simulates the body, so a move on another peer would be overwritten.
+            view.ClaimOwnership();
+            Vector3 start = character.transform.position;
+            Vector3 destination = start + offset;
+            character.transform.position = destination;
+            Rigidbody body = character.GetComponent<Rigidbody>();
+            if (body != null)
+            {
+                body.position = destination;
+                body.linearVelocity = velocity;
+            }
+
+            addOutput(FormattableString.Invariant(
+                $"OK: Moved {bestName} at distance {bestDistance:F1}m from {start.x:F2},{start.y:F2},{start.z:F2} to {destination.x:F2},{destination.y:F2},{destination.z:F2}; velocity={velocity.x:F2},{velocity.y:F2},{velocity.z:F2}"));
+        }
+
+        public static void ListCharacters(string requestedName, string zdoStringKey, Action<string> addOutput)
+        {
+            int count = 0;
+            foreach (Character character in Character.GetAllCharacters())
+            {
+                if (character == null || character is Player || !CharacterMatches(character, requestedName))
+                    continue;
+
+                ZNetView view = character.GetComponent<ZNetView>();
+                ZDO? zdo = view != null && view.IsValid() ? view.GetZDO() : null;
+                Rigidbody body = character.GetComponent<Rigidbody>();
+                Vector3 position = character.transform.position;
+                Vector3 velocity = body != null ? body.linearVelocity : Vector3.zero;
+                string field = zdo != null && zdoStringKey.Length > 0 ? $"; {zdoStringKey}={zdo.GetString(zdoStringKey)}" : "";
+                addOutput(FormattableString.Invariant(
+                    $"{GetCharacterName(character)}: pos={position.x:F2},{position.y:F2},{position.z:F2}; vel={velocity.x:F2},{velocity.y:F2},{velocity.z:F2}; health={character.GetHealth():F0}; dead={character.IsDead()}; localOwner={zdo != null && view!.IsOwner()}; owner={zdo?.GetOwner() ?? 0}{field}"));
+                count++;
+            }
+
+            addOutput($"OK: {count} character(s) matching '{requestedName}'");
         }
 
         public static void FreezeNearestCharacter(string requestedName, float radius, Action<string> addOutput)
