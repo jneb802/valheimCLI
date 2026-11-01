@@ -86,7 +86,7 @@ namespace valheimCLI
             if (value is UnityEngine.Object unityObject && unityObject == null) return "<destroyed>";
             if (value is Transform transform) return Path(transform) + " position=" + transform.position.ToString("F3");
             if (value is Component component) return Path(component.transform) + " type=" + component.GetType().FullName;
-            if (value is Array array) return "[" + string.Join(", ", array.Cast<object>().Select(Format)) + "]";
+            if (value is System.Collections.IEnumerable items && !(value is string)) return "[" + string.Join(", ", items.Cast<object>().Select(Format)) + "]";
             return value.ToString();
         }
 
