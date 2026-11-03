@@ -67,6 +67,25 @@ internal static class EncounterValidationCommands
                 }
             }
         });
+        new Terminal.ConsoleCommand("cli_creature_allegiance", "Report nearby creatures' faction, tamed state, encounter tag, and whether they treat the player as an enemy: [radius]", args =>
+        {
+            Player? player = Player.m_localPlayer;
+            if (player == null) { args.Context.AddString("ERROR: No player"); return; }
+            float radius = 30;
+            if (args.Length > 1 && (!float.TryParse(args[1], NumberStyles.Float, CultureInfo.InvariantCulture, out radius) ||
+                float.IsNaN(radius) || radius <= 0 || radius > 200))
+            { args.Context.AddString("ERROR: Radius must be 0–200 metres"); return; }
+            foreach (Character character in Character.GetAllCharacters().Where(c => !c.IsPlayer() &&
+                Vector3.Distance(c.transform.position, player.transform.position) <= radius))
+            {
+                ZDO? record = character.GetComponent<ZNetView>()?.GetZDO();
+                BaseAI? ai = character.GetBaseAI();
+                Character? target = ai?.GetTargetCreature();
+                args.Context.AddString($"creature={character.name} id={record?.m_uid} hp={character.GetHealth():F0} faction={character.m_faction} " +
+                    $"tamed={character.IsTamed()} encounter={record?.GetString("VE_Encounter") ?? ""} huntPlayer={ai?.HuntPlayer() ?? false} " +
+                    $"enemyOfPlayer={BaseAI.IsEnemy(character, player)} target={(target == null ? "none" : target.name)}");
+            }
+        }, isCheat: true);
         new Terminal.ConsoleCommand("cli_epicloot_table_level", "Set nearby table feature for test setup: <feature-name> <level>", args =>
         {
             if (args.Length != 3 || Player.m_localPlayer == null || !int.TryParse(args[2], out int level)) return;
