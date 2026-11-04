@@ -10,12 +10,15 @@ namespace valheimCLI
     {
         public static void Register()
         {
-            new Terminal.ConsoleCommand("cli_store_buy", "Buy an available item through the open store: cli_store_buy <prefab>", args =>
+            new Terminal.ConsoleCommand("cli_store_buy", "Buy an available item through the open store: cli_store_buy <prefab|#index> (index from cli_store_items; use it for key items without a prefab)", args =>
             {
-                if (args.Length != 2 || Player.m_localPlayer == null || StoreGui.instance == null || !StoreGui.IsVisible()) { args.Context.AddString("ERROR: Open a store and specify an item prefab"); return; }
+                if (args.Length != 2 || Player.m_localPlayer == null || StoreGui.instance == null || !StoreGui.IsVisible()) { args.Context.AddString("ERROR: Open a store and specify an item prefab or #index"); return; }
                 StoreGui store = StoreGui.instance;
                 Trader trader = store.m_trader;
-                Trader.TradeItem item = trader.GetAvailableItems().FirstOrDefault(candidate => candidate.m_prefab != null && candidate.m_prefab.name == args[1]);
+                System.Collections.Generic.List<Trader.TradeItem> available = trader.GetAvailableItems();
+                Trader.TradeItem item = args[1].StartsWith("#", StringComparison.Ordinal)
+                    ? int.TryParse(args[1].Substring(1), NumberStyles.None, CultureInfo.InvariantCulture, out int index) && index < available.Count ? available[index] : null
+                    : available.FirstOrDefault(candidate => candidate.m_prefab != null && candidate.m_prefab.name == args[1]);
                 if (item == null) { args.Context.AddString("ERROR: Item is not available at this store"); return; }
                 Inventory inventory = Player.m_localPlayer.GetInventory();
                 int before = inventory.CountItems(store.m_coinPrefab.m_itemData.m_shared.m_name);

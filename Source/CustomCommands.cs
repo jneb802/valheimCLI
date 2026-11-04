@@ -16,6 +16,7 @@ namespace valheimCLI
         private static readonly FieldInfo? ProfileIndexField = typeof(FejdStartup).GetField("m_profileIndex", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo? WorldField = typeof(FejdStartup).GetField("m_world", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly MethodInfo? SetSelectedProfileMethod = typeof(FejdStartup).GetMethod("SetSelectedProfile", BindingFlags.Instance | BindingFlags.NonPublic);
+        private static readonly MethodInfo? SetupCharacterPreviewMethod = typeof(FejdStartup).GetMethod("SetupCharacterPreview", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo? GameFirstSpawnField = typeof(Game).GetField("m_firstSpawn", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo? GameInIntroField = typeof(Game).GetField("m_inIntro", BindingFlags.Instance | BindingFlags.NonPublic);
         private static readonly FieldInfo? GameRequestRespawnField = typeof(Game).GetField("m_requestRespawn", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -2404,6 +2405,15 @@ namespace valheimCLI
                 return;
             }
 
+            // Like the game's New Character button, start from an empty preview player. The
+            // preview otherwise still holds the last selected character's custom data, skills
+            // and inventory, and SavePlayerData would copy them into the new character.
+            if (SetupCharacterPreviewMethod == null)
+            {
+                addOutput("ERROR: FejdStartup.SetupCharacterPreview is not available");
+                return;
+            }
+            SetupCharacterPreviewMethod.Invoke(fejd, new object?[] { null });
             GameObject? playerInstance = PlayerInstanceField?.GetValue(fejd) as GameObject;
             Player? previewPlayer = playerInstance != null ? playerInstance.GetComponent<Player>() : null;
             if (previewPlayer == null)
@@ -3670,12 +3680,14 @@ namespace valheimCLI
             string distanceText = distance > 0f ? $" distance={distance:F1}m" : "";
             addOutput($"OK: {source} trader={traderName}{distanceText} itemCount={items.Count}");
 
-            foreach (Trader.TradeItem item in items)
+            for (int index = 0; index < items.Count; index++)
             {
+                Trader.TradeItem item = items[index];
                 string prefabName = item.m_prefab != null ? item.m_prefab.name : "<null>";
-                string displayName = item.m_prefab?.m_itemData?.m_shared?.m_name ?? "";
+                // Key items have no prefab; the store shows their own name instead.
+                string displayName = item.m_prefab?.m_itemData?.m_shared?.m_name ?? item.m_name ?? "";
                 string requiredKey = item.m_requiredGlobalKey ?? "";
-                addOutput($"ITEM: prefab={prefabName} name={displayName} price={item.m_price} stack={item.m_stack} requiredGlobalKey={requiredKey}");
+                addOutput($"ITEM: index={index} prefab={prefabName} name={displayName} price={item.m_price} stack={item.m_stack} requiredGlobalKey={requiredKey}");
             }
         }
 
