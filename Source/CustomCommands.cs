@@ -26,6 +26,7 @@ namespace valheimCLI
         public static void Register()
         {
             StateInspectionCommands.Register();
+            CreatureAttachCommands.Register();
             new Terminal.ConsoleCommand("cli_freeze_characters", "Freeze matching nearby creatures locally: <prefab|*> [radius=30]. Run on each client. Reload to restore.", args =>
             {
                 float radius = 30;
