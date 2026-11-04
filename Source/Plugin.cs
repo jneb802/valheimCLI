@@ -141,7 +141,7 @@ namespace valheimCLI
                     return true;
                 }
 
-                ExecuteCommand(trustedCommand, skipAllowedCheck: true);
+                ExecuteCommand(trustedCommand, trusted: true);
                 return true;
             }
 
@@ -781,7 +781,7 @@ namespace valheimCLI
             return lines;
         }
 
-        private void ExecuteCommand(string command, bool skipAllowedCheck = false)
+        private void ExecuteCommand(string command, bool trusted = false)
         {
             if (Console.instance == null)
             {
@@ -796,7 +796,22 @@ namespace valheimCLI
             {
                 // Execute the command; its AddString output is captured synchronously.
                 // (An earlier 100 ms sleep here stalled the game thread once per command.)
-                Console.instance.TryRunCommand(command, silentFail: false, skipAllowedCheck: skipAllowedCheck);
+                if (trusted)
+                {
+                    string name = command.Split(new[] { ' ' }, 2)[0].ToLowerInvariant();
+                    if (Terminal.commands.TryGetValue(name, out Terminal.ConsoleCommand registered))
+                    {
+                        registered.RunAction(new Terminal.ConsoleEventArgs(command, Console.instance, registered));
+                    }
+                    else
+                    {
+                        Console.instance.AddString($"ERROR: Unknown console command '{name}'.");
+                    }
+                }
+                else
+                {
+                    Console.instance.TryRunCommand(command, silentFail: false, skipAllowedCheck: false);
+                }
 
                 // Send captured output or confirmation
                 if (_capturedOutput.Count > 0)
