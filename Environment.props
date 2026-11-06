@@ -50,6 +50,10 @@
             <HintPath>$(VALHEIM_MANAGED)/UnityEngine.CoreModule.dll</HintPath>
             <Private>false</Private>
         </Reference>
+        <Reference Include="UnityEngine.JSONSerializeModule">
+            <HintPath>$(VALHEIM_MANAGED)/UnityEngine.JSONSerializeModule.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
         <Reference Include="UnityEngine.UI">
             <HintPath>$(VALHEIM_MANAGED)/UnityEngine.UI.dll</HintPath>
             <Private>false</Private>

@@ -9,6 +9,28 @@ public static class PrefabInspectionCommands
 {
     public static void Register()
     {
+        new Terminal.ConsoleCommand("cli_loaded_asset_state", "Inspect loaded assets by exact name without changing them: cli_loaded_asset_state <name>", args =>
+        {
+            if (args.Length != 2)
+            {
+                args.Context.AddString("ERROR: Exact asset name is required");
+                return;
+            }
+            UnityEngine.Object[] assets = Resources.FindObjectsOfTypeAll<UnityEngine.Object>()
+                .Where(asset => asset != null && asset.name == args[1]).ToArray();
+            args.Context.AddString($"matchingAssets={assets.Length}");
+            foreach (UnityEngine.Object asset in assets.Take(20))
+            {
+                args.Context.AddString($"name={asset.name} type={asset.GetType().FullName} instanceId={asset.GetInstanceID()} hideFlags={asset.hideFlags}");
+                try
+                {
+                    string json = JsonUtility.ToJson(asset);
+                    args.Context.AddString(json.Length > 4000 ? json.Substring(0, 4000) + " [TRUNCATED]" : json);
+                }
+                catch (Exception exception) { args.Context.AddString($"Serialization unavailable: {exception.GetType().Name}"); }
+            }
+            if (assets.Length > 20) args.Context.AddString($"TRUNCATED: {assets.Length - 20} additional assets omitted");
+        }, isCheat: true);
         new Terminal.ConsoleCommand("cli_prefab_render_state", "Inspect prefab components and shared materials without changing them: cli_prefab_render_state <prefab> [copies]", args =>
         {
             if ((args.Length != 2 && (args.Length != 3 || args[2] != "copies")) || ZNetScene.instance == null)
