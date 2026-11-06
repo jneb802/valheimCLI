@@ -8,8 +8,8 @@ namespace valheimCLI
     {
         public static void Register()
         {
-            new Terminal.ConsoleCommand("cli_destructibles", "Inspect loaded destructibles: cli_destructibles <prefab> [radius]", args => Run(args, false), isCheat: true);
-            new Terminal.ConsoleCommand("cli_damage_destructible", "Hit nearest living destructible through its normal damage RPC: cli_damage_destructible <prefab> <damage> <pickaxe|blunt|slash> [radius]", args => Run(args, true), isCheat: true);
+            new Terminal.ConsoleCommand("cli_destructibles", "Inspect loaded destructibles: cli_destructibles <prefab|network-id> [radius]", args => Run(args, false), isCheat: true);
+            new Terminal.ConsoleCommand("cli_damage_destructible", "Hit one living destructible through its normal damage RPC: cli_damage_destructible <prefab|network-id> <damage> <pickaxe|blunt|slash> [radius]", args => Run(args, true), isCheat: true);
         }
 
         private static void Run(Terminal.ConsoleEventArgs args, bool damage)
@@ -34,7 +34,7 @@ namespace valheimCLI
                 return;
             }
             Destructible[] targets = Object.FindObjectsByType<Destructible>(FindObjectsSortMode.None)
-                .Where(target => target.gameObject.activeInHierarchy && Utils.GetPrefabName(target.gameObject) == args[1] && Vector3.Distance(target.transform.position, player.transform.position) <= radius)
+                .Where(target => target.gameObject.activeInHierarchy && Vector3.Distance(target.transform.position, player.transform.position) <= radius)
                 .OrderBy(target => Vector3.Distance(target.transform.position, player.transform.position)).ToArray();
             int count = 0;
             foreach (Destructible target in targets)
@@ -43,9 +43,11 @@ namespace valheimCLI
                 if (view == null) continue;
                 ZDO data = view.GetZDO();
                 if (data == null) continue;
+                string prefab = Utils.GetPrefabName(target.gameObject);
+                if (prefab != args[1] && data.m_uid.ToString() != args[1]) continue;
                 float health = data.GetFloat(ZDOVars.s_health, target.m_health + Game.m_worldLevel * target.m_health * Game.instance.m_worldLevelMineHPMultiplier);
                 if (damage && health <= 0f) continue;
-                args.Context.AddString($"prefab={args[1]} position={target.transform.position.ToString("F3")} health={health} id={data.m_uid} owner={view.IsOwner()}");
+                args.Context.AddString($"prefab={prefab} position={target.transform.position.ToString("F3")} health={health} id={data.m_uid} owner={view.IsOwner()}");
                 count++;
                 if (!damage) continue;
                 HitData hit = new HitData();
