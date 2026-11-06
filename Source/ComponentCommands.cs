@@ -10,6 +10,7 @@ namespace valheimCLI
     {
         public static void Register()
         {
+            DestructibleCommands.Register();
             new Terminal.ConsoleCommand("cli_store_buy", "Buy an available item through the open store: cli_store_buy <prefab|#index> (index from cli_store_items; use it for key items without a prefab)", args =>
             {
                 if (args.Length != 2 || Player.m_localPlayer == null || StoreGui.instance == null || !StoreGui.IsVisible()) { args.Context.AddString("ERROR: Open a store and specify an item prefab or #index"); return; }
