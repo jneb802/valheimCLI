@@ -10,6 +10,17 @@ internal static class StateInspectionCommands
 {
     internal static void Register()
     {
+        new Terminal.ConsoleCommand("cli_world_prefabs", "Read known saved objects by exact prefab and an optional string metadata key: <prefab> [metadata-key]", args =>
+        {
+            if (args.Length < 2 || ZDOMan.instance == null) { args.Context.AddString("ERROR: Join a world and specify a prefab"); return; }
+            int hash = args[1].GetStableHashCode();
+            ZDO[] records = ZDOMan.instance.m_objectsByID.Values.Where(data => data.GetPrefab() == hash)
+                .OrderBy(data => data.GetPosition().x).ThenBy(data => data.GetPosition().z).ToArray();
+            args.Context.AddString("scope=" + (ZNet.instance.IsServer() ? "server-world" : "client-known") + " matched=" + records.Length + " shown=" + Math.Min(100, records.Length));
+            foreach (ZDO data in records.Take(100))
+                args.Context.AddString("id=" + data.m_uid + " position=" + data.GetPosition().ToString("F3") +
+                    (args.Length > 2 ? " " + args[2] + "=" + data.GetString(args[2]) : ""));
+        }, isCheat: true);
         new Terminal.ConsoleCommand("cli_player_custom_data", "Read saved custom player fields by key prefix: [prefix]", args =>
         {
             if (Player.m_localPlayer == null) { args.Context.AddString("ERROR: No local player"); return; }
