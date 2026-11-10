@@ -68,7 +68,9 @@ internal static class ConfigCommands
                 }
                 entry.BoxedValue = converted;
             }
-            args.Context.AddString($"CONFIG plugin={guid} section={definition.Section} key={definition.Key} type={entry.SettingType.Name} value={entry.GetSerializedValue()}");
+            // Jotunn can make GetSerializedValue return the cached local value instead of the live override.
+            string effectiveValue = TomlTypeConverter.ConvertToString(entry.BoxedValue, entry.SettingType);
+            args.Context.AddString($"CONFIG plugin={guid} section={definition.Section} key={definition.Key} type={entry.SettingType.Name} value={effectiveValue}");
         }
         catch (Exception exception)
         {
