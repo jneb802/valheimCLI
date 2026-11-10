@@ -14,6 +14,22 @@ internal static class RoadInspectionCommands
     private static Type? Find(string name) => AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetType(name, false)).FirstOrDefault(t => t != null);
     internal static void Register()
     {
+        new Terminal.ConsoleCommand("cli_ground_surface", "Read loaded ground height, paint, terrain compiler and an optional metadata field: <x> <z> [metadata-key]", args =>
+        {
+            if (args.Length < 3 || !float.TryParse(args[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float x) ||
+                !float.TryParse(args[2], NumberStyles.Float, CultureInfo.InvariantCulture, out float z) ||
+                float.IsNaN(x) || float.IsNaN(z) || Mathf.Abs(x) > 10000 || Mathf.Abs(z) > 10000)
+            { args.Context.AddString("ERROR: cli_ground_surface <x> <z> [metadata-key]"); return; }
+            Vector3 point = new(x, 0, z);
+            if (ZoneSystem.instance == null || !ZoneSystem.instance.GetGroundHeight(point, out float height))
+            { args.Context.AddString("ERROR: Terrain is not loaded"); return; }
+            point.y = height;
+            Heightmap heightmap = Heightmap.FindHeightmap(point);
+            TerrainComp compiler = TerrainComp.FindTerrainCompiler(point);
+            ZDO? data = compiler != null ? compiler.GetComponent<ZNetView>()?.GetZDO() : null;
+            args.Context.AddString("position=" + point.ToString("F3") + " paint=" + heightmap.GetPaintMask(point).ToString("F3") + " terrain=" + (data?.m_uid.ToString() ?? "none"));
+            if (args.Length > 3) args.Context.AddString(args[3] + "=" + (data?.GetString(args[3]) ?? ""));
+        }, isCheat: true);
         new Terminal.ConsoleCommand("cli_road_network", "Read supported road geometry: cli_road_network [route-index] [point-step=100]", args =>
         {
             Type? api = Find("ProceduralRoads.RoadTravelApi");
