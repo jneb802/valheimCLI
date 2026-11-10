@@ -123,6 +123,7 @@ namespace valheimCLI
 
         private bool TryExecuteBuiltInCommand(string command)
         {
+            if (ServerWorldCommands.TryExecute(command, output => _commandServer?.SendOutput(output))) return true;
             if (UiCommands.TryExecute(command, output => _commandServer?.SendOutput(output)))
             {
                 return true;

@@ -118,6 +118,13 @@ namespace valheimCLI
             ComponentCommands.Register();
             RouteController.Register();
             BuildCommands.Register();
+            RoadInspectionCommands.Register();
+            new Terminal.ConsoleCommand("cli_logout", "Save the current character and leave the world through the normal game logout flow", args =>
+            {
+                if (Game.instance == null || Player.m_localPlayer == null) { args.Context.AddString("ERROR: No local player in a world"); return; }
+                args.Context.AddString("OK: Saving character and leaving the world");
+                Game.instance.Logout();
+            });
             AsyncCommands.Register();
 
             new Terminal.ConsoleCommand("cli_create_character", "Create and select a local character: cli_create_character <name> [--replace] [--local]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
