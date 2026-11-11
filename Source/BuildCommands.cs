@@ -232,9 +232,8 @@ namespace valheimCLI
                 return;
             }
 
-            bool placed = player.TryPlacePiece(piece);
             StringBuilder sb = new();
-            sb.AppendLine($"OK: placed={placed}");
+            PlaceWithCost(player, piece, sb);
             AppendPlacementDiagnostics(player, piece, sb);
             EmitLines(sb, addOutput);
         }
@@ -251,11 +250,24 @@ namespace valheimCLI
                 return;
             }
 
-            bool placed = player.TryPlacePiece(piece);
             StringBuilder sb = new();
-            sb.AppendLine($"OK: placed={placed}");
+            PlaceWithCost(player, piece, sb);
             AppendPlacementDiagnostics(player, piece, sb);
             EmitLines(sb, addOutput);
+        }
+
+        // Mirror Player.UpdatePlacement: TryPlacePiece alone neither checks nor consumes the build cost.
+        private static void PlaceWithCost(Player player, Piece piece, StringBuilder sb)
+        {
+            if (!player.m_noPlacementCost && !player.HaveRequirements(piece, Player.RequirementMode.CanBuild))
+            {
+                sb.AppendLine("OK: placed=False reason=missing-requirements");
+                return;
+            }
+            bool placed = player.TryPlacePiece(piece);
+            if (placed && !player.m_noPlacementCost && !ZoneSystem.instance.GetGlobalKey(piece.FreeBuildKey()))
+                player.ConsumeResources(piece.m_resources, 0);
+            sb.AppendLine($"OK: placed={placed}");
         }
 
         private static bool PreparePiece(string requestedPiece, bool noCost, Action<string> addOutput, out Player player, out Piece piece)

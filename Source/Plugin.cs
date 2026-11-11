@@ -59,6 +59,8 @@ namespace valheimCLI
             EnvironmentCommands.Register();
             StatusEffectCommands.Register();
             ConfigCommands.Register();
+            ContainerInspectionCommands.Register();
+            ZdoChurnCommands.Register();
             new MwlLocationReload(this).Register();
 
             // Initialize state tracker
