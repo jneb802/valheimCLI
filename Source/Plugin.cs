@@ -59,6 +59,7 @@ namespace valheimCLI
             EnvironmentCommands.Register();
             StatusEffectCommands.Register();
             ConfigCommands.Register();
+            ZdoLifecycleCommands.Register();
             new MwlLocationReload(this).Register();
 
             // Initialize state tracker
@@ -969,6 +970,7 @@ namespace valheimCLI
 
         private void OnDestroy()
         {
+            ZdoLifecycleCommands.Stop();
             NavigationCommands.Shutdown();
             _commandServer?.Dispose();
             Config.Save();
