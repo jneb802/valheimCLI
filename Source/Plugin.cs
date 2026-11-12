@@ -55,6 +55,7 @@ namespace valheimCLI
             DungeonInspectionCommands.Register();
             ItemInteractionCommands.Register();
             EncounterValidationCommands.Register();
+            CreatureVisualCommands.Register();
             NavigationCommands.Register();
             EnvironmentCommands.Register();
             StatusEffectCommands.Register();
