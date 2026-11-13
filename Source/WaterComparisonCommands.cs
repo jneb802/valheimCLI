@@ -53,8 +53,10 @@ internal static class WaterComparisonCommands
                 originalMaterial = selected.m_waterSurface.sharedMaterial;
                 if (originalMaterial == null) { selected = null; throw new InvalidOperationException("No surface material"); }
                 originalEnabled = selected.m_waterSurface.enabled;
-                testMaterial = new Material(originalMaterial);
-                selected.m_waterSurface.sharedMaterial = testMaterial;
+                Material copy = new(originalMaterial);
+                selected.m_waterSurface.sharedMaterial = copy;
+                testMaterial = selected.m_waterSurface.material;
+                if (copy != testMaterial) UnityEngine.Object.Destroy(copy);
                 waterRoot = selected.transform.parent ?? selected.transform;
                 waterScale = waterRoot.localScale;
                 root = waterRoot.root;
@@ -65,7 +67,7 @@ internal static class WaterComparisonCommands
             if (action == "float")
             {
                 if (args.Length != 4) throw new ArgumentException("float <property> <value>");
-                Material material = comparison != null ? comparison.GetComponentInChildren<WaterVolume>().m_waterSurface.sharedMaterial : testMaterial;
+                Material material = (comparison != null ? comparison.GetComponentInChildren<WaterVolume>() : selected).m_waterSurface.material;
                 int index = material.shader.FindPropertyIndex(args[2]);
                 if (index < 0) throw new ArgumentException("Unknown shader property");
                 UnityEngine.Rendering.ShaderPropertyType type = material.shader.GetPropertyType(index);
@@ -81,16 +83,15 @@ internal static class WaterComparisonCommands
                 Type? manager = AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetType("Jotunn.Managers.PrefabManager")).FirstOrDefault(t => t != null);
                 object? instance = manager?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
                 GameObject? prefab = manager?.GetMethod("GetPrefab", new[] { typeof(string) })?.Invoke(instance, new object[] { args[2] }) as GameObject;
-                if (prefab == null || prefab.GetComponentInChildren<WaterVolume>(true) == null)
-                    throw new ArgumentException("No water prefab named " + args[2]);
+                if (prefab == null || prefab.GetComponentsInChildren<WaterVolume>(true).Length != 1)
+                    throw new ArgumentException("Specify a prefab with exactly one water volume: " + args[2]);
                 RemoveComparison();
                 comparison = UnityEngine.Object.Instantiate(prefab, waterRoot.position, waterRoot.rotation);
                 comparison.name = "CLI_WaterComparison";
                 comparison.transform.localScale = waterRoot.lossyScale;
                 comparison.SetActive(true);
                 WaterVolume water = comparison.GetComponentInChildren<WaterVolume>(true);
-                Material material = new(water.m_waterSurface.sharedMaterial);
-                water.m_waterSurface.sharedMaterial = material;
+                Material material = water.m_waterSurface.material;
                 if (material.HasProperty("_WaterEdge")) material.SetFloat("_WaterEdge", testMaterial.GetFloat("_WaterEdge"));
                 foreach (Collider collider in comparison.GetComponentsInChildren<Collider>(true)) collider.enabled = false;
                 selected.m_waterSurface.enabled = false;
@@ -158,7 +159,12 @@ internal static class WaterComparisonCommands
         foreach (KeyValuePair<EnvZone, string> pair in environments)
             if (pair.Key != null) pair.Key.m_environment = pair.Value;
         environments.Clear();
-        if (selected != null) selected.m_waterSurface.sharedMaterial = originalMaterial;
+        if (selected != null)
+        {
+            Material active = selected.m_waterSurface.sharedMaterial;
+            selected.m_waterSurface.sharedMaterial = originalMaterial;
+            if (active != originalMaterial && active != testMaterial) UnityEngine.Object.Destroy(active);
+        }
         if (testMaterial != null) UnityEngine.Object.Destroy(testMaterial);
         selected = null;
         root = null;
