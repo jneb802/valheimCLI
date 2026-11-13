@@ -57,6 +57,7 @@ namespace valheimCLI
             EncounterValidationCommands.Register();
             CreatureVisualCommands.Register();
             NavigationCommands.Register();
+            WaterComparisonCommands.Register();
             EnvironmentCommands.Register();
             StatusEffectCommands.Register();
             ConfigCommands.Register();
