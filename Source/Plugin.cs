@@ -58,6 +58,7 @@ namespace valheimCLI
             CreatureVisualCommands.Register();
             NavigationCommands.Register();
             EnvironmentCommands.Register();
+            RoomMediaCommands.Register();
             StatusEffectCommands.Register();
             ConfigCommands.Register();
             ContainerInspectionCommands.Register();
