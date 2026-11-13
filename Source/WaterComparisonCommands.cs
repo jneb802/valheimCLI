@@ -18,10 +18,12 @@ internal static class WaterComparisonCommands
     private static Transform? waterRoot;
     private static Vector3 waterScale;
     private static GameObject? comparison;
+    private static GameObject? pool;
+    private static Material? floorMaterial;
     private static readonly Dictionary<EnvZone, string> environments = new();
 
     internal static void Register() => new Terminal.ConsoleCommand("cli_water_compare",
-        "Reversible local water test: select [radius=100] | state | float <property> <value> | native <prefab> | original | environment <name> | scale <x> <y> <z> | move <dx> <dy> <dz> | reset", Run, isCheat: true);
+        "Reversible local water test: select [radius=100] | pool <prefab> <x> <y> <z> | state | float <property> <value> | native <prefab> | original | environment <name> | scale <x> <y> <z> | move <dx> <dy> <dz> | reset", Run, isCheat: true);
 
     private static float Number(string value)
     {
@@ -39,6 +41,42 @@ internal static class WaterComparisonCommands
             if (args.Length < 2) throw new ArgumentException("Specify an action");
             string action = args[1];
             if (action == "reset") { Reset(); args.Context.AddString("WATER_COMPARE restored"); return; }
+            if (action == "pool")
+            {
+                if (args.Length != 6 || Player.m_localPlayer == null) throw new ArgumentException("pool <prefab> <x> <y> <z> while in a world");
+                GameObject prefab = WaterPrefab(args[2]);
+                if (prefab.GetComponentInChildren<ZNetView>(true) != null) throw new ArgumentException("Pool prefab must have no network components");
+                Vector3 position = new(Number(args[3]), Number(args[4]), Number(args[5]));
+                Material? floorSource = ZNetScene.instance.GetPrefab("stone_floor_2x2")?.GetComponentInChildren<MeshRenderer>(true)?.sharedMaterial;
+                if (floorSource == null || !floorSource.shader.isSupported) throw new InvalidOperationException("Native stone floor material unavailable");
+                Reset();
+                pool = new GameObject("CLI_WaterPool");
+                pool.transform.position = position;
+                GameObject water = UnityEngine.Object.Instantiate(prefab, pool.transform);
+                water.transform.localPosition = Vector3.zero;
+                water.transform.localRotation = Quaternion.identity;
+                water.transform.localScale = new Vector3(14, 1, 16);
+                water.SetActive(true);
+                selected = water.GetComponentInChildren<WaterVolume>(true);
+                PrepareSelection();
+                selected.m_waterSurface.material.SetFloat("_WaterEdge", 30000);
+                floorMaterial = new Material(floorSource);
+                GameObject floor = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                floor.name = "PoolFloor";
+                floor.transform.SetParent(pool.transform, false);
+                floor.transform.localPosition = new Vector3(0, -1, 0);
+                floor.transform.localScale = new Vector3(18, 0.2f, 20);
+                floor.GetComponent<Renderer>().sharedMaterial = floorMaterial;
+                for (int i = 0; i < 3; i++)
+                {
+                    GameObject marker = GameObject.CreatePrimitive(PrimitiveType.Cube);
+                    marker.name = "DepthMarker";
+                    marker.transform.SetParent(pool.transform, false);
+                    marker.transform.localPosition = new Vector3(-4 + i * 4, -0.5f, 0);
+                    marker.transform.localScale = new Vector3(1, 1.5f, 1);
+                    marker.GetComponent<Renderer>().sharedMaterial = floorMaterial;
+                }
+            }
             if (action == "select")
             {
                 Player player = Player.m_localPlayer;
@@ -50,17 +88,7 @@ internal static class WaterComparisonCommands
                     .Where(w => w.m_waterSurface != null && Vector3.Distance(w.transform.position, player.transform.position) <= radius)
                     .OrderBy(w => Vector3.Distance(w.transform.position, player.transform.position)).FirstOrDefault();
                 if (selected == null) throw new InvalidOperationException("No water in radius");
-                originalMaterial = selected.m_waterSurface.sharedMaterial;
-                if (originalMaterial == null) { selected = null; throw new InvalidOperationException("No surface material"); }
-                originalEnabled = selected.m_waterSurface.enabled;
-                Material copy = new(originalMaterial);
-                selected.m_waterSurface.sharedMaterial = copy;
-                testMaterial = selected.m_waterSurface.material;
-                if (copy != testMaterial) UnityEngine.Object.Destroy(copy);
-                waterRoot = selected.transform.parent ?? selected.transform;
-                waterScale = waterRoot.localScale;
-                root = waterRoot.root;
-                rootPosition = root.position;
+                PrepareSelection();
             }
             if (selected == null || root == null || waterRoot == null || testMaterial == null)
                 throw new InvalidOperationException("Select water first");
@@ -80,11 +108,7 @@ internal static class WaterComparisonCommands
             else if (action == "native")
             {
                 if (args.Length != 3) throw new ArgumentException("native <prefab>");
-                Type? manager = AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetType("Jotunn.Managers.PrefabManager")).FirstOrDefault(t => t != null);
-                object? instance = manager?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
-                GameObject? prefab = manager?.GetMethod("GetPrefab", new[] { typeof(string) })?.Invoke(instance, new object[] { args[2] }) as GameObject;
-                if (prefab == null || prefab.GetComponentsInChildren<WaterVolume>(true).Length != 1)
-                    throw new ArgumentException("Specify a prefab with exactly one water volume: " + args[2]);
+                GameObject prefab = WaterPrefab(args[2]);
                 RemoveComparison();
                 comparison = UnityEngine.Object.Instantiate(prefab, waterRoot.position, waterRoot.rotation);
                 comparison.name = "CLI_WaterComparison";
@@ -120,7 +144,7 @@ internal static class WaterComparisonCommands
                 RemoveComparison();
                 root.position = rootPosition + Vector(args);
             }
-            else if (action != "select" && action != "state") throw new ArgumentException("Unknown action: " + action);
+            else if (action != "select" && action != "state" && action != "pool") throw new ArgumentException("Unknown action: " + action);
             WaterVolume target = comparison != null ? comparison.GetComponentInChildren<WaterVolume>() : selected;
             Material active = target.m_waterSurface.sharedMaterial;
             args.Context.AddString($"WATER_COMPARE selectedId={selected.GetInstanceID()} selectedPosition={selected.transform.position:F3} root={root.name} rootPosition={root.position:F3} source={(comparison != null ? "native" : "original")} scale={waterRoot.lossyScale:F3} depth={target.m_forceDepth:R} shader={active.shader.name} shaderId={active.shader.GetInstanceID()}");
@@ -136,6 +160,31 @@ internal static class WaterComparisonCommands
                 }
         }
         catch (Exception exception) { args.Context.AddString("ERROR: " + exception.GetBaseException().Message); }
+    }
+
+    private static GameObject WaterPrefab(string name)
+    {
+        Type? manager = AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetType("Jotunn.Managers.PrefabManager")).FirstOrDefault(t => t != null);
+        object? instance = manager?.GetProperty("Instance", BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
+        GameObject? prefab = manager?.GetMethod("GetPrefab", new[] { typeof(string) })?.Invoke(instance, new object[] { name }) as GameObject;
+        if (prefab == null || prefab.GetComponentsInChildren<WaterVolume>(true).Length != 1)
+            throw new ArgumentException("Specify a prefab with exactly one water volume: " + name);
+        return prefab;
+    }
+
+    private static void PrepareSelection()
+    {
+        originalMaterial = selected!.m_waterSurface.sharedMaterial;
+        if (originalMaterial == null) { selected = null; throw new InvalidOperationException("No surface material"); }
+        originalEnabled = selected.m_waterSurface.enabled;
+        Material copy = new(originalMaterial);
+        selected.m_waterSurface.sharedMaterial = copy;
+        testMaterial = selected.m_waterSurface.material;
+        if (copy != testMaterial) UnityEngine.Object.Destroy(copy);
+        waterRoot = selected.transform.parent ?? selected.transform;
+        waterScale = waterRoot.localScale;
+        root = waterRoot.root;
+        rootPosition = root.position;
     }
 
     private static void RemoveComparison()
@@ -171,5 +220,9 @@ internal static class WaterComparisonCommands
         waterRoot = null;
         originalMaterial = null;
         testMaterial = null;
+        if (pool != null) UnityEngine.Object.Destroy(pool);
+        if (floorMaterial != null) UnityEngine.Object.Destroy(floorMaterial);
+        pool = null;
+        floorMaterial = null;
     }
 }
