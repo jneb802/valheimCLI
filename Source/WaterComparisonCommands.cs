@@ -149,6 +149,9 @@ internal static class WaterComparisonCommands
             Material active = target.m_waterSurface.sharedMaterial;
             args.Context.AddString($"WATER_COMPARE selectedId={selected.GetInstanceID()} selectedPosition={selected.transform.position:F3} root={root.name} rootPosition={root.position:F3} source={(comparison != null ? "native" : "original")} scale={waterRoot.lossyScale:F3} depth={target.m_forceDepth:R} shader={active.shader.name} shaderId={active.shader.GetInstanceID()}");
             if (action == "state")
+            {
+                args.Context.AddString("WATER_COMPARE_VOLUMES count=" + root.GetComponentsInChildren<WaterVolume>(true).Length);
+                args.Context.AddString("WATER_COMPARE_KEYWORDS enabled=" + string.Join(",", active.shaderKeywords) + " available=" + string.Join(",", active.shader.keywordSpace.keywordNames));
                 for (int i = 0; i < active.shader.GetPropertyCount(); i++)
                 {
                     string name = active.shader.GetPropertyName(i);
@@ -157,7 +160,10 @@ internal static class WaterComparisonCommands
                         args.Context.AddString($"WATER_COMPARE_PROPERTY {name}={active.GetFloat(name):R}");
                     else if (type == UnityEngine.Rendering.ShaderPropertyType.Color || type == UnityEngine.Rendering.ShaderPropertyType.Vector)
                         args.Context.AddString($"WATER_COMPARE_PROPERTY {name}={active.GetVector(name):F4}");
+                    else if (type == UnityEngine.Rendering.ShaderPropertyType.Texture)
+                        args.Context.AddString($"WATER_COMPARE_TEXTURE {name}={active.GetTexture(name)?.name ?? "null"}");
                 }
+            }
         }
         catch (Exception exception) { args.Context.AddString("ERROR: " + exception.GetBaseException().Message); }
     }
