@@ -86,6 +86,10 @@
             <HintPath>$(VALHEIM_MANAGED)/UnityEngine.ParticleSystemModule.dll</HintPath>
             <Private>false</Private>
         </Reference>
+        <Reference Include="UnityEngine.AudioModule">
+            <HintPath>$(VALHEIM_MANAGED)/UnityEngine.AudioModule.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
         <Reference Include="UnityEngine.PhysicsModule">
             <HintPath>$(VALHEIM_MANAGED)/UnityEngine.PhysicsModule.dll</HintPath>
             <Private>false</Private>
