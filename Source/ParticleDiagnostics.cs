@@ -21,7 +21,7 @@ namespace valheimCLI;
 internal static class ParticleDiagnostics
 {
     internal static void Register() => new Terminal.ConsoleCommand("cli_particle_report",
-        "Save live/prefab particle materials, textures and shader copies: cli_particle_report <exact-prefab> [radius=20] [label]",
+        "Save live/prefab particle materials, textures and shader copies for a network object: cli_particle_report <exact-prefab> [radius=20] [label]",
         Run, isCheat: true);
 
     private static void Run(Terminal.ConsoleEventArgs args)
@@ -42,11 +42,13 @@ internal static class ParticleDiagnostics
         if (prefab == null) { args.Context.AddString("ERROR: Registered prefab not found: " + args[1]); return; }
 
         Stopwatch timer = Stopwatch.StartNew();
-        Transform[] scene = Object.FindObjectsByType<Transform>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-        Transform target = scene.Where(t => t.gameObject.scene.IsValid() && PrefabName(t.name) == args[1] &&
+        // The scene can contain millions of transforms from registered mod prefabs. Use the game's
+        // live network-object index instead of enumerating those unrelated hierarchies.
+        Transform target = ZNetScene.instance.m_instances.Values.Where(view => view != null).Select(view => view.transform)
+            .Where(t => PrefabName(t.name) == args[1] &&
                 Vector3.Distance(t.position, player.transform.position) <= radius)
             .OrderBy(t => Vector3.Distance(t.position, player.transform.position)).ThenBy(t => t.GetInstanceID()).FirstOrDefault();
-        if (target == null) { args.Context.AddString("ERROR: No matching scene object within radius; move near the effect"); return; }
+        if (target == null) { args.Context.AddString("ERROR: No matching live network object within radius; move near the effect"); return; }
 
         Report report = new();
         report.Write("PARTICLE_REPORT version=1 utc=" + DateTime.UtcNow.ToString("O"));
@@ -54,6 +56,8 @@ internal static class ParticleDiagnostics
         report.Write($"target={args[1]} position={target.position:F3} radius={radius.ToString(CultureInfo.InvariantCulture)}");
         report.Write("NOTE: Object IDs are session-local. Texture hashes cover CPU-readable raw bytes only (up to 16 MiB estimated); unreadable textures have unknown hashes. No GPU readback is performed.");
         report.Write("NOTE: Unity does not expose original bundle/mod ownership for these objects. Loaded bundle names and same-name objects are clues only; unloaded bundles are absent. No assets are loaded by this command.");
+        report.Write("NOTE: The registered prefab can already have mod changes; it is not an unmodified vanilla baseline. Missing optional texture properties and unused material slots do not by themselves prove a fault.");
+        report.Write($"TIMING targetLookupMs={timer.ElapsedMilliseconds}");
         foreach (BepInEx.PluginInfo plugin in Chainloader.PluginInfos.Values.OrderBy(p => p.Metadata.GUID))
             report.Write($"PLUGIN guid={plugin.Metadata.GUID} version={plugin.Metadata.Version}");
         foreach (AssetBundle bundle in AssetBundle.GetAllLoadedAssetBundles().OrderBy(b => b.name))
@@ -61,6 +65,7 @@ internal static class ParticleDiagnostics
         if (EnvMan.instance != null)
             report.Write($"ENV current={EnvMan.instance.GetCurrentEnvironment()?.m_name} debug={EnvMan.instance.m_debugEnv}");
 
+        long inspectStart = timer.ElapsedMilliseconds;
         InspectRoot("scene", target.gameObject, report);
         InspectRoot("registered", prefab, report);
 
@@ -75,13 +80,15 @@ internal static class ParticleDiagnostics
                 report.Write($"REFERENCE path={Path(component.transform, target)} field={field.Name} object={Identity(smoke)}");
                 if (!referenced.Add(smoke.GetInstanceID())) continue;
                 InspectRoot("smoke-reference", smoke, report);
-                Transform[] copies = scene.Where(t => PrefabName(t.name) == smoke.name &&
-                    Vector3.Distance(t.position, target.position) <= radius).OrderBy(t => t.GetInstanceID()).ToArray();
-                report.Write($"SMOKE_COPIES name={smoke.name} count={copies.Length} sampled={Math.Min(3, copies.Length)} association=proximity-not-proven-origin");
-                foreach (Transform copy in copies.Take(3)) InspectRoot("nearby-smoke", copy.gameObject, report);
+                // Do not search all scene transforms for detached effects. Their source prefab is
+                // enough to inspect renderer-backed smoke; custom instanced rendering is explicit.
+                if (smoke.GetComponentsInChildren<Renderer>(true).Length == 0)
+                    report.Write("SMOKE_REFERENCE has no Renderer components; custom/instanced rendering material is not resolved by this report");
             }
         }
 
+        report.Write($"TIMING materialInspectionMs={timer.ElapsedMilliseconds - inspectStart}");
+        long shaderStart = timer.ElapsedMilliseconds;
         Shader[] shaders = Resources.FindObjectsOfTypeAll<Shader>();
         foreach (string name in report.ShaderNames.OrderBy(n => n))
         {
@@ -90,6 +97,7 @@ internal static class ParticleDiagnostics
             foreach (Shader shader in matches.Take(16)) report.Write($"SHADER_COPY {Identity(shader)} supported={shader.isSupported} renderQueue={shader.renderQueue}");
             if (matches.Length > 16) report.Write("TRUNCATED shader copies");
         }
+        report.Write($"TIMING shaderCopiesMs={timer.ElapsedMilliseconds - shaderStart}");
         report.Write($"INSPECTION elapsedMs={timer.ElapsedMilliseconds} renderers={report.Renderers} uniqueMaterials={report.Materials.Count}");
         string directory = System.IO.Path.Combine(Paths.ConfigPath, "valheimCLI", "diagnostics");
         Directory.CreateDirectory(directory);
