@@ -12,7 +12,7 @@ internal static class BossSummonCommands
 
     internal static void Register()
     {
-        new Terminal.ConsoleCommand("cli_spawn_boss_summon", "Spawn a linked Endgame runner: cli_spawn_boss_summon neck|boar [distance=10] [lifetime=35]. Requires a nearby living Uber Eikthyr.", args => Run(args, false), isCheat: true);
+        new Terminal.ConsoleCommand("cli_spawn_boss_summon", "Spawn a linked Endgame runner: cli_spawn_boss_summon neck [distance=10] [lifetime=35]. Requires a nearby living Uber Eikthyr.", args => Run(args, false), isCheat: true);
         new Terminal.ConsoleCommand("cli_boss_summon_state", "Inspect nearby Endgame runners, their boss links and eligible targets.", args => Run(args, true), isCheat: true);
     }
 
@@ -45,12 +45,11 @@ internal static class BossSummonCommands
                 args.Context.AddString("Runners within 100m: " + runners.Length);
                 return;
             }
-            if (args.Length < 2 || args.Length > 4) throw new ArgumentException("Usage: cli_spawn_boss_summon neck|boar [distance=10] [lifetime=35]");
+            if (args.Length < 2 || args.Length > 4) throw new ArgumentException("Usage: cli_spawn_boss_summon neck [distance=10] [lifetime=35]");
             string prefab = args[1].ToLowerInvariant() switch
             {
                 "neck" => "VE_Eikthyr_LightningNeck",
-                "boar" => "VE_Eikthyr_LightningBoar",
-                _ => throw new ArgumentException("Choose neck or boar.")
+                _ => throw new ArgumentException("Choose neck.")
             };
             float distance = args.Length > 2 ? Parse(args[2], "distance", 3, 25) : 10;
             float lifetime = args.Length > 3 ? Parse(args[3], "lifetime", 1, 300) : 35;
