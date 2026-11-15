@@ -180,6 +180,8 @@ internal sealed class BossBalanceCommands : MonoBehaviour
             "# Health is base health. Damage fields are per hit; m_hitInterval is seconds between hits.\n" +
             "# m_aiAttackInterval is weapon cooldown. m_ttl is effect lifetime; m_aoe is projectile blast radius.\n" +
             "# Existing hazards, nests and scheduled cooldowns finish with their previous values.\n" +
+            "# Scripted Moder ground-fire damage and interval change on the next tick.\n" +
+            "# Indexed settings (such as TickBrackets/0) edit existing phase entries; keep the exported keys.\n" +
             "# Elder nest count/placement changes apply to the next placement; curse changes apply to the next cast.\n" +
             "# Elder thrown-log damage uses physical collision; its flight settings are under abilities.\n" +
             "# cli_boss_balance reset " + file.Name + " restores defaults; heal " + file.Name + " refills this boss's health.\n" + Writer.Serialize(values);
