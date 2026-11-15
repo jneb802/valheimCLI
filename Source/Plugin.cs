@@ -50,8 +50,10 @@ namespace valheimCLI
 
             Assembly assembly = Assembly.GetExecutingAssembly();
             HarmonyInstance.PatchAll(assembly);
+            HarmonyInstance.PatchAll(typeof(PlayerDataCommands));
 
             CustomCommands.Register();
+            PlayerDataCommands.Register();
             DungeonInspectionCommands.Register();
             ItemInteractionCommands.Register();
             EncounterValidationCommands.Register();
