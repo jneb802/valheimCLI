@@ -8,6 +8,7 @@ internal static class CreatureVisualCommands
 {
     internal static void Register()
     {
+        BossSummonCommands.Register();
         new Terminal.ConsoleCommand("cli_creature_state", "Inspect nearest creature and weapons: <prefab>", args => Creature(args, false), isCheat: true);
         new Terminal.ConsoleCommand("cli_creature_attack", "Start nearest owned creature's normal attack: <prefab> <weapon-prefab>", args => Creature(args, true), isCheat: true);
         new Terminal.ConsoleCommand("cli_scene_lights", "List or toggle lights within 300m by hierarchy text: <list|on|off> <path-text>", Lights, isCheat: true);
