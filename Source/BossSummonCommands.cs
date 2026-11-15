@@ -40,6 +40,8 @@ internal static class BossSummonCommands
                     Character? boss = Invoke(ability, "Owner", runner.gameObject) as Character;
                     Player? target = boss == null ? null : Invoke(ability, "Target", boss, runner.transform.position) as Player;
                     MonsterAI ai = runner.GetComponent<MonsterAI>();
+                    ZDO record = runner.m_nview.GetZDO();
+                    args.Context.AddString($"summonMetadata id={record.m_uid} bossId={record.GetZDOID("VE_UberBossOwner")} expiry={record.GetLong("VE_AbilityExpires")} slsManaged={record.GetBool("SLS_EXTMGD")} encounter={record.GetString("VE_Encounter")}");
                     args.Context.AddString($"runner={runner.name} id={runner.m_nview.GetZDO().m_uid} owner={runner.IsOwner()} health={runner.GetHealth():F1}/{runner.GetMaxHealth():F1} boss={(boss == null ? "NONE" : boss.name)} eligibleTarget={(target == null ? "NONE" : target.GetPlayerName())} alerted={ai.IsAlerted()} position={runner.transform.position:F2} velocity={runner.m_body.linearVelocity:F2} targetDistance={(target == null ? -1 : Vector3.Distance(runner.transform.position, target.transform.position)):F2}");
                 }
                 args.Context.AddString("Runners within 100m: " + runners.Length);
