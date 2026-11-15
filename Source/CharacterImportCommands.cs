@@ -20,10 +20,40 @@ namespace valheimCLI
         {
             new Terminal.ConsoleCommand("character_replace",
                 "Replace local inventory and skills from Enforcer YAML: character_replace <playerName> [accountID]. Requires devcommands.",
-                args => Execute(args, false));
+                args => Execute(args, false), optionsFetcher: GetImportOptions, alwaysRefreshTabOptions: true);
             new Terminal.ConsoleCommand("character_restore",
                 "Restore a character_replace backup: character_restore <backupFile>. Requires devcommands.",
-                args => Execute(args, true));
+                args => Execute(args, true), optionsFetcher: GetBackupOptions, alwaysRefreshTabOptions: true);
+        }
+
+        private static List<string> GetImportFiles()
+        {
+            if (!Directory.Exists(Imports)) return new List<string>();
+            // Limit discovery to the root and one account directory, including mmcli config links.
+            return new[] { Imports }.Concat(Directory.GetDirectories(Imports))
+                .SelectMany(path => Directory.GetFiles(path, "*.yaml")).ToList();
+        }
+
+        private static List<string> GetImportOptions()
+        {
+            try
+            {
+                return GetImportFiles().Select(Path.GetFileNameWithoutExtension)
+                    .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(name => name, StringComparer.OrdinalIgnoreCase).ToList();
+            }
+            catch (IOException) { return new List<string>(); }
+            catch (UnauthorizedAccessException) { return new List<string>(); }
+        }
+
+        private static List<string> GetBackupOptions()
+        {
+            try
+            {
+                return Directory.Exists(Backups) ? Directory.GetFiles(Backups, "*.backup")
+                    .Select(Path.GetFileName).OrderByDescending(name => name, StringComparer.Ordinal).ToList() : new List<string>();
+            }
+            catch (IOException) { return new List<string>(); }
+            catch (UnauthorizedAccessException) { return new List<string>(); }
         }
 
         private static void Execute(Terminal.ConsoleEventArgs args, bool restore)
@@ -36,6 +66,11 @@ namespace valheimCLI
                 if (player == null || player.IsDead() || player.IsTeleporting())
                     throw new InvalidOperationException("A living local player outside teleportation is required.");
                 string[] parameters = ParseArguments(args.ArgsAll);
+                // Valheim's Tab completion inserts names without quotes. The external CLI also
+                // joins shell arguments with spaces. Prefer an exact full filename in that case.
+                if (!restore && !args.ArgsAll.Contains("\"") &&
+                    GetImportOptions().Contains(args.ArgsAll.Trim(), StringComparer.OrdinalIgnoreCase))
+                    parameters = new[] { args.ArgsAll.Trim() };
                 if (parameters.Length < 1 || parameters.Length > (restore ? 1 : 2))
                     throw new InvalidOperationException(restore
                         ? "Usage: character_restore <backupFile>"
@@ -102,12 +137,8 @@ namespace valheimCLI
             CheckSegment(name);
             if (account != null) CheckSegment(account);
             Directory.CreateDirectory(Imports);
-            // Only the root and one account directory are supported. mmcli can link config files.
-            List<string> directories = new List<string> { Imports };
-            directories.AddRange(Directory.GetDirectories(Imports));
-            List<string> matches = directories
-                .Where(path => account == null || string.Equals(Path.GetFileName(path), account, StringComparison.Ordinal))
-                .SelectMany(path => Directory.GetFiles(path, "*.yaml"))
+            List<string> matches = GetImportFiles()
+                .Where(path => account == null || string.Equals(Path.GetFileName(Path.GetDirectoryName(path)), account, StringComparison.Ordinal))
                 .Where(path => string.Equals(Path.GetFileNameWithoutExtension(path), name, StringComparison.OrdinalIgnoreCase)).ToList();
             if (matches.Count == 0) throw new FileNotFoundException("No matching YAML file in " + Imports);
             if (matches.Count != 1)
