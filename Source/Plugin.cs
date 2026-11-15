@@ -59,6 +59,7 @@ namespace valheimCLI
             CreatureVisualCommands.Register();
             NavigationCommands.Register();
             EnvironmentCommands.Register();
+            BossBalanceCommands.Register(gameObject);
             StatusEffectCommands.Register();
             ConfigCommands.Register();
             ContainerInspectionCommands.Register();
