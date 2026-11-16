@@ -170,6 +170,13 @@ namespace valheimCLI
                     {
                         if (!stream.DataAvailable)
                         {
+                            // A socket the client closed reads as readable with nothing to read.
+                            // DataAvailable and Connected never notice it, so leave here, or the
+                            // handler thread and its socket stay open (CLOSE-WAIT) for the game's life.
+                            if (client.Client.Poll(0, SelectMode.SelectRead) && client.Client.Available == 0)
+                            {
+                                break;
+                            }
                             Thread.Sleep(50);
                             continue;
                         }
