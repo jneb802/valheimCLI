@@ -60,6 +60,7 @@ namespace valheimCLI
             NavigationCommands.Register();
             EnvironmentCommands.Register();
             BossBalanceCommands.Register(gameObject);
+            DamageLogCommands.Register();
             StatusEffectCommands.Register();
             ConfigCommands.Register();
             ContainerInspectionCommands.Register();
