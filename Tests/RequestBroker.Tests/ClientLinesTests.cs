@@ -10,7 +10,7 @@ using Xunit;
 
 namespace valheimCLI.Tests;
 
-/// <summary>#980: a connection's socket thread ends when its caller closes the connection.</summary>
+/// <summary>#980: a connection's socket thread ends when its caller closes the connection, or when the server stops.</summary>
 public sealed class ClientLinesTests
 {
     [Fact]
@@ -23,25 +23,24 @@ public sealed class ClientLinesTests
         listener.Start();
         int port = ((IPEndPoint)listener.LocalEndpoint).Port;
         var threads = new List<Thread>();
-        bool running = true;
+        var accepted = new List<TcpClient>();
         try
         {
             for (int i = 0; i < Commands; i++)
             {
-                using (TcpClient caller = new TcpClient())
-                {
-                    caller.Connect(IPAddress.Loopback, port);
-                    TcpClient accepted = listener.AcceptTcpClient();
-                    Thread thread = new Thread(() => Serve(accepted, () => Volatile.Read(ref running))) { IsBackground = true };
-                    thread.Start();
-                    threads.Add(thread);
+                using TcpClient caller = new TcpClient();
+                caller.Connect(IPAddress.Loopback, port);
+                TcpClient client = listener.AcceptTcpClient();
+                accepted.Add(client);
+                Thread thread = new Thread(() => Serve(client, () => true)) { IsBackground = true };
+                thread.Start();
+                threads.Add(thread);
 
-                    NetworkStream stream = caller.GetStream();
-                    var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
-                    var reader = new StreamReader(stream, new UTF8Encoding(false));
-                    writer.WriteLine("PING");
-                    Assert.Equal("PONG", reader.ReadLine());
-                }
+                NetworkStream stream = caller.GetStream();
+                var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
+                var reader = new StreamReader(stream, new UTF8Encoding(false));
+                writer.WriteLine("PING");
+                Assert.Equal("PONG", reader.ReadLine());
             }
 
             // The server keeps running: only the callers' close may end the threads.
@@ -50,12 +49,12 @@ public sealed class ClientLinesTests
         }
         finally
         {
-            Volatile.Write(ref running, false);
+            foreach (TcpClient client in accepted) client.Close();
         }
     }
 
     [Fact]
-    public void AnOpenIdleConnectionWaitsAndStopsWithTheServer()
+    public void SeveralLinesInOneWriteAreEachRead()
     {
         using TcpListener listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -63,63 +62,52 @@ public sealed class ClientLinesTests
         using TcpClient caller = new TcpClient();
         caller.Connect(IPAddress.Loopback, port);
         using TcpClient accepted = listener.AcceptTcpClient();
-        using NetworkStream stream = accepted.GetStream();
-        using var reader = new StreamReader(stream, new UTF8Encoding(false));
-        int polls = 0;
-        var lines = new ClientLines(accepted, stream, reader, _ => polls++);
+        byte[] bytes = Encoding.UTF8.GetBytes("CMD:a\nCMD:b\n");
+        caller.GetStream().Write(bytes, 0, bytes.Length);
+        caller.Close();
+        using var reader = new StreamReader(accepted.GetStream(), new UTF8Encoding(false));
+        var lines = new ClientLines(reader);
 
-        // Still connected and silent: Next keeps polling until the server stops.
-        Assert.Null(lines.Next(() => polls < 5));
-        Assert.Equal(5, polls);
+        Assert.Equal("CMD:a", lines.Next(() => true));
+        Assert.Equal("CMD:b", lines.Next(() => true));
+        Assert.Null(lines.Next(() => true));
     }
 
     [Fact]
-    public void ALineSentBeforeTheCallerClosesIsStillRead()
+    public void ABlockedReadEndsWhenTheServerClosesTheConnection()
     {
+        // Stop() closes every client; an idle caller's thread must end then too.
         using TcpListener listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
         int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        using TcpClient accepted = Accept(listener, port, caller =>
-        {
-            byte[] bytes = Encoding.UTF8.GetBytes("CMD:help\n");
-            caller.GetStream().Write(bytes, 0, bytes.Length);
-        });
-        using NetworkStream stream = accepted.GetStream();
-        using var reader = new StreamReader(stream, new UTF8Encoding(false));
-        var lines = new ClientLines(accepted, stream, reader, Thread.Sleep);
-
-        Assert.True(SpinWait.SpinUntil(() => stream.DataAvailable, TimeSpan.FromSeconds(2)));
-        Assert.Equal("CMD:help", lines.Next(() => true));
-        // The caller has closed: Next ends on that, well before this bound would stop it.
-        var clock = System.Diagnostics.Stopwatch.StartNew();
-        Assert.Null(lines.Next(() => clock.Elapsed < TimeSpan.FromSeconds(5)));
-        Assert.True(clock.Elapsed < TimeSpan.FromSeconds(4), $"Next waited {clock.Elapsed.TotalSeconds:F1} s after the caller closed");
-    }
-
-    private static TcpClient Accept(TcpListener listener, int port, Action<TcpClient> send)
-    {
         using TcpClient caller = new TcpClient();
         caller.Connect(IPAddress.Loopback, port);
         TcpClient accepted = listener.AcceptTcpClient();
-        send(caller);
-        return accepted;
+        bool running = true;
+        string? result = "unset";
+        var reader = new StreamReader(accepted.GetStream(), new UTF8Encoding(false));
+        Thread thread = new Thread(() => result = new ClientLines(reader).Next(() => Volatile.Read(ref running))) { IsBackground = true };
+        thread.Start();
+        Assert.False(thread.Join(TimeSpan.FromMilliseconds(200)), "an open, silent connection should keep its thread waiting");
+
+        Volatile.Write(ref running, false);
+        accepted.Close();
+        Assert.True(thread.Join(TimeSpan.FromSeconds(5)), "the read did not end when the server closed the connection");
+        Assert.Null(result);
     }
 
     private static void Serve(TcpClient client, Func<bool> running)
     {
-        using (client)
-        using (NetworkStream stream = client.GetStream())
-        using (var reader = new StreamReader(stream, new UTF8Encoding(false)))
-        using (var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true })
+        using NetworkStream stream = client.GetStream();
+        using var reader = new StreamReader(stream, new UTF8Encoding(false));
+        using var writer = new StreamWriter(stream, new UTF8Encoding(false)) { AutoFlush = true };
+        var lines = new ClientLines(reader);
+        try
         {
-            var lines = new ClientLines(client, stream, reader);
-            try
-            {
-                string? line;
-                while ((line = lines.Next(running)) != null)
-                    if (line == "PING") writer.WriteLine("PONG");
-            }
-            catch (IOException) { }
+            string? line;
+            while ((line = lines.Next(running)) != null)
+                if (line == "PING") writer.WriteLine("PONG");
         }
+        catch (IOException) { }
     }
 }

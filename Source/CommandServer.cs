@@ -194,7 +194,7 @@ namespace valheimCLI
                 // greeting line and ignore lines that are not OUTPUT: or state changes.
                 writer.WriteLine("VALHEIM_CLI_CAPS completion");
 
-                ClientLines lines = new ClientLines(client, stream, reader);
+                ClientLines lines = new ClientLines(reader);
                 while (true)
                 {
                     try
