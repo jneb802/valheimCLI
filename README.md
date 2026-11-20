@@ -117,6 +117,48 @@ valheim-cli cli_capture E-side 347.5 57.5 -522.5 331.1 51.5 -515.6  # pose, wait
 valheim-cli cli_save 120                       # save the world, answer when the save has completed
 ```
 
+## Cinematic Camera Moves
+
+One command starts a smooth free-fly camera move; the game then advances it
+every frame (after its own free-fly input, so the mouse does not fight it),
+with sine ease in/out at both ends. The command answers at once; poll
+`cli_camera_status`. When a move ends the camera stays at its final pose in
+free-fly; `cli_freefly_release` returns it to the player (and stops a running
+move, as `cli_freefly_pose` does). Turning free-fly off ends the move.
+
+```bash
+# Arc around what the camera centre looks at now (the ground it hits): frame a
+# centre shot by hand or with cli_freefly_pose, then swing 20 degrees left,
+# 40 right and back to the centre over 30 s.
+valheim-cli cli_camera_arc 20 30 --swing
+# A wide 90-degree arc around a given point, from the current camera's radius,
+# height and bearing; positive degrees move the camera to its right.
+valheim-cli cli_camera_arc 90 40 5136 66 -5408
+# The same with an explicit start: 120 m out, 45 m up, starting south (bearing 180).
+valheim-cli cli_camera_arc -60 30 5136 66 -5408 --radius 120 --height 45 --start 180
+# Fly over a road at constant speed, looking 25 degrees down along the heading.
+valheim-cli cli_camera_path 40 5000,95,-5380 5080,92,-5400 5160,90,-5420 5240,95,-5400 --pitch 25
+# Fly past a point, always looking at it; start from where the camera is.
+valheim-cli cli_camera_path 20 5200,90,-5450 --from-here --look 5136,66,-5408
+valheim-cli cli_camera_status    # OK: camera path running 7.5/20.0s (38%) pos=... yaw=... pitch=...
+valheim-cli cli_camera_stop      # stop where it is
+valheim-cli cli_hud hide         # Ctrl+F3: the HUD, crosshair and hover text go; cli_hud show brings them back
+```
+
+- `cli_camera_arc <degrees> <seconds> [x y z] [--radius m] [--height m] [--start bearing] [--distance m] [--swing] [--linear]`:
+  without `x y z` the focus is the first ground, rock or piece the camera
+  centre hits (or the point `--distance m` ahead). Radius (horizontal),
+  height (above the focus) and start bearing (compass, from the focus to the
+  camera) come from the current camera unless given. `--swing` goes out by
+  `-degrees`, across to `+degrees` and back, at rest at each turn.
+- `cli_camera_path <seconds> <x,y,z[@lx,ly,lz]>... [--look x,y,z] [--pitch deg] [--ahead m] [--from-here] [--linear]`:
+  a centripetal Catmull-Rom curve through the waypoints, walked at constant
+  speed. The camera looks along the path at a point `--ahead` m on it
+  (default 8), or at per-waypoint `@` look points (on every waypoint),
+  one fixed `--look` target, or the path's heading at a fixed `--pitch`
+  (positive looks down).
+- `cli_camera_stop`, `cli_camera_status`, `cli_hud [hide|show|toggle]`.
+
 ## Know What You Are Testing
 
 `cli_manifest` lists every loaded plugin with the md5 of its DLL, `cli_world`

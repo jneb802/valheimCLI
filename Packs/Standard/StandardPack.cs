@@ -21,10 +21,12 @@ namespace valheimCLI
                 // Without the patch cli_set_player_safety reports ghostReplicated=False.
                 try { GhostReplication.Patch(); }
                 catch (Exception ex) { GhostReplication.Unpatch(); valheimCLIPlugin.Log.LogError("Ghost mode is not replicated to other peers: " + ex); }
+                try { CinematicCamera.Patch(); }
+                catch (Exception ex) { CinematicCamera.Unpatch(); valheimCLIPlugin.Log.LogError("Camera moves are unavailable: " + ex); }
                 valheimCLIPlugin.Log.LogInfo("Standard commands ready; owner=" + _own.Owner.Instance);
             }
             catch { Dispose(); throw; }
         }
-        public void Dispose() { GhostReplication.Unpatch(); TestTeleportTiming.Set(false, out _); _own?.Dispose(); _session?.Dispose(); }
+        public void Dispose() { CinematicCamera.Unpatch(); GhostReplication.Unpatch(); TestTeleportTiming.Set(false, out _); _own?.Dispose(); _session?.Dispose(); }
     }
 }

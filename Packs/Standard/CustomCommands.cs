@@ -28,6 +28,7 @@ namespace valheimCLI
             BuildCommands.Register();
             CartCommands.Register();
             AsyncCommands.Register();
+            CinematicCamera.Register();
             new Terminal.ConsoleCommand("cli_create_character", "Create and select a local character: cli_create_character <name> [--replace] [--local] [--skip-intro]. --skip-intro saves it as already spawned once, so it lands at the start without the valkyrie intro", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 if (args.Length < 2)
@@ -478,6 +479,7 @@ namespace valheimCLI
                     return;
                 }
 
+                CinematicCamera.StopForManualPose();
                 FreeFlyPose(new Vector3(camX, camY, camZ), new Vector3(lookX, lookY, lookZ), args.Context.AddString);
             }, isCheat: true);
 
@@ -490,6 +492,7 @@ namespace valheimCLI
                     return;
                 }
 
+                CinematicCamera.StopForManualPose();
                 if (camera.m_freeFly)
                 {
                     camera.ToggleFreeFly();
