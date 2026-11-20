@@ -33,6 +33,8 @@ namespace valheimCLI
 
         private readonly List<string> _capturedOutput = new();
         private bool _capturingOutput;
+        // True while ExecuteCommand runs a caller's command: its console lines go to that caller only (#981).
+        private bool _runningForCaller;
 
         public Extensions.ExtensionRegistry? Extensions { get; private set; }
         public Extensions.ConsoleModuleHost Modules { get; private set; } = null!;
@@ -215,6 +217,9 @@ namespace valheimCLI
                 lines.Add("Error: Console not available (game not fully loaded)");
                 return lines;
             }
+            // A caller's command (cli_until) can run this inside ExecuteCommand: keep that command's capture as it was.
+            List<string> outer = new List<string>(_capturedOutput);
+            bool outerCapturing = _capturingOutput;
             _capturedOutput.Clear();
             _capturingOutput = true;
             try
@@ -224,8 +229,9 @@ namespace valheimCLI
             }
             finally
             {
-                _capturingOutput = false;
+                _capturingOutput = outerCapturing;
                 _capturedOutput.Clear();
+                _capturedOutput.AddRange(outer);
             }
             return lines;
         }
@@ -240,6 +246,7 @@ namespace valheimCLI
 
             _capturedOutput.Clear();
             _capturingOutput = true;
+            _runningForCaller = true;
 
             try
             {
@@ -262,18 +269,28 @@ namespace valheimCLI
                     _commandServer?.SendOutput($"Executed: {command}");
                 }
             }
+            catch
+            {
+                // Lines written before the failure still reach the caller: they no longer show in game.
+                foreach (string line in _capturedOutput) _commandServer?.SendOutput(line);
+                throw;
+            }
             finally
             {
                 _capturingOutput = false;
+                _runningForCaller = false;
             }
         }
 
-        public void CaptureOutput(string text)
+        /// <summary>
+        /// Keeps the line while a command is capturing. True when it was kept for a caller's command (ExecuteCommand), whose
+        /// lines stay out of the player's console; a player-typed command that captures (cli_until's polls) still shows them.
+        /// </summary>
+        public bool CaptureOutput(string text)
         {
-            if (_capturingOutput)
-            {
-                _capturedOutput.Add(text);
-            }
+            if (!_capturingOutput) return false;
+            _capturedOutput.Add(text);
+            return _runningForCaller;
         }
 
         public static valheimCLIPlugin? Instance { get; private set; }
@@ -404,13 +421,16 @@ namespace valheimCLI
         public void Complete() => _broker.Complete(Id);
     }
 
-    // Harmony patch to capture console output
+    // Harmony patch to capture console output. A line a caller's command writes to the console goes back to
+    // that caller only, not into the player's console as well (#981); a player-typed command's output, and
+    // anything another terminal writes, shows as before.
     [HarmonyPatch(typeof(Terminal), nameof(Terminal.AddString), new Type[] { typeof(string) })]
     public static class Terminal_AddString_Patch
     {
-        public static void Postfix(string text)
+        public static bool Prefix(Terminal __instance, string text)
         {
-            valheimCLIPlugin.Instance?.CaptureOutput(text);
+            bool captured = valheimCLIPlugin.Instance?.CaptureOutput(text) ?? false;
+            return HarnessConsole.ShowsInGame(captured, writtenToConsole: __instance != null && __instance == Console.instance);
         }
     }
 }
