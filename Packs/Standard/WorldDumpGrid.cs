@@ -45,7 +45,8 @@ namespace valheimCLI
         public const long MaximumSamples = 1000000;
 
         /// <summary>The one refusal text for a step <see cref="IsAllowedStep"/> refuses.</summary>
-        public const string StepRule = "step must be 5..1000 metres, or 1..1000 metres with --window";
+        public static readonly string StepRule = string.Format(CultureInfo.InvariantCulture,
+            "step must be {0}..{2} metres, or {1}..{2} metres with --window", MinimumWholeMapStep, MinimumStep, MaximumStep);
 
         /// <summary>Whether a dump may use this step; 1 m to 4 m need a window.</summary>
         public static bool IsAllowedStep(int step, bool windowed) =>
@@ -117,10 +118,10 @@ namespace valheimCLI
 
         // The exporter runs on the game thread: refuse accidentally huge work
         // before creating files. Use a window for fine-grained samples.
-        internal static bool TrySampleCount(int xFrom, int xTo, int zFrom, int zTo, int step, out long count)
+        internal static bool TrySampleCount(int xFrom, int xTo, int zFrom, int zTo, int step, bool windowed, out long count)
         {
             count = 0;
-            if (step < MinimumStep || step > MaximumStep || xTo < xFrom || zTo < zFrom)
+            if (!IsAllowedStep(step, windowed) || xTo < xFrom || zTo < zFrom)
             {
                 return false;
             }

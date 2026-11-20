@@ -2100,10 +2100,10 @@ namespace valheimCLI
                 addOutput("ERROR: GENERATOR_AT no world loaded");
                 return;
             }
-            HeightmapBlend? blend = HeightmapBlend.Create(world);
+            HeightmapBlend? blend = HeightmapBlend.Create(world, out string blendError);
             if (blend == null)
             {
-                addOutput("ERROR: GENERATOR_AT no zone heightmap prefab loaded");
+                addOutput("ERROR: GENERATOR_AT blended_height unavailable: " + blendError);
                 return;
             }
             foreach (float[] point in points)
@@ -2171,15 +2171,15 @@ namespace valheimCLI
                 return;
             }
 
-            if (!WorldDumpGrid.TrySampleCount(ixFrom, ixTo, izFrom, izTo, step, out long expectedSamples))
+            if (!WorldDumpGrid.TrySampleCount(ixFrom, ixTo, izFrom, izTo, step, windowed, out long expectedSamples))
             {
                 addOutput(FormattableString.Invariant($"ERROR: WORLD_DUMP exceeds {WorldDumpGrid.MaximumSamples} samples; use --window or a larger step"));
                 return;
             }
-            HeightmapBlend? blend = HeightmapBlend.Create(world);
+            HeightmapBlend? blend = HeightmapBlend.Create(world, out string blendError);
             if (blend == null)
             {
-                addOutput("ERROR: WORLD_DUMP no zone heightmap prefab loaded");
+                addOutput("ERROR: WORLD_DUMP blended_height unavailable: " + blendError);
                 return;
             }
             string dir = string.IsNullOrWhiteSpace(directory) ? BuildWorldDumpDirectory() : directory!;

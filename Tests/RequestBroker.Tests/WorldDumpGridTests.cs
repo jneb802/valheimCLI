@@ -109,12 +109,16 @@ public class WorldDumpGridTests
     {
         // The issue's example: a 120 x 120 m window over a dungeon's footprint.
         int from = WorldDumpGrid.From(940f, 1), to = WorldDumpGrid.To(1060f, 1);
-        Assert.True(WorldDumpGrid.TrySampleCount(from, to, from, to, 1, out long count));
+        Assert.True(WorldDumpGrid.TrySampleCount(from, to, from, to, 1, true, out long count));
         Assert.Equal(121L * 121L, count);
 
         // A 1,201 m square at 1 m is 1,442,401 samples: over the cap, refused before any file.
         int wideFrom = WorldDumpGrid.From(400f, 1), wideTo = WorldDumpGrid.To(1600f, 1);
-        Assert.False(WorldDumpGrid.TrySampleCount(wideFrom, wideTo, wideFrom, wideTo, 1, out _));
+        Assert.False(WorldDumpGrid.TrySampleCount(wideFrom, wideTo, wideFrom, wideTo, 1, true, out _));
+
+        // The same small extent without a window is refused: 1..4 m are for windows only.
+        Assert.False(WorldDumpGrid.TrySampleCount(from, to, from, to, 1, false, out _));
+        Assert.Equal("step must be 5..1000 metres, or 1..1000 metres with --window", WorldDumpGrid.StepRule);
     }
 
     [Theory]
