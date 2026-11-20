@@ -606,33 +606,41 @@ namespace valheimCLI
         Stopped,
         /// <summary>It threw; the view is given back rather than left on a broken pose.</summary>
         Failed,
-        /// <summary>A manual pose (cli_freefly_pose, cli_capture) took the camera over: it wants free-fly.</summary>
+        /// <summary>A manual pose (cli_freefly_pose, cli_capture, cli_freefly_release) took the camera over: it decides the view.</summary>
         ManualPose,
-        /// <summary>A new move replaced it and keeps free-fly.</summary>
-        Replaced,
-        /// <summary>Free-fly was turned off under it, or a logout save ended it: nothing to give back.</summary>
+        /// <summary>Free-fly was turned off under it: the view is already the player's.</summary>
         Interrupted
     }
 
-    /// <summary>How a camera move leaves the view.</summary>
+    /// <summary>What the end of a move does with the view.</summary>
+    public enum CameraViewEnd
+    {
+        /// <summary>Nothing: whoever ended the move decides the view.</summary>
+        Leave,
+        /// <summary>--stay: the camera keeps its last pose in free-fly.</summary>
+        Stay,
+        /// <summary>Free-fly off and the camera back on the player, as cli_freefly_release does.</summary>
+        ReturnToPlayer
+    }
+
+    /// <summary>How a camera move leaves the view: the one owner of that choice.</summary>
     public static class CameraMoveEnding
     {
         /// <summary>
-        /// Whether the move ends by turning free-fly off and returning the camera to the player (as
-        /// cli_freefly_release does): yes when it finished, was stopped or failed, unless --stay
-        /// (the move's, or cli_camera_stop's) keeps the last pose. Whether free-fly was already on
-        /// before the move does not matter: the view still goes back to the player.
+        /// A move that finished, was stopped or failed returns the camera to the player, unless
+        /// --stay (the move's, or cli_camera_stop's) keeps the last pose. Whether free-fly was
+        /// already on before the move does not matter: the view still goes back to the player.
         /// </summary>
-        public static bool ReturnsToPlayer(CameraMoveEnd end, bool stay)
+        public static CameraViewEnd View(CameraMoveEnd end, bool stay)
         {
             switch (end)
             {
                 case CameraMoveEnd.Finished:
                 case CameraMoveEnd.Stopped:
                 case CameraMoveEnd.Failed:
-                    return !stay;
+                    return stay ? CameraViewEnd.Stay : CameraViewEnd.ReturnToPlayer;
                 default:
-                    return false;
+                    return CameraViewEnd.Leave;
             }
         }
     }

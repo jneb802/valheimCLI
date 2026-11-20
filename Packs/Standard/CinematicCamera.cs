@@ -24,6 +24,10 @@ namespace valheimCLI
         private static Harmony? _harmony;
         private static Move? _move;
         private static PlayerCarry? _carry;
+        /// <summary>A finished move owes the player its view once the carried player has landed.</summary>
+        private static bool _viewPending;
+        /// <summary>The free-fly smoothness before the first move took the camera (moves set it to 0).</summary>
+        private static float? _smoothBefore;
         private static string _last = "idle";
 
         private sealed class Move
@@ -127,9 +131,8 @@ namespace valheimCLI
 
                 if (_move == null)
                 {
-                    // Same default with nothing running: a free-fly camera left over goes back to the player.
-                    string view = GameCamera.instance != null && GameCamera.instance.m_freeFly ? LeaveView(GameCamera.instance, CameraMoveEnd.Stopped, request.Stay) : string.Empty;
-                    args.Context.AddString("OK: no camera move running" + view + "; last=" + _last);
+                    // Nothing to end: a camera framed by hand stays as it is.
+                    args.Context.AddString("OK: no camera move running; last=" + _last);
                     return;
                 }
 
@@ -165,6 +168,8 @@ namespace valheimCLI
                 if (camera == null || !camera.m_freeFly)
                 {
                     Finish("interrupted (free-fly off)", CameraMoveEnd.Interrupted, stay: false);
+                    if (_smoothBefore.HasValue && camera != null) camera.SetFreeFlySmoothness(_smoothBefore.Value);
+                    _smoothBefore = null;
                 }
             }
 
@@ -177,6 +182,7 @@ namespace valheimCLI
                     {
                         _carry = null;
                         _last += "; player back";
+                        if (_viewPending && _move == null) _last += ReturnView(GameCamera.instance);
                     }
                 }
                 catch (Exception ex)
@@ -185,6 +191,7 @@ namespace valheimCLI
                     _carry?.ForceRestore();
                     _carry = null;
                     _last += "; player return FAILED (flags restored where it is): " + ex.Message;
+                    if (_viewPending && _move == null) _last += ReturnView(GameCamera.instance);
                 }
             }
         }
@@ -426,6 +433,8 @@ namespace valheimCLI
             if (options.NoSpawn) SpawnPause.Hold();
             else SpawnPause.Release();
             if (options.Clean.HasValue) move.Cleaned.Add(ShotCleaner.Clean(move.Near, options.Clean.Value, all: false, corpses: true));
+            if (!_smoothBefore.HasValue) _smoothBefore = camera.GetFreeFlySmoothness();
+            _viewPending = false;
             TakeFreeFly(camera);
             _move = move;
             Apply(camera, move, 0);
@@ -544,11 +553,41 @@ namespace valheimCLI
             valheimCLIPlugin.Log.LogInfo("Camera " + _last);
         }
 
-        /// <summary>Turns free-fly off and returns the camera to the player, as cli_freefly_release does, unless the end keeps the pose.</summary>
+        /// <summary>
+        /// Leaves the view as <see cref="CameraMoveEnding.View"/> says. A return to the player waits
+        /// while the carried player is still on its way back (a distant teleport), so the view does
+        /// not jump to where the player still hangs at the camera's end; Tick gives it back on landing.
+        /// </summary>
         private static string LeaveView(GameCamera? camera, CameraMoveEnd end, bool stay)
         {
-            if (camera == null || end == CameraMoveEnd.ManualPose || end == CameraMoveEnd.Replaced || end == CameraMoveEnd.Interrupted) return string.Empty;
-            if (!CameraMoveEnding.ReturnsToPlayer(end, stay)) return "; camera stays in free-fly (--stay)";
+            switch (CameraMoveEnding.View(end, stay))
+            {
+                case CameraViewEnd.Leave:
+                    return string.Empty;
+                case CameraViewEnd.Stay:
+                    return "; camera stays in free-fly (--stay)";
+            }
+
+            if (_carry != null && _carry.Returning)
+            {
+                _viewPending = true;
+                return "; camera returns to the player once it has landed";
+            }
+
+            return ReturnView(camera);
+        }
+
+        /// <summary>Free-fly off (as cli_freefly_release does) and the free-fly smoothness the moves set to 0 put back.</summary>
+        private static string ReturnView(GameCamera? camera)
+        {
+            _viewPending = false;
+            if (camera == null) return string.Empty;
+            if (_smoothBefore.HasValue)
+            {
+                camera.SetFreeFlySmoothness(_smoothBefore.Value);
+                _smoothBefore = null;
+            }
+
             if (camera.m_freeFly) camera.ToggleFreeFly();
             return "; freefly off, camera returned to the player";
         }

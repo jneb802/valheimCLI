@@ -582,20 +582,21 @@ public class CameraMotionTests
     }
 
     [Theory]
-    [InlineData(CameraMoveEnd.Finished, false, true)]
-    [InlineData(CameraMoveEnd.Finished, true, false)]
-    [InlineData(CameraMoveEnd.Stopped, false, true)]
-    [InlineData(CameraMoveEnd.Stopped, true, false)]
-    [InlineData(CameraMoveEnd.Failed, false, true)]
-    [InlineData(CameraMoveEnd.Failed, true, false)]
-    // A manual pose (cli_freefly_pose, cli_capture) wants free-fly; a replacing move keeps it;
-    // free-fly turned off under the move or a logout save leaves nothing to give back.
-    [InlineData(CameraMoveEnd.ManualPose, false, false)]
-    [InlineData(CameraMoveEnd.Replaced, false, false)]
-    [InlineData(CameraMoveEnd.Interrupted, false, false)]
-    public void MovesEndByReturningTheViewToThePlayerUnlessTheyStay(CameraMoveEnd end, bool stay, bool returns)
+    [InlineData(CameraMoveEnd.Finished, false, CameraViewEnd.ReturnToPlayer)]
+    [InlineData(CameraMoveEnd.Finished, true, CameraViewEnd.Stay)]
+    [InlineData(CameraMoveEnd.Stopped, false, CameraViewEnd.ReturnToPlayer)]
+    [InlineData(CameraMoveEnd.Stopped, true, CameraViewEnd.Stay)]
+    [InlineData(CameraMoveEnd.Failed, false, CameraViewEnd.ReturnToPlayer)]
+    [InlineData(CameraMoveEnd.Failed, true, CameraViewEnd.Stay)]
+    // A manual pose (cli_freefly_pose, cli_capture, cli_freefly_release) decides the view itself,
+    // and free-fly turned off under the move leaves the view on the player already.
+    [InlineData(CameraMoveEnd.ManualPose, false, CameraViewEnd.Leave)]
+    [InlineData(CameraMoveEnd.ManualPose, true, CameraViewEnd.Leave)]
+    [InlineData(CameraMoveEnd.Interrupted, false, CameraViewEnd.Leave)]
+    [InlineData(CameraMoveEnd.Interrupted, true, CameraViewEnd.Leave)]
+    public void MovesEndByReturningTheViewToThePlayerUnlessTheyStay(CameraMoveEnd end, bool stay, CameraViewEnd expected)
     {
-        Assert.Equal(returns, CameraMoveEnding.ReturnsToPlayer(end, stay));
+        Assert.Equal(expected, CameraMoveEnding.View(end, stay));
     }
 
     private static string[] Args(string line) => line.Split(' ', StringSplitOptions.RemoveEmptyEntries);

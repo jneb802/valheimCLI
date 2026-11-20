@@ -124,7 +124,7 @@ every frame (after its own free-fly input, so the mouse does not fight it),
 with sine ease in/out at both ends. The command answers at once; poll
 `cli_camera_status`. When a move finishes (or is stopped) a carried player is
 set back first, then free-fly goes off and the camera returns to the player where it now stands, as `cli_freefly_release` does. That holds even when free-fly was already on before the move (a shot framed by hand); `--stay` keeps the last pose in free-fly for chaining shots.
-`cli_freefly_release`, `cli_freefly_pose` and `cli_capture` stop a running move (a pose or capture keeps free-fly). Turning free-fly off ends the move.
+`cli_freefly_release`, `cli_freefly_pose` and `cli_capture` stop a running move and decide the view themselves (a pose or capture keeps free-fly). Turning free-fly off ends the move. After a long carried path whose start had unloaded, the view returns once the player has landed. `cli_camera_stop` with no move running changes nothing. The free-fly smoothness the moves set to 0 is put back when the view returns.
 
 ```bash
 # Arc around what the camera centre looks at now (the ground it hits): frame a
@@ -154,7 +154,7 @@ valheim-cli cli_camera_path 40 5000,95,-5380 5080,92,-5400 5160,90,-5420 5240,95
 valheim-cli cli_camera_path 20 5200,90,-5450 --from-here --look 5136,66,-5408 --no-carry
 # End next to the next shot: put the player on the ground under the camera's end.
 valheim-cli cli_camera_path 30 5240,95,-5400 5320,92,-5380 --pitch 20 --carry end
-valheim-cli cli_camera_status    # OK: camera path running 7.5/20.0s (38%) pos=... carry=start clean=40m nospawn=on cleaned creatures=1 ... player=carried ...
+valheim-cli cli_camera_status    # OK: camera path running 7.5/20.0s (38%) pos=... carry=start clean=40m nospawn=on end=player cleaned creatures=1 ... player=carried ...
 valheim-cli cli_camera_stop      # stop: a carried player is put back, the view returns to the player
 valheim-cli cli_camera_stop --stay  # stop and keep the camera where it is, in free-fly
 valheim-cli cli_camera_clean 80  # one-off: hostile creatures, drops and corpses within 80 m of the camera
@@ -219,6 +219,14 @@ valheim-cli cli_hud hide         # Ctrl+F3: the HUD, crosshair and hover text go
     spawner structures) and restores it after. It is this game's flag: on a
     game it hosts it pauses every spawner, on a client joined to a server
     only the spawners of the zones that client owns.
+- `cli_destroy_prefabs_at <x> <y> <z> <pattern[,pattern...]> [radius=15]`: clear
+  objects out of a shot (trees, rocks) around any loaded point without moving
+  the player: what `cli_destroy_nearby_prefabs` does (prefab names containing
+  a pattern, players kept, radius 0.5..60 m, ownership claimed so the destroy
+  reaches every peer), with several patterns per call and counts per pattern
+  (`OK: DESTROYED at=... radius=... total=5 counts=Beech:3,Pine:2`). The
+  sphere must lie in zones this game has loaded, else nothing is destroyed
+  and the error names the zone. `y` matters: the sphere is centred there.
 - `cli_camera_clean [radius] [x y z] [--all]`: one-off clean within `radius`
   (default 60) of `x y z` or the camera. `--all` also removes creatures that
   are not hostile (deer); tamed creatures, bosses and players always stay.

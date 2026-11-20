@@ -327,7 +327,18 @@ namespace valheimCLI
                     float.TryParse(args[2], out destroyRadius);
                 }
 
-                DestroyNearbyPrefabs(args[1], Mathf.Clamp(destroyRadius, 0.5f, 60f), args.Context.AddString);
+                DestroyNearbyPrefabs(args[1], DestroyAtRequest.ClampRadius(destroyRadius), args.Context.AddString);
+            }, isCheat: true);
+
+            new Terminal.ConsoleCommand("cli_destroy_prefabs_at", "Destroy net objects around a loaded point (the player stays where it is) whose prefab name contains any of the patterns: cli_destroy_prefabs_at <x> <y> <z> <pattern[,pattern...]> [radius=15]. Counts are reported per pattern; an area that is not loaded is refused", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            {
+                if (!DestroyAtRequest.TryParse(args.Args, out DestroyAtRequest request, out string error))
+                {
+                    args.Context.AddString(error);
+                    return;
+                }
+
+                DestroyPrefabsAt(request, args.Context.AddString);
             }, isCheat: true);
 
             new Terminal.ConsoleCommand("cli_destroy_nearby_characters", "Destroy nearby non-player characters by prefab/name: cli_destroy_nearby_characters <name|*> [radius]", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
@@ -1900,8 +1911,52 @@ namespace valheimCLI
                 return;
             }
 
-            Collider[] colliders = Physics.OverlapSphere(player.transform.position, radius);
-            HashSet<ZNetView> targets = new HashSet<ZNetView>();
+            int[] counts = DestroyPrefabsAround(player.transform.position, new[] { pattern }, radius);
+            addOutput($"OK: DESTROYED pattern={pattern} radius={radius:F1} count={counts[0]}");
+        }
+
+        /// <summary>
+        /// cli_destroy_prefabs_at: what cli_destroy_nearby_prefabs does, around any loaded point
+        /// instead of the player, with several patterns at once. Refuses a sphere that reaches into a
+        /// zone whose objects are not all loaded, since what is not loaded cannot be found.
+        /// </summary>
+        public static void DestroyPrefabsAt(DestroyAtRequest request, Action<string> addOutput)
+        {
+            if (ZNetScene.instance == null || ZoneSystem.instance == null)
+            {
+                addOutput("ERROR: ZNetScene is not ready");
+                return;
+            }
+
+            Vector3 centre = new Vector3(request.X, request.Y, request.Z);
+            float r = request.Radius;
+            foreach (Vector3 probe in new[] { centre, centre + new Vector3(r, 0, 0), centre - new Vector3(r, 0, 0), centre + new Vector3(0, 0, r), centre - new Vector3(0, 0, r) })
+            {
+                if (!ZNetScene.instance.IsAreaReady(probe))
+                {
+                    addOutput(string.Format(CultureInfo.InvariantCulture,
+                        "ERROR: the area at {0:F1},{1:F1},{2:F1} (radius {3:F1}) is not loaded here (zone {4}); nothing destroyed. Load it first (it must be within this game's loaded zones)",
+                        centre.x, centre.y, centre.z, r, ZoneSystem.GetZone(probe)));
+                    return;
+                }
+            }
+
+            int[] counts = DestroyPrefabsAround(centre, request.Patterns, r);
+            int total = 0;
+            foreach (int c in counts) total += c;
+            addOutput(string.Format(CultureInfo.InvariantCulture, "OK: DESTROYED at={0:F1},{1:F1},{2:F1} radius={3:F1} total={4} counts={5}",
+                centre.x, centre.y, centre.z, r, total, PrefabPatterns.FormatCounts(request.Patterns, counts)));
+        }
+
+        /// <summary>
+        /// The one owner of destroying net objects by prefab-name pattern within a sphere: players
+        /// excluded, each object once (counted to its first matching pattern), ownership claimed so
+        /// the destroy reaches every peer.
+        /// </summary>
+        private static int[] DestroyPrefabsAround(Vector3 centre, IReadOnlyList<string> patterns, float radius)
+        {
+            Collider[] colliders = Physics.OverlapSphere(centre, radius);
+            Dictionary<ZNetView, int> targets = new Dictionary<ZNetView, int>();
             foreach (Collider collider in colliders)
             {
                 if (collider.GetComponentInParent<Player>() != null)
@@ -1910,28 +1965,29 @@ namespace valheimCLI
                 }
 
                 ZNetView view = collider.GetComponentInParent<ZNetView>();
-                if (view == null || !view.IsValid())
+                if (view == null || !view.IsValid() || targets.ContainsKey(view))
                 {
                     continue;
                 }
 
-                if (CleanPrefabName(view.gameObject.name).IndexOf(pattern, StringComparison.OrdinalIgnoreCase) < 0)
+                int match = PrefabPatterns.Match(CleanPrefabName(view.gameObject.name), patterns);
+                if (match < 0)
                 {
                     continue;
                 }
 
-                targets.Add(view);
+                targets.Add(view, match);
             }
 
-            int destroyed = 0;
-            foreach (ZNetView view in targets)
+            int[] counts = new int[patterns.Count];
+            foreach (KeyValuePair<ZNetView, int> target in targets)
             {
-                view.ClaimOwnership();
-                ZNetScene.instance.Destroy(view.gameObject);
-                destroyed++;
+                target.Key.ClaimOwnership();
+                ZNetScene.instance.Destroy(target.Key.gameObject);
+                counts[target.Value]++;
             }
 
-            addOutput($"OK: DESTROYED pattern={pattern} radius={radius:F1} count={destroyed}");
+            return counts;
         }
 
         public static void DestroyNearbyCharacters(string requestedName, float radius, Action<string> addOutput)

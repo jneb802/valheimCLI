@@ -70,6 +70,7 @@
     <Compile Include="../../Packs/Standard/WorldDumpGrid.cs" Link="Source/WorldDumpGrid.cs" />
     <Compile Include="../../Packs/Standard/GeneratorPointRequest.cs" Link="Source/GeneratorPointRequest.cs" />
     <Compile Include="../../Packs/Standard/CameraMotion.cs" Link="Source/CameraMotion.cs" />
+    <Compile Include="../../Packs/Standard/DestroyAtRequest.cs" Link="Source/DestroyAtRequest.cs" />
   </ItemGroup>
 
   <ItemGroup>
