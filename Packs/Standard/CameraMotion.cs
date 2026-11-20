@@ -480,7 +480,7 @@ namespace valheimCLI
     /// </summary>
     public sealed class CameraMoveOptions
     {
-        public const string Usage = "[--carry [start|end]] [--no-carry] [--check [clearance m]] [--clean [radius m]] [--nospawn]";
+        public const string Usage = "[--carry [start|end]] [--no-carry] [--check [clearance m]] [--clean [radius m]] [--nospawn] [--stay]";
         public const double DefaultClearance = 1.0;
         public const double MaximumClearance = 20;
         public const double DefaultCleanRadius = 40;
@@ -513,6 +513,8 @@ namespace valheimCLI
         public double? Clean { get; private set; }
         /// <summary>Pause the game's natural spawning (SpawnSystem.m_nospawn) for the move.</summary>
         public bool NoSpawn { get; private set; }
+        /// <summary>Keep the last pose in free-fly when the move ends (for chaining shots); by default the move ends by returning the camera to the player.</summary>
+        public bool Stay { get; private set; }
 
         /// <summary>
         /// Parses the move option at <paramref name="i"/>, advancing past its value if it has one.
@@ -554,6 +556,9 @@ namespace valheimCLI
                     _noCarryGiven = true;
                     Carry = CameraCarry.Off;
                     return Parsed.Ok;
+                case "--stay":
+                    Stay = true;
+                    return Parsed.Ok;
                 case "--nospawn":
                     NoSpawn = true;
                     return Parsed.Ok;
@@ -588,7 +593,73 @@ namespace valheimCLI
             CameraCarry effective = carried ?? Carry;
             string carry = effective == CameraCarry.Off ? "off" : (effective == CameraCarry.End ? "end" : "start");
             string clean = Clean.HasValue ? Clean.Value.ToString("F0", CultureInfo.InvariantCulture) + "m" : "off";
-            return "carry=" + carry + " clean=" + clean + " nospawn=" + (NoSpawn ? "on" : "off");
+            return "carry=" + carry + " clean=" + clean + " nospawn=" + (NoSpawn ? "on" : "off") + " end=" + (Stay ? "stay" : "player");
+        }
+    }
+
+    /// <summary>Why a camera move ended.</summary>
+    public enum CameraMoveEnd
+    {
+        /// <summary>It ran to the end.</summary>
+        Finished,
+        /// <summary>cli_camera_stop.</summary>
+        Stopped,
+        /// <summary>It threw; the view is given back rather than left on a broken pose.</summary>
+        Failed,
+        /// <summary>A manual pose (cli_freefly_pose, cli_capture) took the camera over: it wants free-fly.</summary>
+        ManualPose,
+        /// <summary>A new move replaced it and keeps free-fly.</summary>
+        Replaced,
+        /// <summary>Free-fly was turned off under it, or a logout save ended it: nothing to give back.</summary>
+        Interrupted
+    }
+
+    /// <summary>How a camera move leaves the view.</summary>
+    public static class CameraMoveEnding
+    {
+        /// <summary>
+        /// Whether the move ends by turning free-fly off and returning the camera to the player (as
+        /// cli_freefly_release does): yes when it finished, was stopped or failed, unless --stay
+        /// (the move's, or cli_camera_stop's) keeps the last pose. Whether free-fly was already on
+        /// before the move does not matter: the view still goes back to the player.
+        /// </summary>
+        public static bool ReturnsToPlayer(CameraMoveEnd end, bool stay)
+        {
+            switch (end)
+            {
+                case CameraMoveEnd.Finished:
+                case CameraMoveEnd.Stopped:
+                case CameraMoveEnd.Failed:
+                    return !stay;
+                default:
+                    return false;
+            }
+        }
+    }
+
+    /// <summary>A parsed <c>cli_camera_stop</c> request.</summary>
+    public sealed class CameraStopRequest
+    {
+        public const string Usage = "Usage: cli_camera_stop [--stay]";
+        /// <summary>Keep the camera where it stopped, in free-fly; by default the view returns to the player.</summary>
+        public bool Stay { get; private set; }
+
+        public static bool TryParse(IReadOnlyList<string> args, out CameraStopRequest request, out string error)
+        {
+            request = new CameraStopRequest();
+            error = string.Empty;
+            for (int i = 1; i < args.Count; i++)
+            {
+                if (!args[i].Equals("--stay", StringComparison.OrdinalIgnoreCase))
+                {
+                    error = $"ERROR: unknown argument '{args[i]}'. {Usage}";
+                    return false;
+                }
+
+                request.Stay = true;
+            }
+
+            return true;
         }
     }
 

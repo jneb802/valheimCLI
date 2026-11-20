@@ -122,9 +122,9 @@ valheim-cli cli_save 120                       # save the world, answer when the
 One command starts a smooth free-fly camera move; the game then advances it
 every frame (after its own free-fly input, so the mouse does not fight it),
 with sine ease in/out at both ends. The command answers at once; poll
-`cli_camera_status`. When a move ends the camera stays at its final pose in
-free-fly; `cli_freefly_release` returns it to the player (and stops a running
-move, as `cli_freefly_pose` and `cli_capture` do). Turning free-fly off ends the move.
+`cli_camera_status`. When a move finishes (or is stopped) a carried player is
+set back first, then free-fly goes off and the camera returns to the player where it now stands, as `cli_freefly_release` does. That holds even when free-fly was already on before the move (a shot framed by hand); `--stay` keeps the last pose in free-fly for chaining shots.
+`cli_freefly_release`, `cli_freefly_pose` and `cli_capture` stop a running move (a pose or capture keeps free-fly). Turning free-fly off ends the move.
 
 ```bash
 # Arc around what the camera centre looks at now (the ground it hits): frame a
@@ -155,7 +155,8 @@ valheim-cli cli_camera_path 20 5200,90,-5450 --from-here --look 5136,66,-5408 --
 # End next to the next shot: put the player on the ground under the camera's end.
 valheim-cli cli_camera_path 30 5240,95,-5400 5320,92,-5380 --pitch 20 --carry end
 valheim-cli cli_camera_status    # OK: camera path running 7.5/20.0s (38%) pos=... carry=start clean=40m nospawn=on cleaned creatures=1 ... player=carried ...
-valheim-cli cli_camera_stop      # stop where it is (a carried player is put back)
+valheim-cli cli_camera_stop      # stop: a carried player is put back, the view returns to the player
+valheim-cli cli_camera_stop --stay  # stop and keep the camera where it is, in free-fly
 valheim-cli cli_camera_clean 80  # one-off: hostile creatures, drops and corpses within 80 m of the camera
 valheim-cli cli_hud hide         # Ctrl+F3: the HUD, crosshair and hover text go; cli_hud show brings them back
 ```
@@ -172,7 +173,9 @@ valheim-cli cli_hud hide         # Ctrl+F3: the HUD, crosshair and hover text go
   (default 8), or at per-waypoint `@` look points (on every waypoint),
   one fixed `--look` target, or the path's heading at a fixed `--pitch`
   (positive looks down).
-- Both moves take `[--carry [start|end]] [--no-carry] [--check [m]] [--clean [m]] [--nospawn]`:
+- Both moves take `[--carry [start|end]] [--no-carry] [--check [m]] [--clean [m]] [--nospawn] [--stay]`:
+  - `--stay` keeps the last pose in free-fly when the move ends, for chaining
+    shots; without it the move ends back in the regular view on the player.
   - `--carry` takes the local player along: the game loads zones around the
     player, never around a free-fly camera, so a path that leaves the loaded
     area would fly into bare terrain. Paths carry by default (`--no-carry`
@@ -219,7 +222,7 @@ valheim-cli cli_hud hide         # Ctrl+F3: the HUD, crosshair and hover text go
 - `cli_camera_clean [radius] [x y z] [--all]`: one-off clean within `radius`
   (default 60) of `x y z` or the camera. `--all` also removes creatures that
   are not hostile (deer); tamed creatures, bosses and players always stay.
-- `cli_camera_stop`, `cli_camera_status`, `cli_hud [hide|show|toggle]`.
+- `cli_camera_stop [--stay]` (with no move running it still returns a leftover free-fly camera to the player unless `--stay`), `cli_camera_status`, `cli_hud [hide|show|toggle]`.
 
 ## Know What You Are Testing
 

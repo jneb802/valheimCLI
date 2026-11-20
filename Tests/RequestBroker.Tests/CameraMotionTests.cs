@@ -350,7 +350,7 @@ public class CameraMotionTests
         Assert.Equal(30, a.Options.Clean);
         Assert.True(a.Options.NoSpawn);
         Assert.True(a.Linear);
-        Assert.Equal("carry=off clean=30m nospawn=on", a.Options.Describe());
+        Assert.Equal("carry=off clean=30m nospawn=on end=player", a.Options.Describe());
     }
 
     [Theory]
@@ -475,15 +475,15 @@ public class CameraMotionTests
     {
         Assert.True(CameraPathRequest.TryParse(Args("cli_camera_path 10 1,2,3 4,5,6"), out CameraPathRequest p, out _));
         Assert.False(p.Options.CarryGiven);
-        Assert.Equal("carry=start clean=off nospawn=off", p.Options.Describe());
-        Assert.Equal("carry=off clean=off nospawn=off", p.Options.Describe(CameraCarry.Off));
+        Assert.Equal("carry=start clean=off nospawn=off end=player", p.Options.Describe());
+        Assert.Equal("carry=off clean=off nospawn=off end=player", p.Options.Describe(CameraCarry.Off));
         Assert.True(CameraPathRequest.TryParse(Args("cli_camera_path 10 1,2,3 4,5,6 --carry"), out p, out _));
         Assert.True(p.Options.CarryGiven);
         Assert.True(CameraPathRequest.TryParse(Args("cli_camera_path 10 1,2,3 4,5,6 --no-carry"), out p, out _));
         Assert.True(p.Options.CarryGiven);
         Assert.True(CameraArcRequest.TryParse(Args("cli_camera_arc 20 10"), out CameraArcRequest a, out _));
         Assert.False(a.Options.CarryGiven);
-        Assert.Equal("carry=end clean=off nospawn=off", a.Options.Describe(CameraCarry.End));
+        Assert.Equal("carry=end clean=off nospawn=off end=player", a.Options.Describe(CameraCarry.End));
     }
 
     [Fact]
@@ -553,6 +553,49 @@ public class CameraMotionTests
         Assert.Equal(3.5, stretches[1].First.Sample.Along);
         Assert.Single(CameraClearance.Merge(samples, mergeGap: 2.5));
         Assert.Empty(CameraClearance.Merge(new List<ClearanceSample>()));
+    }
+
+    [Fact]
+    public void StayIsAMoveOptionOnBothMoves()
+    {
+        Assert.True(CameraPathRequest.TryParse(Args("cli_camera_path 10 1,2,3 4,5,6"), out CameraPathRequest p, out _));
+        Assert.False(p.Options.Stay);
+        Assert.True(CameraPathRequest.TryParse(Args("cli_camera_path 10 1,2,3 --stay 4,5,6 --carry end"), out p, out _));
+        Assert.True(p.Options.Stay);
+        Assert.Equal(2, p.Points.Count);
+        Assert.Equal(CameraCarry.End, p.Options.Carry);
+        Assert.Equal("carry=end clean=off nospawn=off end=stay", p.Options.Describe());
+        Assert.True(CameraArcRequest.TryParse(Args("cli_camera_arc 20 10 --swing --stay"), out CameraArcRequest a, out _));
+        Assert.True(a.Options.Stay);
+        Assert.True(a.Swing);
+    }
+
+    [Fact]
+    public void StopRequestTakesOnlyStay()
+    {
+        Assert.True(CameraStopRequest.TryParse(Args("cli_camera_stop"), out CameraStopRequest r, out _));
+        Assert.False(r.Stay);
+        Assert.True(CameraStopRequest.TryParse(Args("cli_camera_stop --STAY"), out r, out _));
+        Assert.True(r.Stay);
+        Assert.False(CameraStopRequest.TryParse(Args("cli_camera_stop now"), out _, out string error));
+        Assert.StartsWith("ERROR", error);
+    }
+
+    [Theory]
+    [InlineData(CameraMoveEnd.Finished, false, true)]
+    [InlineData(CameraMoveEnd.Finished, true, false)]
+    [InlineData(CameraMoveEnd.Stopped, false, true)]
+    [InlineData(CameraMoveEnd.Stopped, true, false)]
+    [InlineData(CameraMoveEnd.Failed, false, true)]
+    [InlineData(CameraMoveEnd.Failed, true, false)]
+    // A manual pose (cli_freefly_pose, cli_capture) wants free-fly; a replacing move keeps it;
+    // free-fly turned off under the move or a logout save leaves nothing to give back.
+    [InlineData(CameraMoveEnd.ManualPose, false, false)]
+    [InlineData(CameraMoveEnd.Replaced, false, false)]
+    [InlineData(CameraMoveEnd.Interrupted, false, false)]
+    public void MovesEndByReturningTheViewToThePlayerUnlessTheyStay(CameraMoveEnd end, bool stay, bool returns)
+    {
+        Assert.Equal(returns, CameraMoveEnding.ReturnsToPlayer(end, stay));
     }
 
     private static string[] Args(string line) => line.Split(' ', StringSplitOptions.RemoveEmptyEntries);

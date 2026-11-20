@@ -13,8 +13,8 @@ namespace valheimCLI
     /// the game then advances it every frame in a postfix of GameCamera.UpdateFreeFly, after the
     /// game has applied mouse and key input, so the pose is exact and input does not fight it.
     /// The same frame hook carries the player along (--carry, the default for paths) and keeps
-    /// the shot clean (--clean). When the move ends the camera stays at its last pose in free-fly;
-    /// cli_freefly_release returns it to the player.
+    /// the shot clean (--clean). When the move ends free-fly goes off and the camera returns to
+    /// the player (after a carried player is set back); --stay keeps the last pose in free-fly.
     /// </summary>
     public static class CinematicCamera
     {
@@ -107,25 +107,33 @@ namespace valheimCLI
 
         internal static void Register()
         {
-            _ = new Terminal.ConsoleCommand("cli_camera_arc", "Orbit the free-fly camera around a focus, always looking at it, with ease in/out: cli_camera_arc <degrees> <seconds> [x y z] [--radius m] [--height m] [--start bearing] [--distance m] [--swing] [--linear] " + CameraMoveOptions.Usage + ". Without x y z the focus is what the camera centre looks at now (the ground it hits, or --distance m ahead); radius, height and start bearing come from the current camera unless given. Positive degrees move the camera to its right. --swing goes left by degrees, right by twice that, and back to the start. --carry takes the player along (hidden, flying, god and ghost) and puts it back at the start (or 'end': the ground under the camera's end); --check [m] is a dry run listing where the arc comes within m (default 1) of solid colliders; --clean [m] despawns hostile creatures and removes drops within m (default 40) of the arc and its focus, at the start and every frame; --nospawn pauses natural spawning for the move", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            _ = new Terminal.ConsoleCommand("cli_camera_arc", "Orbit the free-fly camera around a focus, always looking at it, with ease in/out: cli_camera_arc <degrees> <seconds> [x y z] [--radius m] [--height m] [--start bearing] [--distance m] [--swing] [--linear] " + CameraMoveOptions.Usage + ". Without x y z the focus is what the camera centre looks at now (the ground it hits, or --distance m ahead); radius, height and start bearing come from the current camera unless given. Positive degrees move the camera to its right. --swing goes left by degrees, right by twice that, and back to the start. --carry takes the player along (hidden, flying, god and ghost) and puts it back at the start (or 'end': the ground under the camera's end); --check [m] is a dry run listing where the arc comes within m (default 1) of solid colliders; --clean [m] despawns hostile creatures and removes drops within m (default 40) of the arc and its focus, at the start and every frame; --nospawn pauses natural spawning for the move. When it ends, free-fly goes off and the camera returns to the player (even if free-fly was on before the move); --stay keeps the last pose in free-fly", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 StartArc(args.Args, args.Context.AddString);
             }, isCheat: true);
 
-            _ = new Terminal.ConsoleCommand("cli_camera_path", "Fly the free-fly camera through waypoints on a smooth curve at constant speed with ease in/out: cli_camera_path <seconds> <x,y,z[@lx,ly,lz]> <x,y,z[@lx,ly,lz]>... [--look x,y,z] [--pitch deg] [--ahead m] [--from-here] [--linear] " + CameraMoveOptions.Usage + ". The camera looks along the path (a point --ahead m on it, default 8) unless it is given per-waypoint @look points, one fixed --look target, or a fixed --pitch (positive down) along the path's heading. --from-here starts at the current camera. The player is carried along so zones load (hidden, flying, god and ghost) and put back at the start (--carry end: the ground under the camera's end; --no-carry: stays). --check [m] is a dry run listing where the path comes within m (default 1) of solid colliders or crosses unloaded ground; --clean [m] despawns hostile creatures and removes drops within m (default 40) of the path, at the start and every frame; --nospawn pauses natural spawning for the move", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            _ = new Terminal.ConsoleCommand("cli_camera_path", "Fly the free-fly camera through waypoints on a smooth curve at constant speed with ease in/out: cli_camera_path <seconds> <x,y,z[@lx,ly,lz]> <x,y,z[@lx,ly,lz]>... [--look x,y,z] [--pitch deg] [--ahead m] [--from-here] [--linear] " + CameraMoveOptions.Usage + ". The camera looks along the path (a point --ahead m on it, default 8) unless it is given per-waypoint @look points, one fixed --look target, or a fixed --pitch (positive down) along the path's heading. --from-here starts at the current camera. The player is carried along so zones load (hidden, flying, god and ghost) and put back at the start (--carry end: the ground under the camera's end; --no-carry: stays). --check [m] is a dry run listing where the path comes within m (default 1) of solid colliders or crosses unloaded ground; --clean [m] despawns hostile creatures and removes drops within m (default 40) of the path, at the start and every frame; --nospawn pauses natural spawning for the move. When it ends, free-fly goes off and the camera returns to the player (even if free-fly was on before the move); --stay keeps the last pose in free-fly", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 StartPath(args.Args, args.Context.AddString);
             }, isCheat: true);
 
-            _ = new Terminal.ConsoleCommand("cli_camera_stop", "Stop a running cli_camera_arc or cli_camera_path; the camera stays where it is, in free-fly, and a carried player is put back", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            _ = new Terminal.ConsoleCommand("cli_camera_stop", "Stop a running cli_camera_arc or cli_camera_path: a carried player is put back, then free-fly goes off and the camera returns to the player: cli_camera_stop [--stay]. --stay keeps the camera where it stopped, in free-fly", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
-                if (_move == null)
+                if (!CameraStopRequest.TryParse(args.Args, out CameraStopRequest request, out string error))
                 {
-                    args.Context.AddString("OK: no camera move running; last=" + _last);
+                    args.Context.AddString(error);
                     return;
                 }
 
-                Finish("stopped");
+                if (_move == null)
+                {
+                    // Same default with nothing running: a free-fly camera left over goes back to the player.
+                    string view = GameCamera.instance != null && GameCamera.instance.m_freeFly ? LeaveView(GameCamera.instance, CameraMoveEnd.Stopped, request.Stay) : string.Empty;
+                    args.Context.AddString("OK: no camera move running" + view + "; last=" + _last);
+                    return;
+                }
+
+                Finish("stopped", CameraMoveEnd.Stopped, request.Stay);
                 args.Context.AddString("OK: camera move stopped; " + _last);
             }, isCheat: true);
 
@@ -156,7 +164,7 @@ namespace valheimCLI
                 GameCamera camera = GameCamera.instance;
                 if (camera == null || !camera.m_freeFly)
                 {
-                    Finish("interrupted (free-fly off)");
+                    Finish("interrupted (free-fly off)", CameraMoveEnd.Interrupted, stay: false);
                 }
             }
 
@@ -184,7 +192,7 @@ namespace valheimCLI
         /// <summary>Stops a move without moving the camera; free-fly release and an explicit pose call this.</summary>
         internal static void StopForManualPose()
         {
-            if (_move != null) Finish("stopped by a manual pose or release");
+            if (_move != null) Finish("stopped by a manual pose or release", CameraMoveEnd.ManualPose, stay: true);
         }
 
         private static void StartArc(string[] args, Action<string> output)
@@ -473,14 +481,14 @@ namespace valheimCLI
                 move.Elapsed += dt;
                 double t = move.Seconds > 0 ? move.Elapsed / move.Seconds : 1;
                 Apply(__instance, move, t);
-                if (t >= 1) Finish("finished");
+                if (t >= 1) Finish("finished", CameraMoveEnd.Finished, move.Options.Stay);
             }
             catch (Exception ex)
             {
                 _move = null;
                 _last = move.Kind + " failed: " + ex.Message;
                 valheimCLIPlugin.Log.LogError("Camera move failed: " + ex);
-                _last += EndExtras(__instance);
+                _last += EndExtras(__instance) + LeaveView(__instance, CameraMoveEnd.Failed, move.Options.Stay);
             }
         }
 
@@ -522,7 +530,7 @@ namespace valheimCLI
             return Window;
         }
 
-        private static void Finish(string how)
+        private static void Finish(string how, CameraMoveEnd end, bool stay)
         {
             Move? move = _move;
             _move = null;
@@ -530,8 +538,19 @@ namespace valheimCLI
             GameCamera camera = GameCamera.instance;
             string pose = camera != null ? " " + Pose(camera) : string.Empty;
             _last = string.Format(CultureInfo.InvariantCulture, "{0} {1} after {2:F1}/{3:F1}s{4}{5}", move.Kind, how, Math.Min(move.Elapsed, move.Seconds), move.Seconds, pose, Cleaned(move));
+            // The carried player is set back first, so the view returns to where it now stands.
             _last += EndExtras(camera);
+            _last += LeaveView(camera, end, stay);
             valheimCLIPlugin.Log.LogInfo("Camera " + _last);
+        }
+
+        /// <summary>Turns free-fly off and returns the camera to the player, as cli_freefly_release does, unless the end keeps the pose.</summary>
+        private static string LeaveView(GameCamera? camera, CameraMoveEnd end, bool stay)
+        {
+            if (camera == null || end == CameraMoveEnd.ManualPose || end == CameraMoveEnd.Replaced || end == CameraMoveEnd.Interrupted) return string.Empty;
+            if (!CameraMoveEnding.ReturnsToPlayer(end, stay)) return "; camera stays in free-fly (--stay)";
+            if (camera.m_freeFly) camera.ToggleFreeFly();
+            return "; freefly off, camera returned to the player";
         }
 
         /// <summary>Puts a carried player back and resumes spawning; answers what happened, for the last-move line.</summary>
