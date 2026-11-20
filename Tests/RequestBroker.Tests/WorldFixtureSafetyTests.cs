@@ -19,13 +19,13 @@ namespace valheimCLI.Tests
         [Fact]
         public void HugeExportsAreRejectedBeforeAnyWork()
         {
-            Assert.False(WorldDumpGrid.TrySampleCount(0, 4000, 0, 4000, 5, out _));
-            Assert.False(WorldDumpGrid.TrySampleCount(int.MinValue, int.MaxValue, 0, 0, 50, out _));
-            Assert.False(WorldDumpGrid.TrySampleCount(0, 1, 0, 1, 0, out _));
-            Assert.False(WorldDumpGrid.TrySampleCount(2, 1, 0, 1, 50, out _));
-            Assert.True(WorldDumpGrid.TrySampleCount(0, 400, 0, 400, 50, out long count));
+            Assert.False(WorldDumpGrid.TrySampleCount(0, 4000, 0, 4000, 5, false, out _));
+            Assert.False(WorldDumpGrid.TrySampleCount(int.MinValue, int.MaxValue, 0, 0, 50, false, out _));
+            Assert.False(WorldDumpGrid.TrySampleCount(0, 1, 0, 1, 0, false, out _));
+            Assert.False(WorldDumpGrid.TrySampleCount(2, 1, 0, 1, 50, false, out _));
+            Assert.True(WorldDumpGrid.TrySampleCount(0, 400, 0, 400, 50, false, out long count));
             Assert.Equal(160801, count);
-            Assert.True(WorldDumpGrid.TrySampleCount(10, 18, 20, 28, 8, out count));
+            Assert.True(WorldDumpGrid.TrySampleCount(10, 18, 20, 28, 8, false, out count));
             Assert.Equal(81, count);
         }
 
