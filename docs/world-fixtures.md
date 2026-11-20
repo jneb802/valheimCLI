@@ -77,5 +77,7 @@ interpolation between vertices.
 terrain or a client's edited collider height. These are generator data, not
 baked terrain edits.
 Full exports also write `locations.csv`; windowed exports deliberately do not.
+A full export's reply names the location count as `locations=` and that file as
+`locations_file=`, so every reply key appears once.
 The reply includes the actual sample count, extent and output path. Generated
 CSVs, world files and game assemblies do not belong in the repository.

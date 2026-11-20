@@ -2228,7 +2228,7 @@ namespace valheimCLI
                 }
             }
 
-            addOutput($"OK: WORLD_DUMP samples={samples} step={step} locations={locations} ms={stopwatch.ElapsedMilliseconds} world={worldPath} locations={locationsPath}");
+            addOutput($"OK: WORLD_DUMP samples={samples} step={step} locations={locations} ms={stopwatch.ElapsedMilliseconds} world={worldPath} locations_file={locationsPath}");
         }
 
         private static string BuildWorldDumpDirectory()
