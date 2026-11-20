@@ -268,12 +268,12 @@ namespace valheimCLI
             }
         }
 
-        public void CaptureOutput(string text)
+        /// <summary>Keeps the line for the caller of the command running now; false when no caller's command is capturing.</summary>
+        public bool CaptureOutput(string text)
         {
-            if (_capturingOutput)
-            {
-                _capturedOutput.Add(text);
-            }
+            if (!_capturingOutput) return false;
+            _capturedOutput.Add(text);
+            return true;
         }
 
         public static valheimCLIPlugin? Instance { get; private set; }
@@ -404,13 +404,16 @@ namespace valheimCLI
         public void Complete() => _broker.Complete(Id);
     }
 
-    // Harmony patch to capture console output
+    // Harmony patch to capture console output. A line a caller's command writes to the console goes back to
+    // that caller only, not into the player's console as well (#981); a player-typed command's output, and
+    // anything another terminal writes, shows as before.
     [HarmonyPatch(typeof(Terminal), nameof(Terminal.AddString), new Type[] { typeof(string) })]
     public static class Terminal_AddString_Patch
     {
-        public static void Postfix(string text)
+        public static bool Prefix(Terminal __instance, string text)
         {
-            valheimCLIPlugin.Instance?.CaptureOutput(text);
+            bool captured = valheimCLIPlugin.Instance?.CaptureOutput(text) ?? false;
+            return HarnessConsole.ShowsInGame(captured, writtenToConsole: __instance != null && __instance == Console.instance);
         }
     }
 }
