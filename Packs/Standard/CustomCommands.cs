@@ -324,7 +324,11 @@ namespace valheimCLI
                 float destroyRadius = 15f;
                 if (args.Length >= 3)
                 {
-                    float.TryParse(args[2], out destroyRadius);
+                    if (!CommandArguments.TryFiniteFloat(args[2], out destroyRadius))
+                    {
+                        args.Context.AddString("ERROR: radius must be a number. Usage: cli_destroy_nearby_prefabs <pattern> [radius=15]");
+                        return;
+                    }
                 }
 
                 DestroyNearbyPrefabs(args[1], DestroyAtRequest.ClampRadius(destroyRadius), args.Context.AddString);
@@ -1930,14 +1934,21 @@ namespace valheimCLI
 
             Vector3 centre = new Vector3(request.X, request.Y, request.Z);
             float r = request.Radius;
-            foreach (Vector3 probe in new[] { centre, centre + new Vector3(r, 0, 0), centre - new Vector3(r, 0, 0), centre + new Vector3(0, 0, r), centre - new Vector3(0, 0, r) })
+            // Every zone the sphere's square reaches, diagonals included, must have all its objects loaded.
+            Vector2s low = ZoneSystem.GetZone(centre - new Vector3(r, 0, r));
+            Vector2s high = ZoneSystem.GetZone(centre + new Vector3(r, 0, r));
+            for (int zx = low.x; zx <= high.x; zx++)
             {
-                if (!ZNetScene.instance.IsAreaReady(probe))
+                for (int zz = low.y; zz <= high.y; zz++)
                 {
-                    addOutput(string.Format(CultureInfo.InvariantCulture,
-                        "ERROR: the area at {0:F1},{1:F1},{2:F1} (radius {3:F1}) is not loaded here (zone {4}); nothing destroyed. Load it first (it must be within this game's loaded zones)",
-                        centre.x, centre.y, centre.z, r, ZoneSystem.GetZone(probe)));
-                    return;
+                    Vector2s zone = new Vector2s(zx, zz);
+                    if (!ZNetScene.instance.IsAreaReady(ZoneSystem.GetZonePos(zone)))
+                    {
+                        addOutput(string.Format(CultureInfo.InvariantCulture,
+                            "ERROR: the area at {0:F1},{1:F1},{2:F1} (radius {3:F1}) is not loaded here (zone {4}); nothing destroyed. Load it first (it must be within this game's loaded zones)",
+                            centre.x, centre.y, centre.z, r, zone));
+                        return;
+                    }
                 }
             }
 

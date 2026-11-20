@@ -197,8 +197,8 @@ valheim-cli cli_hud hide         # Ctrl+F3: the HUD, crosshair and hover text go
     loading screen for a few seconds after the shot, the zones at the camera's
     end unload, and the flags come back once the player lands. `--carry end`
     keeps the player, and the loaded zones, at the end of the shot instead.
-    A logout or quit during a carried move sets the player down at its start
-    before the game saves the logout point.
+    Any save of the logout point during a carried move (logout, quit, the
+    periodic world save) records the start, not the point by the camera.
   - `--check [m]` is a dry run: the camera does not move. It samples the
     move at most 1 m apart and reports, merged into stretches (runs closer
     than 2 m are one), where it comes within `m` (default 1) of a solid

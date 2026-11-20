@@ -51,6 +51,13 @@ public class DestroyAtRequestTests
     }
 
     [Fact]
+    public void ClampRadiusTurnsNotANumberIntoTheDefault()
+    {
+        Assert.Equal(DestroyAtRequest.DefaultRadius, DestroyAtRequest.ClampRadius(float.NaN));
+        Assert.Equal(60f, DestroyAtRequest.ClampRadius(float.PositiveInfinity));
+    }
+
+    [Fact]
     public void PatternsMatchCaseInsensitivelyAndCountToTheFirst()
     {
         Assert.True(PrefabPatterns.TryParse("pine, Beech ,pine", out List<string> patterns, out _));

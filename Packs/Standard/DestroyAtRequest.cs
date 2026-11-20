@@ -99,7 +99,7 @@ namespace valheimCLI
             return true;
         }
 
-        /// <summary>The radius rule of cli_destroy_nearby_prefabs: clamped to 0.5..60 m.</summary>
-        public static float ClampRadius(float radius) => radius < MinimumRadius ? MinimumRadius : (radius > MaximumRadius ? MaximumRadius : radius);
+        /// <summary>The radius rule both destroy commands share: clamped to 0.5..60 m (not a number: the default).</summary>
+        public static float ClampRadius(float radius) => float.IsNaN(radius) ? DefaultRadius : (radius < MinimumRadius ? MinimumRadius : (radius > MaximumRadius ? MaximumRadius : radius));
     }
 }

@@ -170,19 +170,6 @@ namespace valheimCLI
             Restore();
         }
 
-        /// <summary>
-        /// Before the game saves a logout point (logout, quit): the player is set down at its start
-        /// at once, loaded or not, with every flag restored, so the save holds where it stood rather
-        /// than a point in the air beside the camera.
-        /// </summary>
-        public void Drop()
-        {
-            if (!Alive) return;
-            _returning = true;
-            if (!_teleportAccepted) Place(Start, StartRotation);
-            Restore();
-        }
-
         /// <summary>After an error: give the flags back where the player is, never throwing.</summary>
         public void ForceRestore()
         {

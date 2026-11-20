@@ -64,33 +64,35 @@ namespace valheimCLI
             if (_harmony != null) return;
             _harmony = new Harmony(HarmonyId);
             _harmony.Patch(AccessTools.Method(typeof(GameCamera), "UpdateFreeFly"), postfix: new HarmonyMethod(typeof(CinematicCamera), nameof(AfterUpdateFreeFly)));
-            _harmony.Patch(AccessTools.Method(typeof(Game), nameof(Game.SavePlayerProfile)), prefix: new HarmonyMethod(typeof(CinematicCamera), nameof(BeforeSavePlayerProfile)));
+            _harmony.Patch(AccessTools.Method(typeof(Game), nameof(Game.SavePlayerProfile)),
+                prefix: new HarmonyMethod(typeof(CinematicCamera), nameof(BeforeSavePlayerProfile)),
+                finalizer: new HarmonyMethod(typeof(CinematicCamera), nameof(AfterSavePlayerProfile)));
         }
 
         /// <summary>
-        /// A logout or quit saves the player's position as its logout point: a carried player is set
-        /// down at its start first, flags restored, so it never logs in again in the air by the camera.
+        /// Every save that records a logout point (quit, logout, and also the periodic world save)
+        /// reads the player's position. While the player is carried that is a point in the air by
+        /// the camera, so for the save only the player stands at its start; the move goes on.
         /// </summary>
-        private static void BeforeSavePlayerProfile(bool setLogoutPoint)
+        private static void BeforeSavePlayerProfile(bool setLogoutPoint, out Vector3? __state)
         {
-            if (!setLogoutPoint || _carry == null) return;
-            try
+            __state = null;
+            PlayerCarry? carry = _carry;
+            if (!setLogoutPoint || carry == null || carry.Returning) return;
+            Player player = carry.Player;
+            if (player == null || player != Player.m_localPlayer) return;
+            __state = player.transform.position;
+            player.transform.position = carry.Start;
+        }
+
+        private static Exception? AfterSavePlayerProfile(Exception? __exception, Vector3? __state)
+        {
+            if (__state.HasValue && _carry != null && _carry.Player != null && _carry.Player == Player.m_localPlayer)
             {
-                Move? move = _move;
-                _move = null;
-                if (move != null) _last = move.Kind + " ended by a logout save";
-                _carry.Drop();
-                _last += "; player set down at its start for the logout save";
+                _carry.Player.transform.position = __state.Value;
             }
-            catch (Exception ex)
-            {
-                valheimCLIPlugin.Log.LogError("Camera carry drop before the logout save failed: " + ex);
-            }
-            finally
-            {
-                _carry = null;
-                SpawnPause.Release();
-            }
+
+            return __exception;
         }
 
         public static void Unpatch()
@@ -131,8 +133,16 @@ namespace valheimCLI
 
                 if (_move == null)
                 {
-                    // Nothing to end: a camera framed by hand stays as it is.
-                    args.Context.AddString("OK: no camera move running; last=" + _last);
+                    // Nothing to end: a camera framed by hand stays as it is. A view return still owed to a
+                    // landing player is kept, or dropped with --stay.
+                    string owed = string.Empty;
+                    if (_viewPending)
+                    {
+                        if (request.Stay) CancelPendingView();
+                        owed = request.Stay ? "; camera kept in free-fly (--stay): no return to the player on landing" : "; camera returns to the player once it has landed";
+                    }
+
+                    args.Context.AddString("OK: no camera move running" + owed + "; last=" + _last);
                     return;
                 }
 
@@ -168,8 +178,6 @@ namespace valheimCLI
                 if (camera == null || !camera.m_freeFly)
                 {
                     Finish("interrupted (free-fly off)", CameraMoveEnd.Interrupted, stay: false);
-                    if (_smoothBefore.HasValue && camera != null) camera.SetFreeFlySmoothness(_smoothBefore.Value);
-                    _smoothBefore = null;
                 }
             }
 
@@ -178,27 +186,43 @@ namespace valheimCLI
             {
                 try
                 {
-                    if (_carry.Tick())
-                    {
-                        _carry = null;
-                        _last += "; player back";
-                        if (_viewPending && _move == null) _last += ReturnView(GameCamera.instance);
-                    }
+                    if (_carry.Tick()) Landed("; player back");
                 }
                 catch (Exception ex)
                 {
                     valheimCLIPlugin.Log.LogError("Camera carry return failed: " + ex);
                     _carry?.ForceRestore();
-                    _carry = null;
-                    _last += "; player return FAILED (flags restored where it is): " + ex.Message;
-                    if (_viewPending && _move == null) _last += ReturnView(GameCamera.instance);
+                    Landed("; player return FAILED (flags restored where it is): " + ex.Message);
                 }
             }
+
+            // Whoever turned free-fly off (a move's end, cli_freefly_release, the free-fly key, a world
+            // change), the smoothness the moves set to 0 goes back to what it was.
+            GameCamera now = GameCamera.instance;
+            if (_smoothBefore.HasValue && _move == null && (now == null || !now.m_freeFly)) RestoreSmoothness(now);
         }
 
-        /// <summary>Stops a move without moving the camera; free-fly release and an explicit pose call this.</summary>
+        /// <summary>The carried player is back: the view owed to it (a move that ended while it was on its way) is given.</summary>
+        private static void Landed(string what)
+        {
+            _carry = null;
+            _last += what;
+            if (_viewPending) _last += ReturnView(GameCamera.instance);
+        }
+
+        /// <summary>A view return still owed to a landing player is dropped: someone else now decides the view.</summary>
+        private static void CancelPendingView() => _viewPending = false;
+
+        private static void RestoreSmoothness(GameCamera? camera)
+        {
+            if (camera != null && _smoothBefore.HasValue) camera.SetFreeFlySmoothness(_smoothBefore.Value);
+            _smoothBefore = null;
+        }
+
+        /// <summary>Stops a move without moving the camera; free-fly release and an explicit pose call this. They decide the view, so a view return still owed is dropped too.</summary>
         internal static void StopForManualPose()
         {
+            CancelPendingView();
             if (_move != null) Finish("stopped by a manual pose or release", CameraMoveEnd.ManualPose, stay: true);
         }
 
@@ -451,6 +475,7 @@ namespace valheimCLI
         /// <summary>Free-fly on, no smoothing, lock-on, target or drift: the state every scripted pose starts from.</summary>
         internal static void TakeFreeFly(GameCamera camera)
         {
+            CancelPendingView();
             if (!camera.m_freeFly) camera.ToggleFreeFly();
             camera.SetFreeFlySmoothness(0f);
             camera.m_freeFlyLockon = null;
@@ -582,11 +607,7 @@ namespace valheimCLI
         {
             _viewPending = false;
             if (camera == null) return string.Empty;
-            if (_smoothBefore.HasValue)
-            {
-                camera.SetFreeFlySmoothness(_smoothBefore.Value);
-                _smoothBefore = null;
-            }
+            RestoreSmoothness(camera);
 
             if (camera.m_freeFly) camera.ToggleFreeFly();
             return "; freefly off, camera returned to the player";
