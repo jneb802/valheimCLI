@@ -194,17 +194,13 @@ namespace valheimCLI
                 // greeting line and ignore lines that are not OUTPUT: or state changes.
                 writer.WriteLine("VALHEIM_CLI_CAPS completion");
 
-                while (_running && client.Connected)
+                ClientLines lines = new ClientLines(client, stream, reader);
+                while (true)
                 {
                     try
                     {
-                        if (!stream.DataAvailable)
-                        {
-                            Thread.Sleep(50);
-                            continue;
-                        }
-
-                        var line = reader.ReadLine();
+                        // Null once the caller has closed the connection: the thread ends with it (#980).
+                        var line = lines.Next(() => _running);
                         if (line == null) break;
 
                         line = line.Trim();
