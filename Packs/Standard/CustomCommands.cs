@@ -528,7 +528,7 @@ namespace valheimCLI
                 args.Context.AddString($"OK: screenshot queued path={path} size={Screen.width * supersize}x{Screen.height * supersize}");
             }, isCheat: true);
 
-            new Terminal.ConsoleCommand("cli_generator_at", "Read the world generator at up to 16 points without creating a dump: cli_generator_at <x> <z> [<x> <z> ...]. Returns height, biome, river, river width and unitless base height at each point", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            new Terminal.ConsoleCommand("cli_generator_at", "Read the world generator at up to 16 points without creating a dump: cli_generator_at <x> <z> [<x> <z> ...]. Returns height (GetHeight), blended_height (the zone heightmap's ground before terrain modifiers; exact at whole-metre vertices), biome, river, river width and unitless base height at each point, at full float precision", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 string[] words = Enumerable.Range(0, args.Length).Select(index => args[index]).ToArray();
                 if (!GeneratorPointRequest.TryParse(words, out List<float[]> points))
@@ -539,7 +539,7 @@ namespace valheimCLI
                 GeneratorAt(points, args.Context.AddString);
             }, isCheat: true);
 
-            new Terminal.ConsoleCommand("cli_world_dump", "Sample the world generator to CSV for offline analysis: cli_world_dump [step=50] [dir] [--window cx,cz,half]. Writes world.csv (x,z,height,biome,river,river_width,base_height) over the full map plus locations.csv (name,x,z,radius); with --window it writes one window file and no locations. Samples sit on the world lattice (-10000 + i*step), so step 8 lands on the pathfinding cells and step 128 on the island grid", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
+            new Terminal.ConsoleCommand("cli_world_dump", "Sample the world generator to CSV for offline analysis: cli_world_dump [step=50] [dir] [--window cx,cz,half]. Writes world.csv (x,z,height,biome,river,river_width,base_height,blended_height, full float precision) over the full map plus locations.csv (name,x,z,radius); with --window it writes one window file and no locations. Samples sit on the world lattice (-10000 + i*step), so step 8 lands on the pathfinding cells and step 128 on the island grid. Step 5..1000, or 1..1000 with --window", (Terminal.ConsoleEvent)delegate(Terminal.ConsoleEventArgs args)
             {
                 const string usage = "Usage: cli_world_dump [step=50] [dir] [--window cx,cz,half]";
                 int step = 50;
@@ -593,11 +593,6 @@ namespace valheimCLI
                     return;
                 }
 
-                if (step < 5 || step > 1000)
-                {
-                    args.Context.AddString("ERROR: step must be between 5 and 1000 metres");
-                    return;
-                }
                 WorldDump(step, dir, args.Context.AddString, centerX, centerZ, half);
             }, isCheat: true);
 
@@ -2105,19 +2100,35 @@ namespace valheimCLI
                 addOutput("ERROR: GENERATOR_AT no world loaded");
                 return;
             }
-            CultureInfo invariant = CultureInfo.InvariantCulture;
+            HeightmapBlend? blend = HeightmapBlend.Create(world);
+            if (blend == null)
+            {
+                addOutput("ERROR: GENERATOR_AT no zone heightmap prefab loaded");
+                return;
+            }
             foreach (float[] point in points)
             {
                 float x = point[0], z = point[1];
-                float height = world.GetHeight(x, z);
-                Heightmap.Biome biome = world.GetBiome(x, z);
-                world.GetRiverWeight(x, z, out float river, out float riverWidth);
-                float baseHeight = world.GetBaseHeight(x, z, menuTerrain: false);
-                addOutput(string.Format(invariant,
-                    "GENERATOR {0:F1},{1:F1} height={2:F1} biome={3} river={4:F2} river_width={5:F1} base_height={6:F5}",
-                    x, z, height, biome, river, riverWidth, baseHeight));
+                WorldDumpSample sample = SampleGenerator(world, blend, x, z);
+                addOutput("GENERATOR " + WorldDumpGrid.Format(x) + "," + WorldDumpGrid.Format(z)
+                    + " height=" + WorldDumpGrid.Format(sample.Height)
+                    + " blended_height=" + WorldDumpGrid.Format(sample.BlendedHeight)
+                    + " biome=" + sample.Biome
+                    + " river=" + WorldDumpGrid.Format(sample.River)
+                    + " river_width=" + WorldDumpGrid.Format(sample.RiverWidth)
+                    + " base_height=" + WorldDumpGrid.Format(sample.BaseHeight));
             }
             addOutput(FormattableString.Invariant($"OK: GENERATOR_AT samples={points.Count} world={world.m_world.m_name} uid={world.m_world.m_uid}"));
+        }
+
+        /// <summary>The one reading of the generator that cli_world_dump and cli_generator_at both write.</summary>
+        private static WorldDumpSample SampleGenerator(WorldGenerator world, HeightmapBlend blend, float x, float z)
+        {
+            float height = world.GetHeight(x, z);
+            Heightmap.Biome biome = world.GetBiome(x, z);
+            world.GetRiverWeight(x, z, out float river, out float riverWidth);
+            float baseHeight = world.GetBaseHeight(x, z, menuTerrain: false);
+            return new WorldDumpSample(height, biome.ToString(), river, riverWidth, baseHeight, blend.At(x, z, biome, height));
         }
 
         public static void WorldDump(int step, string? directory, Action<string> addOutput,
@@ -2130,13 +2141,13 @@ namespace valheimCLI
                 return;
             }
 
-            if (step < 5 || step > 1000)
-            {
-                addOutput("ERROR: step must be between 5 and 1000 metres");
-                return;
-            }
             const float halfExtent = 10000f;
             bool windowed = windowCenterX.HasValue && windowCenterZ.HasValue && windowHalf.HasValue;
+            if (!WorldDumpGrid.IsAllowedStep(step, windowed))
+            {
+                addOutput("ERROR: " + WorldDumpGrid.StepRule);
+                return;
+            }
             bool anyWindow = windowCenterX.HasValue || windowCenterZ.HasValue || windowHalf.HasValue;
             string windowSpec = string.Format(CultureInfo.InvariantCulture, "{0},{1},{2}", windowCenterX, windowCenterZ, windowHalf);
             if (anyWindow && (!windowed || !WorldDumpGrid.TryParseWindow(windowSpec, out _, out _, out _)))
@@ -2162,7 +2173,13 @@ namespace valheimCLI
 
             if (!WorldDumpGrid.TrySampleCount(ixFrom, ixTo, izFrom, izTo, step, out long expectedSamples))
             {
-                addOutput("ERROR: WORLD_DUMP exceeds 1000000 samples; use --window or a larger step");
+                addOutput(FormattableString.Invariant($"ERROR: WORLD_DUMP exceeds {WorldDumpGrid.MaximumSamples} samples; use --window or a larger step"));
+                return;
+            }
+            HeightmapBlend? blend = HeightmapBlend.Create(world);
+            if (blend == null)
+            {
+                addOutput("ERROR: WORLD_DUMP no zone heightmap prefab loaded");
                 return;
             }
             string dir = string.IsNullOrWhiteSpace(directory) ? BuildWorldDumpDirectory() : directory!;
@@ -2176,36 +2193,11 @@ namespace valheimCLI
             string locationsPath = Path.Combine(dir, "locations.csv");
             Stopwatch stopwatch = Stopwatch.StartNew();
 
-            int samples = 0;
+            int samples;
             using (StreamWriter writer = new StreamWriter(worldPath, false, new System.Text.UTF8Encoding(false)))
             {
-                writer.WriteLine("x,z,height,biome,river,river_width,base_height");
-                for (int iz = izFrom; iz <= izTo; iz++)
-                {
-                    float z = WorldDumpGrid.At(iz, step);
-                    for (int ix = ixFrom; ix <= ixTo; ix++)
-                    {
-                        float x = WorldDumpGrid.At(ix, step);
-                        float height = world.GetHeight(x, z);
-                        Heightmap.Biome biome = world.GetBiome(x, z);
-                        world.GetRiverWeight(x, z, out float river, out float riverWidth);
-                        float baseHeight = world.GetBaseHeight(x, z, menuTerrain: false);
-                        writer.Write(x.ToString("F0", invariant));
-                        writer.Write(',');
-                        writer.Write(z.ToString("F0", invariant));
-                        writer.Write(',');
-                        writer.Write(height.ToString("F1", invariant));
-                        writer.Write(',');
-                        writer.Write(biome.ToString());
-                        writer.Write(',');
-                        writer.Write(river.ToString("F2", invariant));
-                        writer.Write(',');
-                        writer.Write(riverWidth.ToString("F1", invariant));
-                        writer.Write(',');
-                        writer.WriteLine(baseHeight.ToString("F5", invariant));
-                        samples++;
-                    }
-                }
+                samples = WorldDumpGrid.Write(writer, ixFrom, ixTo, izFrom, izTo, step,
+                    (x, z) => SampleGenerator(world, blend, x, z));
             }
 
             if (samples != expectedSamples)
@@ -2229,7 +2221,8 @@ namespace valheimCLI
                     foreach (ZoneSystem.LocationInstance location in list)
                     {
                         string name = location.m_location.m_prefab.Name;
-                        writer.WriteLine($"{name},{location.m_position.x.ToString("F1", invariant)},{location.m_position.z.ToString("F1", invariant)},{location.m_location.m_exteriorRadius.ToString("F1", invariant)}");
+                        writer.WriteLine(name + "," + WorldDumpGrid.Format(location.m_position.x) + "," + WorldDumpGrid.Format(location.m_position.z)
+                            + "," + WorldDumpGrid.Format(location.m_location.m_exteriorRadius));
                         locations++;
                     }
                 }

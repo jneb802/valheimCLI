@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.IO;
 
 namespace valheimCLI
 {
@@ -19,6 +20,54 @@ namespace valheimCLI
     internal static class WorldDumpGrid
     {
         public const float Origin = -10000f;
+
+        /// <summary>
+        /// The dump's columns. <c>height</c> is WorldGenerator.GetHeight (the point's own biome);
+        /// <c>blended_height</c> is the ground HeightmapBuilder builds there before terrain
+        /// modifiers (its four corner biomes mixed). They differ wherever a 64 m heightmap's corners
+        /// are not all one biome.
+        /// </summary>
+        public const string Header = "x,z,height,biome,river,river_width,base_height,blended_height";
+
+        /// <summary>The finest step: the game's heightmap vertices are 1 m apart.</summary>
+        public const int MinimumStep = 1;
+
+        /// <summary>
+        /// The finest step without a window. Steps of 1 m to 4 m resolve the few-metre noise
+        /// of Swamp and Black Forest ground that an 8 m lattice aliases, and only a window keeps
+        /// them under <see cref="MaximumSamples"/>.
+        /// </summary>
+        public const int MinimumWholeMapStep = 5;
+
+        public const int MaximumStep = 1000;
+
+        /// <summary>The most samples one dump writes: it runs on the game thread.</summary>
+        public const long MaximumSamples = 1000000;
+
+        /// <summary>The one refusal text for a step <see cref="IsAllowedStep"/> refuses.</summary>
+        public const string StepRule = "step must be 5..1000 metres, or 1..1000 metres with --window";
+
+        /// <summary>Whether a dump may use this step; 1 m to 4 m need a window.</summary>
+        public static bool IsAllowedStep(int step, bool windowed) =>
+            step >= (windowed ? MinimumStep : MinimumWholeMapStep) && step <= MaximumStep;
+
+        /// <summary>
+        /// A generator value as the dump and cli_generator_at write it: the shortest text that
+        /// parses back to the same float, in the invariant culture. A rounded value flips a
+        /// threshold rule offline wherever the true value lies within the rounding of it.
+        /// The game runs on Mono, whose "R" for a float is not documented to round-trip, so a
+        /// text that does not parse back exactly falls back to "G9", which always does.
+        /// </summary>
+        public static string Format(float value)
+        {
+            string text = value.ToString("R", CultureInfo.InvariantCulture);
+            if (float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out float parsed)
+                && parsed.Equals(value))
+            {
+                return text;
+            }
+            return value.ToString("G9", CultureInfo.InvariantCulture);
+        }
 
         /// <summary>First lattice index at or above a coordinate.</summary>
         public static int From(float coordinate, int step) =>
@@ -71,19 +120,81 @@ namespace valheimCLI
         internal static bool TrySampleCount(int xFrom, int xTo, int zFrom, int zTo, int step, out long count)
         {
             count = 0;
-            if (step < 5 || step > 1000 || xTo < xFrom || zTo < zFrom)
+            if (step < MinimumStep || step > MaximumStep || xTo < xFrom || zTo < zFrom)
             {
                 return false;
             }
             long width = (long)xTo - xFrom + 1;
             long height = (long)zTo - zFrom + 1;
-            const long maximum = 1000000;
-            if (width > maximum || height > maximum || width > maximum / height)
+            if (width > MaximumSamples || height > MaximumSamples || width > MaximumSamples / height)
             {
                 return false;
             }
             count = width * height;
             return true;
         }
+
+        /// <summary>
+        /// Writes the header and one row per lattice node, z outer and x inner. A row depends
+        /// only on the node's position and the sampler, never on the step or the window, so a
+        /// node two dumps of one world share is the same bytes in both.
+        /// </summary>
+        internal static int Write(TextWriter writer, int ixFrom, int ixTo, int izFrom, int izTo, int step,
+            Func<float, float, WorldDumpSample> sample)
+        {
+            writer.WriteLine(Header);
+            int samples = 0;
+            for (int iz = izFrom; iz <= izTo; iz++)
+            {
+                float z = At(iz, step);
+                for (int ix = ixFrom; ix <= ixTo; ix++)
+                {
+                    float x = At(ix, step);
+                    WriteRow(writer, x, z, sample(x, z));
+                    samples++;
+                }
+            }
+            return samples;
+        }
+
+        private static void WriteRow(TextWriter writer, float x, float z, WorldDumpSample sample)
+        {
+            writer.Write(Format(x));
+            writer.Write(',');
+            writer.Write(Format(z));
+            writer.Write(',');
+            writer.Write(Format(sample.Height));
+            writer.Write(',');
+            writer.Write(sample.Biome);
+            writer.Write(',');
+            writer.Write(Format(sample.River));
+            writer.Write(',');
+            writer.Write(Format(sample.RiverWidth));
+            writer.Write(',');
+            writer.Write(Format(sample.BaseHeight));
+            writer.Write(',');
+            writer.WriteLine(Format(sample.BlendedHeight));
+        }
+    }
+
+    /// <summary>The generator's facts at one dump node, before formatting.</summary>
+    internal readonly struct WorldDumpSample
+    {
+        public WorldDumpSample(float height, string biome, float river, float riverWidth, float baseHeight, float blendedHeight)
+        {
+            Height = height;
+            Biome = biome;
+            River = river;
+            RiverWidth = riverWidth;
+            BaseHeight = baseHeight;
+            BlendedHeight = blendedHeight;
+        }
+
+        public float Height { get; }
+        public string Biome { get; }
+        public float River { get; }
+        public float RiverWidth { get; }
+        public float BaseHeight { get; }
+        public float BlendedHeight { get; }
     }
 }
