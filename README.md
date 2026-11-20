@@ -177,11 +177,16 @@ valheim-cli cli_hud hide         # Ctrl+F3: the HUD, crosshair and hover text go
     player, never around a free-fly camera, so a path that leaves the loaded
     area would fly into bare terrain. Paths carry by default (`--no-carry`
     opts out); arcs stay near their focus and carry only with `--carry`.
+    A default carry gives way: when the player cannot be moved (seated,
+    dead, teleporting) the path flies without it and its OK line says why,
+    and a move that replaces a carried move keeps carrying unless it says
+    `--no-carry`. An asked-for `--carry` that is not possible is an error.
     While carried the player is put at the camera every frame, its renderers
-    and lights are off on this machine (other players still see it), and it
-    is in debug fly (no gravity, no fall height, no damage), ghost mode
-    (creatures ignore it) and god mode. When the move ends, is stopped or is
-    replaced by a move without carry, the player goes back where it stood
+    and lights are off on this machine (other players still see it), it is
+    in debug fly (no gravity, no fall height, no damage), ghost mode
+    (creatures ignore it) and god mode, and auto-pickup is off. When the
+    move ends, is stopped or is replaced by a move with `--no-carry`, the
+    player goes back where it stood
     (`start`, the default) or onto the dry solid ground under the camera's
     end (`end`; the start if there is none), and every one of those flags
     goes back to what it was. When the start has unloaded meanwhile (a long
@@ -189,11 +194,15 @@ valheim-cli cli_hud hide         # Ctrl+F3: the HUD, crosshair and hover text go
     loading screen for a few seconds after the shot, the zones at the camera's
     end unload, and the flags come back once the player lands. `--carry end`
     keeps the player, and the loaded zones, at the end of the shot instead.
+    A logout or quit during a carried move sets the player down at its start
+    before the game saves the logout point.
   - `--check [m]` is a dry run: the camera does not move. It samples the
     move at most 1 m apart and reports, merged into stretches (runs closer
     than 2 m are one), where it comes within `m` (default 1) of a solid
     collider of the game's solid layers (terrain, rocks and static solids,
-    small solids, pieces; `dist=0.00` means inside one), and where the ground or
+    small solids, pieces; `dist=0.00` means inside one or touching it; deep
+    inside a rock sunk into the ground only its surfaces near the path are
+    seen, so such a stretch shows as its entry and exit), and where the ground or
     its objects are not loaded, since only loaded colliders can be checked.
     Each line gives the parameter range (`u`, the spline parameter, for a
     path; `deg`, the bearing offset, for an arc), the distance along the

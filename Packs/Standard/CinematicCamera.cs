@@ -43,8 +43,12 @@ namespace valheimCLI
             public Func<double, CameraVector> Position { get; }
             public Func<double, CameraVector> Look { get; }
             public CameraMoveOptions Options { get; }
-            /// <summary>Points along the move (and an arc's focus) that --clean keeps clear around.</summary>
+            /// <summary>Points along the move (and an arc's focus) that --clean keeps clear around; empty without --clean.</summary>
             public List<CameraMoveSample> Near { get; }
+            /// <summary>The carry the move really has: an inherited one, or none when a default carry was not possible.</summary>
+            public CameraCarry Carry { get; set; }
+            /// <summary>What the start changed from the request (a default carry skipped, the last move's player released), for the OK line.</summary>
+            public string Note { get; set; } = string.Empty;
             public ShotCleaner.Counts Cleaned;
             public double Elapsed { get; set; }
         }
@@ -56,6 +60,33 @@ namespace valheimCLI
             if (_harmony != null) return;
             _harmony = new Harmony(HarmonyId);
             _harmony.Patch(AccessTools.Method(typeof(GameCamera), "UpdateFreeFly"), postfix: new HarmonyMethod(typeof(CinematicCamera), nameof(AfterUpdateFreeFly)));
+            _harmony.Patch(AccessTools.Method(typeof(Game), nameof(Game.SavePlayerProfile)), prefix: new HarmonyMethod(typeof(CinematicCamera), nameof(BeforeSavePlayerProfile)));
+        }
+
+        /// <summary>
+        /// A logout or quit saves the player's position as its logout point: a carried player is set
+        /// down at its start first, flags restored, so it never logs in again in the air by the camera.
+        /// </summary>
+        private static void BeforeSavePlayerProfile(bool setLogoutPoint)
+        {
+            if (!setLogoutPoint || _carry == null) return;
+            try
+            {
+                Move? move = _move;
+                _move = null;
+                if (move != null) _last = move.Kind + " ended by a logout save";
+                _carry.Drop();
+                _last += "; player set down at its start for the logout save";
+            }
+            catch (Exception ex)
+            {
+                valheimCLIPlugin.Log.LogError("Camera carry drop before the logout save failed: " + ex);
+            }
+            finally
+            {
+                _carry = null;
+                SpawnPause.Release();
+            }
         }
 
         public static void Unpatch()
@@ -63,7 +94,11 @@ namespace valheimCLI
             _move = null;
             // A reload must not leave the player hidden, flying or in god mode, nor spawning paused.
             try { _carry?.Abandon(); }
-            catch (Exception ex) { valheimCLIPlugin.Log.LogWarning("Camera carry restore at unload failed: " + ex.Message); }
+            catch (Exception ex)
+            {
+                valheimCLIPlugin.Log.LogWarning("Camera carry restore at unload failed: " + ex.Message);
+                _carry?.ForceRestore();
+            }
             _carry = null;
             SpawnPause.Release();
             _harmony?.UnpatchSelf();
@@ -138,8 +173,10 @@ namespace valheimCLI
                 }
                 catch (Exception ex)
                 {
-                    _carry = null;
                     valheimCLIPlugin.Log.LogError("Camera carry return failed: " + ex);
+                    _carry?.ForceRestore();
+                    _carry = null;
+                    _last += "; player return FAILED (flags restored where it is): " + ex.Message;
                 }
             }
         }
@@ -196,11 +233,16 @@ namespace valheimCLI
                 return;
             }
 
-            List<CameraMoveSample> near = arc.Samples(CleanStep);
-            near.Add(new CameraMoveSample(0, 0, focus));
+            List<CameraMoveSample> near = new List<CameraMoveSample>();
+            if (request.Options.Clean.HasValue)
+            {
+                near = arc.Samples(CleanStep);
+                near.Add(new CameraMoveSample(0, 0, focus));
+            }
+
             if (!Begin(camera, new Move("arc", request.Seconds, arc.PositionAt, arc.LookAt, request.Options, near), output)) return;
             output(string.Format(CultureInfo.InvariantCulture, "OK: camera arc started {0} seconds={1:F1} ease={2} {3}{4}",
-                summary, request.Seconds, request.Linear ? "linear" : "inout", request.Options.Describe(), Cleaned(_move)));
+                summary, request.Seconds, request.Linear ? "linear" : "inout", request.Options.Describe(_move?.Carry), Cleaned(_move) + (_move?.Note ?? string.Empty)));
         }
 
         private static void StartPath(string[] args, Action<string> output)
@@ -232,14 +274,15 @@ namespace valheimCLI
                 return;
             }
 
-            if (!Begin(camera, new Move("path", request.Seconds, path.PositionAt, path.LookAt, request.Options, path.Samples(CleanStep)), output)) return;
+            List<CameraMoveSample> near = request.Options.Clean.HasValue ? path.Samples(CleanStep) : new List<CameraMoveSample>();
+            if (!Begin(camera, new Move("path", request.Seconds, path.PositionAt, path.LookAt, request.Options, near), output)) return;
             string look = request.Target.HasValue ? "target " + request.Target.Value.Format()
                 : request.Looks != null ? "waypoint looks"
                 : request.Pitch.HasValue ? "heading pitch=" + request.Pitch.Value.ToString("F1", CultureInfo.InvariantCulture)
                 : "along path ahead=" + request.LookAhead.ToString("F1", CultureInfo.InvariantCulture);
             output(string.Format(CultureInfo.InvariantCulture,
                 "OK: camera path started {0} seconds={1:F1} speed={2:F2}m/s look={3} ease={4} {5}{6}",
-                summary, request.Seconds, path.Length / request.Seconds, look, request.Linear ? "linear" : "inout", request.Options.Describe(), Cleaned(_move)));
+                summary, request.Seconds, path.Length / request.Seconds, look, request.Linear ? "linear" : "inout", request.Options.Describe(_move?.Carry), Cleaned(_move) + (_move?.Note ?? string.Empty)));
         }
 
         /// <summary>The --check dry run: the camera does not move; one line per stretch that clips or is unloaded.</summary>
@@ -328,41 +371,64 @@ namespace valheimCLI
         private static bool Begin(GameCamera camera, Move move, Action<string> output)
         {
             CameraMoveOptions options = move.Options;
-            if (options.Carry != CameraCarry.Off)
+            bool given = options.CarryGiven;
+            bool carrying = _carry != null && !_carry.Returning;
+            // A default carry gives way to the carry already running: a move that replaces a carried
+            // move without saying --no-carry keeps carrying (to the landing the first move chose).
+            CameraCarry carry = !given && carrying ? _carry!.Landing : options.Carry;
+            string note = string.Empty;
+            if (carry != CameraCarry.Off && !carrying)
             {
-                if (_carry != null && _carry.Returning)
+                string reason;
+                PlayerCarry? taken = null;
+                bool ok = _carry == null
+                    ? PlayerCarry.TryTake(carry, out taken, out reason)
+                    : Fail("the player is still being put back after the last carried move", out reason);
+                if (!ok)
                 {
-                    output("ERROR: the player is still being put back after the last carried move; try again in a moment or use --no-carry");
-                    return false;
-                }
-
-                if (_carry == null)
-                {
-                    if (!PlayerCarry.TryTake(options.Carry, out PlayerCarry? carry, out string error))
+                    // Asked for: refuse. Only the default: fly without it and say so.
+                    if (given)
                     {
-                        output(error);
+                        output("ERROR: --carry: " + reason + "; use --no-carry");
                         return false;
                     }
 
-                    _carry = carry;
+                    carry = CameraCarry.Off;
+                    note = " (not carried: " + reason + ")";
                 }
                 else
                 {
-                    // The move this one replaces carried the player: keep its saved state and start.
-                    _carry.Landing = options.Carry;
+                    _carry = taken;
                 }
+            }
+            else if (carry != CameraCarry.Off && given)
+            {
+                _carry!.Landing = carry;
             }
 
             if (_move != null) _last = _move.Kind + " replaced by a new move";
             _move = null;
-            if (options.Carry == CameraCarry.Off) ReleaseCarry(From(camera.transform.position));
+            move.Carry = carry;
+            if (carry == CameraCarry.Off)
+            {
+                string released = ReleaseCarry(From(camera.transform.position));
+                if (released.Length > 0) note += released.Replace("; player", " (the last move's player") + ")";
+            }
+
             if (options.NoSpawn) SpawnPause.Hold();
             else SpawnPause.Release();
             if (options.Clean.HasValue) move.Cleaned.Add(ShotCleaner.Clean(move.Near, options.Clean.Value, all: false, corpses: true));
             TakeFreeFly(camera);
             _move = move;
             Apply(camera, move, 0);
+            move.Note = note;
             return true;
+        }
+
+        private static bool Fail(string why, out string reason)
+        {
+            reason = why;
+            return false;
         }
 
         /// <summary>Free-fly on, no smoothing, lock-on, target or drift: the state every scripted pose starts from.</summary>
@@ -414,7 +480,7 @@ namespace valheimCLI
                 _move = null;
                 _last = move.Kind + " failed: " + ex.Message;
                 valheimCLIPlugin.Log.LogError("Camera move failed: " + ex);
-                EndExtras(__instance);
+                _last += EndExtras(__instance);
             }
         }
 
@@ -423,7 +489,37 @@ namespace valheimCLI
             t = CameraMath.Clamp01(t);
             SetPose(camera, To(move.Position(t)), To(move.Look(t)), out _, out _);
             _carry?.Follow(camera.transform.position);
-            if (move.Options.Clean.HasValue && t > 0) move.Cleaned.Add(ShotCleaner.Clean(move.Near, move.Options.Clean.Value, all: false, corpses: false));
+            if (move.Options.Clean.HasValue && t > 0)
+            {
+                double radius = move.Options.Clean.Value;
+                move.Cleaned.Add(ShotCleaner.Clean(LoadedPart(move.Near, radius), radius, all: false, corpses: false));
+            }
+        }
+
+        /// <summary>How far from this game's reference position creatures and drops can exist: its loaded zones (5 x 5 zones of 64 m), corner to centre, plus a zone.</summary>
+        private const double LoadedReach = 290;
+        private static readonly List<CameraMoveSample> Window = new List<CameraMoveSample>();
+
+        /// <summary>
+        /// The move's points that anything this game has loaded can be near: creatures and drops exist
+        /// only in the zones around the reference position (the carried player, or the player), so a
+        /// per-frame sweep measures against those points only, not the whole of a long path.
+        /// </summary>
+        private static List<CameraMoveSample> LoadedPart(List<CameraMoveSample> near, double radius)
+        {
+            Window.Clear();
+            if (ZNet.instance == null) return Window;
+            Vector3 centre = ZNet.instance.GetReferencePosition();
+            double reach = LoadedReach + radius;
+            double reach2 = reach * reach;
+            foreach (CameraMoveSample sample in near)
+            {
+                double dx = sample.Position.X - centre.x;
+                double dz = sample.Position.Z - centre.z;
+                if ((dx * dx) + (dz * dz) <= reach2) Window.Add(sample);
+            }
+
+            return Window;
         }
 
         private static void Finish(string how)
@@ -464,9 +560,10 @@ namespace valheimCLI
             }
             catch (Exception ex)
             {
-                _carry = null;
                 valheimCLIPlugin.Log.LogError("Camera carry release failed: " + ex);
-                return "; player put back FAILED: " + ex.Message;
+                carry.ForceRestore();
+                _carry = null;
+                return "; player put back FAILED (flags restored where it is): " + ex.Message;
             }
         }
 
@@ -482,7 +579,7 @@ namespace valheimCLI
 
             double fraction = move.Seconds > 0 ? Math.Min(1, move.Elapsed / move.Seconds) : 1;
             return string.Format(CultureInfo.InvariantCulture, "OK: camera {0} running {1:F1}/{2:F1}s ({3:F0}%) {4} {5}{6}{7}",
-                move.Kind, move.Elapsed, move.Seconds, fraction * 100, camera != null ? Pose(camera) : string.Empty, move.Options.Describe(), Cleaned(move), carry);
+                move.Kind, move.Elapsed, move.Seconds, fraction * 100, camera != null ? Pose(camera) : string.Empty, move.Options.Describe(move.Carry), Cleaned(move), carry);
         }
 
         private static string Pose(GameCamera camera)

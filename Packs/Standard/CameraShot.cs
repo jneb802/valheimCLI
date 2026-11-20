@@ -25,10 +25,12 @@ namespace valheimCLI
         private readonly bool _god;
         private readonly bool _ghost;
         private readonly bool _debugFly;
+        private readonly bool _autoPickup;
         private Vector3 _target;
         private Quaternion _targetRotation;
         private bool _returning;
         private bool _teleportAccepted;
+        private bool _restored;
 
         private PlayerCarry(Player player)
         {
@@ -38,6 +40,7 @@ namespace valheimCLI
             _god = player.InGodMode();
             _ghost = player.InGhostMode();
             _debugFly = player.m_debugFly;
+            _autoPickup = Player.m_enableAutoPickup;
         }
 
         public Player Player { get; }
@@ -46,22 +49,22 @@ namespace valheimCLI
         public CameraCarry Landing { get; set; }
         public bool Returning => _returning;
 
-        /// <summary>Takes the local player, or says why it cannot be carried.</summary>
-        public static bool TryTake(CameraCarry landing, out PlayerCarry? carry, out string error)
+        /// <summary>Takes the local player, or says why it cannot be carried (<paramref name="reason"/>, without an ERROR prefix).</summary>
+        public static bool TryTake(CameraCarry landing, out PlayerCarry? carry, out string reason)
         {
             carry = null;
-            error = string.Empty;
+            reason = string.Empty;
             Player player = Player.m_localPlayer;
             if (player == null || player.m_nview == null || !player.m_nview.IsValid())
             {
-                error = "ERROR: --carry needs a local player; use --no-carry";
+                reason = "no local player";
                 return false;
             }
 
             TeleportBlock block = CustomCommands.TeleportBlocker(player);
             if (block != TeleportBlock.None || player.IsTeleporting())
             {
-                error = "ERROR: the player cannot be carried now (" + CustomCommands.TeleportStateFields(player) + "); use --no-carry";
+                reason = "the player cannot be moved now: " + CustomCommands.TeleportStateFields(player);
                 return false;
             }
 
@@ -70,6 +73,8 @@ namespace valheimCLI
             player.SetGodMode(true);
             player.SetGhostMode(true);
             carry.SetDebugFly(true);
+            // Placed at the camera, the player would pick up the drops it flies past.
+            Player.m_enableAutoPickup = false;
             return true;
         }
 
@@ -165,6 +170,27 @@ namespace valheimCLI
             Restore();
         }
 
+        /// <summary>
+        /// Before the game saves a logout point (logout, quit): the player is set down at its start
+        /// at once, loaded or not, with every flag restored, so the save holds where it stood rather
+        /// than a point in the air beside the camera.
+        /// </summary>
+        public void Drop()
+        {
+            if (!Alive) return;
+            _returning = true;
+            if (!_teleportAccepted) Place(Start, StartRotation);
+            Restore();
+        }
+
+        /// <summary>After an error: give the flags back where the player is, never throwing.</summary>
+        public void ForceRestore()
+        {
+            try { Restore(); }
+            catch (Exception ex) { valheimCLIPlugin.Log.LogError("Camera carry restore failed: " + ex); }
+            finally { Player.m_enableAutoPickup = _autoPickup; }
+        }
+
         public string Describe()
         {
             string state = _returning ? (_teleportAccepted ? "returning (teleport)" : "returning") : "carried";
@@ -192,6 +218,8 @@ namespace valheimCLI
 
         private void Restore()
         {
+            if (_restored) return;
+            Player.m_enableAutoPickup = _autoPickup;
             if (!Alive) return;
             Player.m_maxAirAltitude = Player.transform.position.y;
             SetDebugFly(_debugFly);
@@ -209,6 +237,7 @@ namespace valheimCLI
 
             _hidden.Clear();
             _dimmed.Clear();
+            _restored = true;
         }
 
         private void Hide()
@@ -457,16 +486,31 @@ namespace valheimCLI
             return new ClearanceSample(sample, ClearanceKind.Clip, Name(nearest), hi);
         }
 
+        /// <summary>
+        /// Inside a solid: looking up, the first face is met from behind, and looking down too (or
+        /// nothing is below, as under the terrain sheet). The second look keeps open-bottomed rock and
+        /// cliff meshes overhead (no underside faces) from reading as "inside" for a camera under them.
+        /// </summary>
         private static bool Inside(Vector3 p, int mask, out Collider? within)
         {
             within = null;
-            Physics.queriesHitBackfaces = true;
-            if (!Physics.Raycast(p, Vector3.up, out RaycastHit any, 2000f, mask, QueryTriggerInteraction.Ignore)) return false;
-            Physics.queriesHitBackfaces = false;
-            bool front = Physics.Raycast(p, Vector3.up, out RaycastHit outside, 2000f, mask, QueryTriggerInteraction.Ignore);
-            if (front && outside.distance <= any.distance + 1e-3f) return false;
-            within = any.collider;
+            if (!FirstHitFromBehind(p, Vector3.up, mask, out Collider? above, out bool anyAbove) || !anyAbove) return false;
+            bool belowFromBehind = FirstHitFromBehind(p, Vector3.down, mask, out _, out bool anyBelow);
+            if (anyBelow && !belowFromBehind) return false;
+            within = above;
             return true;
+        }
+
+        private static bool FirstHitFromBehind(Vector3 p, Vector3 direction, int mask, out Collider? collider, out bool any)
+        {
+            collider = null;
+            Physics.queriesHitBackfaces = true;
+            any = Physics.Raycast(p, direction, out RaycastHit both, 2000f, mask, QueryTriggerInteraction.Ignore);
+            Physics.queriesHitBackfaces = false;
+            if (!any) return false;
+            collider = both.collider;
+            bool front = Physics.Raycast(p, direction, out RaycastHit outside, 2000f, mask, QueryTriggerInteraction.Ignore);
+            return !front || outside.distance > both.distance + 1e-3f;
         }
 
         /// <summary>The object a collider belongs to: the network object's prefab name, "terrain" for the heightmap, else the collider's object.</summary>

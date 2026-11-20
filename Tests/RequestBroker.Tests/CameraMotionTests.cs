@@ -456,6 +456,36 @@ public class CameraMotionTests
         AssertNear(left.PositionAt(1), l[0].Position, 1e-6);
     }
 
+    [Theory]
+    [InlineData(3600, false, 0, 360)]
+    [InlineData(-720, false, -360, 0)]
+    [InlineData(200, true, -200, 160)]
+    public void ArcSamplesStopAtOneRevolution(double sweep, bool swing, double from, double to)
+    {
+        CameraArc arc = new(new CameraVector(0, 0, 0), 20, 5, 30, sweep, swing, linear: false);
+        List<CameraMoveSample> samples = arc.Samples(1.0);
+        Assert.Equal(from, samples[0].Parameter, 9);
+        Assert.Equal(to, samples[^1].Parameter, 9);
+        Assert.Equal(Math.Ceiling(2 * Math.PI * 20), samples.Count - 1);
+        AssertNear(arc.PositionAt(0), arc.PositionAtOffset(0));
+    }
+
+    [Fact]
+    public void CarryGivenTellsAnAskedCarryFromTheDefault()
+    {
+        Assert.True(CameraPathRequest.TryParse(Args("cli_camera_path 10 1,2,3 4,5,6"), out CameraPathRequest p, out _));
+        Assert.False(p.Options.CarryGiven);
+        Assert.Equal("carry=start clean=off nospawn=off", p.Options.Describe());
+        Assert.Equal("carry=off clean=off nospawn=off", p.Options.Describe(CameraCarry.Off));
+        Assert.True(CameraPathRequest.TryParse(Args("cli_camera_path 10 1,2,3 4,5,6 --carry"), out p, out _));
+        Assert.True(p.Options.CarryGiven);
+        Assert.True(CameraPathRequest.TryParse(Args("cli_camera_path 10 1,2,3 4,5,6 --no-carry"), out p, out _));
+        Assert.True(p.Options.CarryGiven);
+        Assert.True(CameraArcRequest.TryParse(Args("cli_camera_arc 20 10"), out CameraArcRequest a, out _));
+        Assert.False(a.Options.CarryGiven);
+        Assert.Equal("carry=end clean=off nospawn=off", a.Options.Describe(CameraCarry.End));
+    }
+
     [Fact]
     public void NearAnyMeasuresToTheClosestSample()
     {

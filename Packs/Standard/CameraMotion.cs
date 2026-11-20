@@ -142,9 +142,12 @@ namespace valheimCLI
         /// <summary>The bearing from the focus to the camera at progress <paramref name="t"/>.</summary>
         public double BearingAt(double t) => StartBearing - OffsetAt(t);
 
-        public CameraVector PositionAt(double t)
+        public CameraVector PositionAt(double t) => PositionAtOffset(OffsetAt(t));
+
+        /// <summary>The camera's position at a bearing offset (degrees) from the start.</summary>
+        public CameraVector PositionAtOffset(double offset)
         {
-            double bearing = BearingAt(t) * (Math.PI / 180.0);
+            double bearing = (StartBearing - offset) * (Math.PI / 180.0);
             return new CameraVector(Focus.X + (Radius * Math.Sin(bearing)), Focus.Y + Height, Focus.Z + (Radius * Math.Cos(bearing)));
         }
 
@@ -153,22 +156,28 @@ namespace valheimCLI
 
         /// <summary>
         /// Points on every part of the circle the move visits (0..Sweep, or -Sweep..+Sweep for a
-        /// swing), at most <paramref name="maximumStep"/> m apart along the arc. A sample's
-        /// parameter is its bearing offset from the start in degrees (positive = to the camera's right).
+        /// swing; one revolution at most, as more laps visit the same points), at most
+        /// <paramref name="maximumStep"/> m apart along the arc. A sample's parameter is its bearing
+        /// offset from the start in degrees (positive = to the camera's right).
         /// </summary>
         public List<CameraMoveSample> Samples(double maximumStep)
         {
             double from = Swing ? -Math.Abs(Sweep) : Math.Min(0, Sweep);
             double to = Swing ? Math.Abs(Sweep) : Math.Max(0, Sweep);
+            if (to - from > 360)
+            {
+                // Keep the end the move starts from: 0 for a plain arc, -Sweep for a swing.
+                if (Swing || Sweep > 0) to = from + 360;
+                else from = to - 360;
+            }
+
             double metresPerDegree = Math.Max(Radius, 1e-6) * (Math.PI / 180.0);
             int steps = CameraMoveSample.Steps((to - from) * metresPerDegree, maximumStep);
             List<CameraMoveSample> samples = new List<CameraMoveSample>(steps + 1);
             for (int i = 0; i <= steps; i++)
             {
                 double offset = from + ((to - from) * i / steps);
-                double bearing = (StartBearing - offset) * (Math.PI / 180.0);
-                CameraVector position = new CameraVector(Focus.X + (Radius * Math.Sin(bearing)), Focus.Y + Height, Focus.Z + (Radius * Math.Cos(bearing)));
-                samples.Add(new CameraMoveSample(offset, (offset - from) * metresPerDegree, position));
+                samples.Add(new CameraMoveSample(offset, (offset - from) * metresPerDegree, PositionAtOffset(offset)));
             }
 
             return samples;
@@ -492,6 +501,12 @@ namespace valheimCLI
         }
 
         public CameraCarry Carry { get; private set; }
+        /// <summary>
+        /// Whether --carry or --no-carry was given. A carry that was only the default gives way: it
+        /// is skipped when the player cannot be carried, and a move that replaces a carried move
+        /// keeps carrying.
+        /// </summary>
+        public bool CarryGiven => _carryGiven || _noCarryGiven;
         /// <summary>When set, the command is a dry run: report where the move comes within this many metres of a solid collider.</summary>
         public double? Check { get; private set; }
         /// <summary>When set, hostile creatures, drops and corpses within this many metres of the move are removed at its start and every frame of it.</summary>
@@ -567,9 +582,11 @@ namespace valheimCLI
             }
         }
 
-        public string Describe()
+        /// <summary>The options as a status fragment; <paramref name="carried"/> is the carry the move really has, when it differs from the request.</summary>
+        public string Describe(CameraCarry? carried = null)
         {
-            string carry = Carry == CameraCarry.Off ? "off" : (Carry == CameraCarry.End ? "end" : "start");
+            CameraCarry effective = carried ?? Carry;
+            string carry = effective == CameraCarry.Off ? "off" : (effective == CameraCarry.End ? "end" : "start");
             string clean = Clean.HasValue ? Clean.Value.ToString("F0", CultureInfo.InvariantCulture) + "m" : "off";
             return "carry=" + carry + " clean=" + clean + " nospawn=" + (NoSpawn ? "on" : "off");
         }
