@@ -8,13 +8,13 @@ through the public API. There is no second DLL loader or runtime compiler.
 
 | Install | Owns | Console commands |
 |---|---|---:|
-| `valheimCLI.dll` | Transport, permissions, expectations, all built-in gameplay, world, reflection, capture and Observe commands | 144 |
+| `valheimCLI.dll` | Transport, permissions, expectations, all built-in gameplay, world, reflection, capture and Observe commands | 145 |
 
 Before the split, core registered 135 console commands. The seven `cli_mwl_*`
 port commands left core (see below); the other 128 keep their names and are each
 registered exactly once in the default plugin. That plugin also includes the
 new extension, access, generator, terrain-modifier, teleport, and readiness
-commands, and the camera-move and HUD commands (`cli_camera_arc`, `cli_camera_path`, `cli_camera_stop`, `cli_camera_status`, `cli_hud`; see the README), for 144 console commands in total. `cli_screenshot_path64` takes one
+commands, and the camera-move and HUD commands (`cli_camera_arc`, `cli_camera_path`, `cli_camera_stop`, `cli_camera_status`, `cli_camera_clean`, `cli_hud`; see the README), for 145 console commands in total. `cli_screenshot_path64` takes one
 base64url-encoded absolute PNG path for owned-run evidence; unlike
 `cli_screenshot`, it never chooses the user's default screenshot folder.
 `docs/command-inventory-before.json` records the 135;

@@ -152,6 +152,29 @@ namespace valheimCLI
         public CameraVector LookAt(double t) => Focus;
 
         /// <summary>
+        /// Points on every part of the circle the move visits (0..Sweep, or -Sweep..+Sweep for a
+        /// swing), at most <paramref name="maximumStep"/> m apart along the arc. A sample's
+        /// parameter is its bearing offset from the start in degrees (positive = to the camera's right).
+        /// </summary>
+        public List<CameraMoveSample> Samples(double maximumStep)
+        {
+            double from = Swing ? -Math.Abs(Sweep) : Math.Min(0, Sweep);
+            double to = Swing ? Math.Abs(Sweep) : Math.Max(0, Sweep);
+            double metresPerDegree = Math.Max(Radius, 1e-6) * (Math.PI / 180.0);
+            int steps = CameraMoveSample.Steps((to - from) * metresPerDegree, maximumStep);
+            List<CameraMoveSample> samples = new List<CameraMoveSample>(steps + 1);
+            for (int i = 0; i <= steps; i++)
+            {
+                double offset = from + ((to - from) * i / steps);
+                double bearing = (StartBearing - offset) * (Math.PI / 180.0);
+                CameraVector position = new CameraVector(Focus.X + (Radius * Math.Sin(bearing)), Focus.Y + Height, Focus.Z + (Radius * Math.Cos(bearing)));
+                samples.Add(new CameraMoveSample(offset, (offset - from) * metresPerDegree, position));
+            }
+
+            return samples;
+        }
+
+        /// <summary>
         /// An arc whose start is the camera's current position: its radius, height and bearing
         /// relative to the focus, each replaced by an override when one is given.
         /// </summary>
@@ -262,6 +285,26 @@ namespace valheimCLI
         }
 
         public CameraVector PointAtDistance(double s) => Evaluate(_points, ParameterAt(s));
+
+        /// <summary>
+        /// Points along the whole path at equal distances at most <paramref name="maximumStep"/> m
+        /// apart, first and last waypoint included. A sample's parameter is the spline parameter
+        /// (waypoint index plus fraction, 0 = the first waypoint of the path).
+        /// </summary>
+        public List<CameraMoveSample> Samples(double maximumStep)
+        {
+            double length = Length;
+            int steps = CameraMoveSample.Steps(length, maximumStep);
+            List<CameraMoveSample> samples = new List<CameraMoveSample>(steps + 1);
+            for (int i = 0; i <= steps; i++)
+            {
+                double s = length * i / steps;
+                double u = ParameterAt(s);
+                samples.Add(new CameraMoveSample(u, s, Evaluate(_points, u)));
+            }
+
+            return samples;
+        }
 
         /// <summary>The distance along the path at progress <paramref name="t"/>: constant speed, eased at both ends.</summary>
         public double DistanceAt(double t) => Length * CameraMath.Ease(t, Linear);
@@ -375,10 +418,348 @@ namespace valheimCLI
         }
     }
 
+    /// <summary>A point on a move: its parameter (spline parameter or arc bearing offset), its distance along the move, and where it is.</summary>
+    public readonly struct CameraMoveSample
+    {
+        public readonly double Parameter;
+        public readonly double Along;
+        public readonly CameraVector Position;
+
+        public CameraMoveSample(double parameter, double along, CameraVector position)
+        {
+            Parameter = parameter;
+            Along = along;
+            Position = position;
+        }
+
+        /// <summary>How many equal steps of at most <paramref name="maximumStep"/> m cover <paramref name="length"/> m (at least one).</summary>
+        public static int Steps(double length, double maximumStep)
+        {
+            if (!(maximumStep > 0)) throw new ArgumentOutOfRangeException(nameof(maximumStep));
+            if (!(length > 0)) return 1;
+            return Math.Max(1, (int)Math.Ceiling((length / maximumStep) - 1e-9));
+        }
+
+        /// <summary>Whether <paramref name="point"/> is within <paramref name="radius"/> m of any sample.</summary>
+        public static bool NearAny(CameraVector point, IReadOnlyList<CameraMoveSample> samples, double radius)
+        {
+            double r2 = radius * radius;
+            for (int i = 0; i < samples.Count; i++)
+            {
+                CameraVector d = point - samples[i].Position;
+                if ((d.X * d.X) + (d.Y * d.Y) + (d.Z * d.Z) <= r2) return true;
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>Whether the local player is carried along with a move, and where it is put back when the move ends.</summary>
+    public enum CameraCarry
+    {
+        /// <summary>The player stays where it is; the camera flies alone.</summary>
+        Off,
+        /// <summary>Carried, then put back where it stood when the move started.</summary>
+        Start,
+        /// <summary>Carried, then put on the solid ground under the camera's final pose (the start when there is none).</summary>
+        End
+    }
+
+    /// <summary>
+    /// The options both camera moves take: carry the player along (zones load around it), a
+    /// dry-run clearance check, cleaning creatures and drops around the move, and pausing spawns.
+    /// </summary>
+    public sealed class CameraMoveOptions
+    {
+        public const string Usage = "[--carry [start|end]] [--no-carry] [--check [clearance m]] [--clean [radius m]] [--nospawn]";
+        public const double DefaultClearance = 1.0;
+        public const double MaximumClearance = 20;
+        public const double DefaultCleanRadius = 40;
+        public const double MaximumCleanRadius = 1000;
+        private bool _carryGiven;
+        private bool _noCarryGiven;
+
+        public CameraMoveOptions(CameraCarry defaultCarry)
+        {
+            Carry = defaultCarry;
+        }
+
+        public enum Parsed
+        {
+            NotAnOption,
+            Ok,
+            Error
+        }
+
+        public CameraCarry Carry { get; private set; }
+        /// <summary>When set, the command is a dry run: report where the move comes within this many metres of a solid collider.</summary>
+        public double? Check { get; private set; }
+        /// <summary>When set, hostile creatures, drops and corpses within this many metres of the move are removed at its start and every frame of it.</summary>
+        public double? Clean { get; private set; }
+        /// <summary>Pause the game's natural spawning (SpawnSystem.m_nospawn) for the move.</summary>
+        public bool NoSpawn { get; private set; }
+
+        /// <summary>
+        /// Parses the move option at <paramref name="i"/>, advancing past its value if it has one.
+        /// Answers NotAnOption for anything else, so each command keeps its own options.
+        /// </summary>
+        public Parsed TryParse(IReadOnlyList<string> args, ref int i, out string error)
+        {
+            error = string.Empty;
+            string option = args[i].ToLowerInvariant();
+            switch (option)
+            {
+                case "--carry":
+                    if (_noCarryGiven)
+                    {
+                        error = "ERROR: --carry and --no-carry contradict each other";
+                        return Parsed.Error;
+                    }
+
+                    _carryGiven = true;
+                    Carry = CameraCarry.Start;
+                    if (i + 1 < args.Count)
+                    {
+                        string landing = args[i + 1].ToLowerInvariant();
+                        if (landing == "start" || landing == "end")
+                        {
+                            Carry = landing == "end" ? CameraCarry.End : CameraCarry.Start;
+                            i++;
+                        }
+                    }
+
+                    return Parsed.Ok;
+                case "--no-carry":
+                    if (_carryGiven)
+                    {
+                        error = "ERROR: --carry and --no-carry contradict each other";
+                        return Parsed.Error;
+                    }
+
+                    _noCarryGiven = true;
+                    Carry = CameraCarry.Off;
+                    return Parsed.Ok;
+                case "--nospawn":
+                    NoSpawn = true;
+                    return Parsed.Ok;
+                case "--check":
+                case "--clean":
+                    bool check = option == "--check";
+                    double value = check ? DefaultClearance : DefaultCleanRadius;
+                    double maximum = check ? MaximumClearance : MaximumCleanRadius;
+                    if (i + 1 < args.Count && CameraArcRequest.TryNumber(args[i + 1], out double given))
+                    {
+                        if (given <= 0 || given > maximum)
+                        {
+                            error = string.Format(CultureInfo.InvariantCulture, "ERROR: {0} must be above 0 and at most {1} m", option, maximum);
+                            return Parsed.Error;
+                        }
+
+                        value = given;
+                        i++;
+                    }
+
+                    if (check) Check = value;
+                    else Clean = value;
+                    return Parsed.Ok;
+                default:
+                    return Parsed.NotAnOption;
+            }
+        }
+
+        public string Describe()
+        {
+            string carry = Carry == CameraCarry.Off ? "off" : (Carry == CameraCarry.End ? "end" : "start");
+            string clean = Clean.HasValue ? Clean.Value.ToString("F0", CultureInfo.InvariantCulture) + "m" : "off";
+            return "carry=" + carry + " clean=" + clean + " nospawn=" + (NoSpawn ? "on" : "off");
+        }
+    }
+
+    /// <summary>What the clearance probe found at one sample of a move.</summary>
+    public enum ClearanceKind
+    {
+        Clear,
+        /// <summary>A solid collider within the clearance (distance 0: the sample is inside it).</summary>
+        Clip,
+        /// <summary>The ground or its objects are not loaded here, so nothing could be checked.</summary>
+        Unloaded
+    }
+
+    /// <summary>One probed sample: where it is on the move and what is nearest.</summary>
+    public readonly struct ClearanceSample
+    {
+        public readonly CameraMoveSample Sample;
+        public readonly ClearanceKind Kind;
+        public readonly string Collider;
+        public readonly double Distance;
+
+        public ClearanceSample(CameraMoveSample sample, ClearanceKind kind, string collider = "", double distance = 0)
+        {
+            Sample = sample;
+            Kind = kind;
+            Collider = collider ?? string.Empty;
+            Distance = distance;
+        }
+    }
+
+    /// <summary>A run of samples of one kind, from its first to its last sample, with the closest one.</summary>
+    public sealed class ClearanceStretch
+    {
+        public ClearanceStretch(ClearanceSample first)
+        {
+            Kind = first.Kind;
+            First = first;
+            Last = first;
+            Closest = first;
+            Samples = 1;
+            if (first.Collider.Length > 0) Colliders.Add(first.Collider);
+        }
+
+        public ClearanceKind Kind { get; }
+        public ClearanceSample First { get; }
+        public ClearanceSample Last { get; private set; }
+        public ClearanceSample Closest { get; private set; }
+        public int Samples { get; private set; }
+        public List<string> Colliders { get; } = new List<string>();
+
+        internal void Add(ClearanceSample sample)
+        {
+            Last = sample;
+            Samples++;
+            if (sample.Distance < Closest.Distance) Closest = sample;
+            if (sample.Collider.Length > 0 && !Colliders.Contains(sample.Collider)) Colliders.Add(sample.Collider);
+        }
+    }
+
+    /// <summary>
+    /// The pure half of the clearance check (<c>--check</c>): the merging of the samples that
+    /// clip or are unloaded into stretches a script can put waypoints into, and their report lines.
+    /// </summary>
+    public static class CameraClearance
+    {
+        /// <summary>The longest step between probed samples, in metres.</summary>
+        public const double SampleStep = 1.0;
+        /// <summary>Runs of one kind at most this far apart along the move are one stretch: a lone clear sample between two clips is no gap worth a waypoint.</summary>
+        public const double MergeGap = 2.0;
+
+        /// <summary>
+        /// Merges the samples that are not clear into stretches, each kind on its own: a sample joins
+        /// the open stretch of its kind when it is at most <paramref name="mergeGap"/> m along the
+        /// move from that stretch's last sample, else it starts a new one. Stretches come back in
+        /// order of their first sample along the move.
+        /// </summary>
+        public static List<ClearanceStretch> Merge(IReadOnlyList<ClearanceSample> samples, double mergeGap = MergeGap)
+        {
+            List<ClearanceStretch> done = new List<ClearanceStretch>();
+            ClearanceStretch? clip = null;
+            ClearanceStretch? unloaded = null;
+            for (int i = 0; i < samples.Count; i++)
+            {
+                ClearanceSample sample = samples[i];
+                if (sample.Kind == ClearanceKind.Clip) clip = Extend(clip, sample, mergeGap, done);
+                else if (sample.Kind == ClearanceKind.Unloaded) unloaded = Extend(unloaded, sample, mergeGap, done);
+            }
+
+            if (clip != null) done.Add(clip);
+            if (unloaded != null) done.Add(unloaded);
+            done.Sort((a, b) => a.First.Sample.Along.CompareTo(b.First.Sample.Along));
+            return done;
+        }
+
+        private static ClearanceStretch Extend(ClearanceStretch? open, ClearanceSample sample, double mergeGap, List<ClearanceStretch> done)
+        {
+            if (open != null && sample.Sample.Along - open.Last.Sample.Along <= mergeGap + 1e-9)
+            {
+                open.Add(sample);
+                return open;
+            }
+
+            if (open != null) done.Add(open);
+            return new ClearanceStretch(sample);
+        }
+
+        /// <summary>One report line for a stretch; <paramref name="parameter"/> names the sample parameter (u for a path, deg for an arc).</summary>
+        public static string Format(ClearanceStretch stretch, string parameter)
+        {
+            string head = string.Format(CultureInfo.InvariantCulture,
+                "{0} {1}={2:F3}..{3:F3} s={4:F1}..{5:F1}m samples={6} from={7} to={8}",
+                stretch.Kind == ClearanceKind.Clip ? "CLIP" : "UNLOADED", parameter,
+                stretch.First.Sample.Parameter, stretch.Last.Sample.Parameter,
+                stretch.First.Sample.Along, stretch.Last.Sample.Along, stretch.Samples,
+                stretch.First.Sample.Position.Format(), stretch.Last.Sample.Position.Format());
+            if (stretch.Kind != ClearanceKind.Clip) return head;
+            ClearanceSample c = stretch.Closest;
+            return head + string.Format(CultureInfo.InvariantCulture,
+                " closest {0}={1:F3} s={2:F1}m at={3} collider={4} dist={5:F2} colliders={6}",
+                parameter, c.Sample.Parameter, c.Sample.Along, c.Sample.Position.Format(), c.Collider, c.Distance,
+                string.Join(",", stretch.Colliders));
+        }
+    }
+
+    /// <summary>A parsed <c>cli_camera_clean</c> request.</summary>
+    public sealed class CameraCleanRequest
+    {
+        public const string Usage = "Usage: cli_camera_clean [radius m] [x y z] [--all]";
+        public const double DefaultRadius = 60;
+        public double Radius { get; private set; } = DefaultRadius;
+        public CameraVector? Centre { get; private set; }
+        /// <summary>Also remove creatures that are not hostile to the player (deer and the like); tamed creatures and bosses always stay.</summary>
+        public bool All { get; private set; }
+
+        public static bool TryParse(IReadOnlyList<string> args, out CameraCleanRequest request, out string error)
+        {
+            request = new CameraCleanRequest();
+            error = Usage;
+            List<double> numbers = new List<double>();
+            for (int i = 1; i < args.Count; i++)
+            {
+                if (args[i].Equals("--all", StringComparison.OrdinalIgnoreCase))
+                {
+                    request.All = true;
+                    continue;
+                }
+
+                if (!CameraArcRequest.TryNumber(args[i], out double number))
+                {
+                    error = $"ERROR: unknown argument '{args[i]}'. {Usage}";
+                    return false;
+                }
+
+                numbers.Add(number);
+            }
+
+            if (numbers.Count == 2 || numbers.Count > 4)
+            {
+                return false;
+            }
+
+            int at = 0;
+            if (numbers.Count == 1 || numbers.Count == 4)
+            {
+                double radius = numbers[0];
+                if (radius <= 0 || radius > CameraMoveOptions.MaximumCleanRadius)
+                {
+                    error = "ERROR: the radius must be above 0 and at most 1000 m";
+                    return false;
+                }
+
+                request.Radius = radius;
+                at = 1;
+            }
+
+            if (numbers.Count >= 3)
+            {
+                request.Centre = new CameraVector(numbers[at], numbers[at + 1], numbers[at + 2]);
+            }
+
+            return true;
+        }
+    }
+
     /// <summary>A parsed <c>cli_camera_arc</c> request.</summary>
     public sealed class CameraArcRequest
     {
-        public const string Usage = "Usage: cli_camera_arc <degrees> <seconds> [x y z] [--radius m] [--height m] [--start bearing] [--distance m] [--swing] [--linear]";
+        public const string Usage = "Usage: cli_camera_arc <degrees> <seconds> [x y z] [--radius m] [--height m] [--start bearing] [--distance m] [--swing] [--linear] " + CameraMoveOptions.Usage;
         public double Degrees { get; private set; }
         public double Seconds { get; private set; }
         public CameraVector? Focus { get; private set; }
@@ -388,6 +769,8 @@ namespace valheimCLI
         public double? Distance { get; private set; }
         public bool Swing { get; private set; }
         public bool Linear { get; private set; }
+        /// <summary>Carry, check, clean and nospawn. An arc stays near its focus, so it carries the player only when asked (--carry).</summary>
+        public CameraMoveOptions Options { get; } = new CameraMoveOptions(CameraCarry.Off);
 
         public static bool TryParse(IReadOnlyList<string> args, out CameraArcRequest request, out string error)
         {
@@ -458,7 +841,9 @@ namespace valheimCLI
                         else request.Distance = value;
                         continue;
                     default:
-                        error = $"ERROR: unknown argument '{args[i]}'. {Usage}";
+                        CameraMoveOptions.Parsed parsed = request.Options.TryParse(args, ref i, out string optionError);
+                        if (parsed == CameraMoveOptions.Parsed.Ok) continue;
+                        error = parsed == CameraMoveOptions.Parsed.Error ? optionError : $"ERROR: unknown argument '{args[i]}'. {Usage}";
                         return false;
                 }
             }
@@ -483,7 +868,7 @@ namespace valheimCLI
     /// <summary>A parsed <c>cli_camera_path</c> request.</summary>
     public sealed class CameraPathRequest
     {
-        public const string Usage = "Usage: cli_camera_path <seconds> <x,y,z[@lx,ly,lz]> <x,y,z[@lx,ly,lz]>... [--look x,y,z] [--pitch deg] [--ahead m] [--from-here] [--linear]";
+        public const string Usage = "Usage: cli_camera_path <seconds> <x,y,z[@lx,ly,lz]> <x,y,z[@lx,ly,lz]>... [--look x,y,z] [--pitch deg] [--ahead m] [--from-here] [--linear] " + CameraMoveOptions.Usage;
         public const int MaximumWaypoints = 64;
         public double Seconds { get; private set; }
         public List<CameraVector> Points { get; } = new List<CameraVector>();
@@ -493,6 +878,11 @@ namespace valheimCLI
         public double LookAhead { get; private set; } = 8;
         public bool FromHere { get; private set; }
         public bool Linear { get; private set; }
+        /// <summary>
+        /// Carry, check, clean and nospawn. A path carries the player by default: free-fly loads no
+        /// zones, and any path that leaves the area loaded around the player flies into bare terrain.
+        /// </summary>
+        public CameraMoveOptions Options { get; } = new CameraMoveOptions(CameraCarry.Start);
 
         public static bool TryParse(IReadOnlyList<string> args, out CameraPathRequest request, out string error)
         {
@@ -579,7 +969,9 @@ namespace valheimCLI
 
                 if (token.StartsWith("--", StringComparison.Ordinal))
                 {
-                    error = $"ERROR: unknown argument '{token}'. {Usage}";
+                    CameraMoveOptions.Parsed parsed = request.Options.TryParse(args, ref i, out string optionError);
+                    if (parsed == CameraMoveOptions.Parsed.Ok) continue;
+                    error = parsed == CameraMoveOptions.Parsed.Error ? optionError : $"ERROR: unknown argument '{token}'. {Usage}";
                     return false;
                 }
 

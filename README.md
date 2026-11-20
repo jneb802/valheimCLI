@@ -137,11 +137,26 @@ valheim-cli cli_camera_arc 90 40 5136 66 -5408
 # The same with an explicit start: 120 m out, 45 m up, starting south (bearing 180).
 valheim-cli cli_camera_arc -60 30 5136 66 -5408 --radius 120 --height 45 --start 180
 # Fly over a road at constant speed, looking 25 degrees down along the heading.
+# The player is carried along (so the zones ahead load) and put back where it
+# stood when the move ends.
 valheim-cli cli_camera_path 40 5000,95,-5380 5080,92,-5400 5160,90,-5420 5240,95,-5400 --pitch 25
-# Fly past a point, always looking at it; start from where the camera is.
-valheim-cli cli_camera_path 20 5200,90,-5450 --from-here --look 5136,66,-5408
-valheim-cli cli_camera_status    # OK: camera path running 7.5/20.0s (38%) pos=... yaw=... pitch=...
-valheim-cli cli_camera_stop      # stop where it is
+# Before shooting: a dry run that lists every stretch of the curve within 1.5 m
+# of terrain, rocks or pieces (and any stretch over unloaded ground), then add
+# road-centre waypoints only there and check again until it is clear.
+valheim-cli cli_camera_path 40 5000,95,-5380 5080,92,-5400 5160,90,-5420 5240,95,-5400 --pitch 25 --check 1.5
+#   OK: camera path check (dry run, the camera did not move) waypoints=4 length=246.1m clearance=1.50m samples=247 ... clip_stretches=1 unloaded_stretches=0 result=clips; u is the spline parameter ...
+#   CLIP u=1.412..1.733 s=110.2..135.0m samples=25 from=... to=... closest u=1.580 s=123.0m at=... collider=rock4_coast_frac dist=0.00 colliders=rock4_coast_frac,terrain
+# A clean shot: despawn hostile creatures and remove drops and corpses within
+# 40 m of the path at the start and every frame, with natural spawning paused.
+valheim-cli cli_camera_path 40 5000,95,-5380 5080,92,-5400 5160,90,-5420 5240,95,-5400 --pitch 25 --clean --nospawn
+# Fly past a point, always looking at it; start from where the camera is, and
+# leave the player standing where it is.
+valheim-cli cli_camera_path 20 5200,90,-5450 --from-here --look 5136,66,-5408 --no-carry
+# End next to the next shot: put the player on the ground under the camera's end.
+valheim-cli cli_camera_path 30 5240,95,-5400 5320,92,-5380 --pitch 20 --carry end
+valheim-cli cli_camera_status    # OK: camera path running 7.5/20.0s (38%) pos=... carry=start clean=40m nospawn=on cleaned creatures=1 ... player=carried ...
+valheim-cli cli_camera_stop      # stop where it is (a carried player is put back)
+valheim-cli cli_camera_clean 80  # one-off: hostile creatures, drops and corpses within 80 m of the camera
 valheim-cli cli_hud hide         # Ctrl+F3: the HUD, crosshair and hover text go; cli_hud show brings them back
 ```
 
@@ -157,6 +172,44 @@ valheim-cli cli_hud hide         # Ctrl+F3: the HUD, crosshair and hover text go
   (default 8), or at per-waypoint `@` look points (on every waypoint),
   one fixed `--look` target, or the path's heading at a fixed `--pitch`
   (positive looks down).
+- Both moves take `[--carry [start|end]] [--no-carry] [--check [m]] [--clean [m]] [--nospawn]`:
+  - `--carry` takes the local player along: the game loads zones around the
+    player, never around a free-fly camera, so a path that leaves the loaded
+    area would fly into bare terrain. Paths carry by default (`--no-carry`
+    opts out); arcs stay near their focus and carry only with `--carry`.
+    While carried the player is put at the camera every frame, its renderers
+    and lights are off on this machine (other players still see it), and it
+    is in debug fly (no gravity, no fall height, no damage), ghost mode
+    (creatures ignore it) and god mode. When the move ends, is stopped or is
+    replaced by a move without carry, the player goes back where it stood
+    (`start`, the default) or onto the dry solid ground under the camera's
+    end (`end`; the start if there is none), and every one of those flags
+    goes back to what it was. When the start has unloaded meanwhile (a long
+    path) the return is the game's distant teleport: the screen fades to the
+    loading screen for a few seconds after the shot, the zones at the camera's
+    end unload, and the flags come back once the player lands. `--carry end`
+    keeps the player, and the loaded zones, at the end of the shot instead.
+  - `--check [m]` is a dry run: the camera does not move. It samples the
+    move at most 1 m apart and reports, merged into stretches (runs closer
+    than 2 m are one), where it comes within `m` (default 1) of a solid
+    collider of the game's solid layers (terrain, rocks and static solids,
+    small solids, pieces; `dist=0.00` means inside one), and where the ground or
+    its objects are not loaded, since only loaded colliders can be checked.
+    Each line gives the parameter range (`u`, the spline parameter, for a
+    path; `deg`, the bearing offset, for an arc), the distance along the
+    move, the end positions, and the closest sample with its collider.
+    `result=clear` only when nothing clips and nothing was unloaded.
+  - `--clean [m]` despawns hostile creatures (no corpse, no loot) and removes
+    item drops and corpses within `m` (default 40) of the move (an arc: also
+    of its focus) when it starts, then creatures and drops every frame.
+  - `--nospawn` pauses the game's natural spawning for the move (the flag the
+    vanilla `nospawn` command sets, checked by biome spawns, spawn points and
+    spawner structures) and restores it after. It is this game's flag: on a
+    game it hosts it pauses every spawner, on a client joined to a server
+    only the spawners of the zones that client owns.
+- `cli_camera_clean [radius] [x y z] [--all]`: one-off clean within `radius`
+  (default 60) of `x y z` or the camera. `--all` also removes creatures that
+  are not hostile (deer); tamed creatures, bosses and players always stay.
 - `cli_camera_stop`, `cli_camera_status`, `cli_hud [hide|show|toggle]`.
 
 ## Know What You Are Testing

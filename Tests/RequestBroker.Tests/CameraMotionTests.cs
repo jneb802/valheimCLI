@@ -308,6 +308,223 @@ public class CameraMotionTests
         Assert.False(string.IsNullOrEmpty(error));
     }
 
+    [Fact]
+    public void PathCarriesByDefaultAndArcOnlyWhenAsked()
+    {
+        Assert.True(CameraPathRequest.TryParse(Args("cli_camera_path 10 1,2,3 4,5,6"), out CameraPathRequest p, out _));
+        Assert.Equal(CameraCarry.Start, p.Options.Carry);
+        Assert.Null(p.Options.Check);
+        Assert.Null(p.Options.Clean);
+        Assert.False(p.Options.NoSpawn);
+
+        Assert.True(CameraPathRequest.TryParse(Args("cli_camera_path 10 1,2,3 4,5,6 --no-carry"), out p, out _));
+        Assert.Equal(CameraCarry.Off, p.Options.Carry);
+        Assert.True(CameraPathRequest.TryParse(Args("cli_camera_path 10 1,2,3 --carry end 4,5,6"), out p, out _));
+        Assert.Equal(CameraCarry.End, p.Options.Carry);
+        Assert.Equal(2, p.Points.Count); // "end" is the carry's value; the next token is a waypoint again
+
+        Assert.True(CameraArcRequest.TryParse(Args("cli_camera_arc 20 10"), out CameraArcRequest a, out _));
+        Assert.Equal(CameraCarry.Off, a.Options.Carry);
+        Assert.True(CameraArcRequest.TryParse(Args("cli_camera_arc 20 10 --carry"), out a, out _));
+        Assert.Equal(CameraCarry.Start, a.Options.Carry);
+        Assert.True(CameraArcRequest.TryParse(Args("cli_camera_arc 20 10 1 2 3 --carry start --swing"), out a, out _));
+        Assert.Equal(CameraCarry.Start, a.Options.Carry);
+        Assert.True(a.Swing);
+    }
+
+    [Fact]
+    public void CheckCleanAndNospawnTakeOptionalValues()
+    {
+        Assert.True(CameraPathRequest.TryParse(Args("cli_camera_path 10 1,2,3 4,5,6 --check"), out CameraPathRequest p, out _));
+        Assert.Equal(1.0, p.Options.Check);
+        Assert.True(CameraPathRequest.TryParse(Args("cli_camera_path 10 --check 2.5 1,2,3 4,5,6 --clean --nospawn"), out p, out _));
+        Assert.Equal(2.5, p.Options.Check);
+        Assert.Equal(40, p.Options.Clean);
+        Assert.True(p.Options.NoSpawn);
+        Assert.Equal(2, p.Points.Count);
+        Assert.True(CameraPathRequest.TryParse(Args("cli_camera_path 10 1,2,3 4,5,6 --clean 120"), out p, out _));
+        Assert.Equal(120, p.Options.Clean);
+
+        Assert.True(CameraArcRequest.TryParse(Args("cli_camera_arc 20 10 --check 0.5 --clean 30 --nospawn --linear"), out CameraArcRequest a, out _));
+        Assert.Equal(0.5, a.Options.Check);
+        Assert.Equal(30, a.Options.Clean);
+        Assert.True(a.Options.NoSpawn);
+        Assert.True(a.Linear);
+        Assert.Equal("carry=off clean=30m nospawn=on", a.Options.Describe());
+    }
+
+    [Theory]
+    [InlineData("cli_camera_path 10 1,2,3 4,5,6 --carry --no-carry")]
+    [InlineData("cli_camera_path 10 1,2,3 4,5,6 --no-carry --carry")]
+    [InlineData("cli_camera_path 10 1,2,3 4,5,6 --check 0")]
+    [InlineData("cli_camera_path 10 1,2,3 4,5,6 --check 25")]
+    [InlineData("cli_camera_path 10 1,2,3 4,5,6 --clean -1")]
+    [InlineData("cli_camera_path 10 1,2,3 4,5,6 --clean 5000")]
+    [InlineData("cli_camera_arc 20 10 --carry --no-carry")]
+    [InlineData("cli_camera_arc 20 10 --check 0")]
+    [InlineData("cli_camera_arc 20 10 --carry middle")]
+    public void MoveOptionsRefuseBadInput(string line)
+    {
+        bool ok = line.StartsWith("cli_camera_arc", StringComparison.Ordinal)
+            ? CameraArcRequest.TryParse(Args(line), out _, out string error)
+            : CameraPathRequest.TryParse(Args(line), out _, out error);
+        Assert.False(ok);
+        Assert.StartsWith("ERROR", error);
+    }
+
+    [Fact]
+    public void CleanRequestTakesRadiusCentreAndAll()
+    {
+        Assert.True(CameraCleanRequest.TryParse(Args("cli_camera_clean"), out CameraCleanRequest r, out _));
+        Assert.Equal(CameraCleanRequest.DefaultRadius, r.Radius);
+        Assert.Null(r.Centre);
+        Assert.False(r.All);
+        Assert.True(CameraCleanRequest.TryParse(Args("cli_camera_clean 80"), out r, out _));
+        Assert.Equal(80, r.Radius);
+        Assert.True(CameraCleanRequest.TryParse(Args("cli_camera_clean 5136 66 -5408 --all"), out r, out _));
+        Assert.Equal(CameraCleanRequest.DefaultRadius, r.Radius);
+        AssertNear(new CameraVector(5136, 66, -5408), r.Centre!.Value);
+        Assert.True(r.All);
+        Assert.True(CameraCleanRequest.TryParse(Args("cli_camera_clean 30 1 2 3"), out r, out _));
+        Assert.Equal(30, r.Radius);
+        AssertNear(new CameraVector(1, 2, 3), r.Centre!.Value);
+    }
+
+    [Theory]
+    [InlineData("cli_camera_clean 1 2")]
+    [InlineData("cli_camera_clean 1 2 3 4 5")]
+    [InlineData("cli_camera_clean 0")]
+    [InlineData("cli_camera_clean 2000")]
+    [InlineData("cli_camera_clean --bogus")]
+    [InlineData("cli_camera_clean 40 x")]
+    public void CleanRequestRefusesBadInput(string line)
+    {
+        Assert.False(CameraCleanRequest.TryParse(Args(line), out _, out string error));
+        Assert.False(string.IsNullOrEmpty(error));
+    }
+
+    [Fact]
+    public void PathSamplesAreEvenAndAtMostTheStepApart()
+    {
+        CameraVector[] points = { new(0, 40, 0), new(30, 42, 10), new(60, 40, 0), new(90.5, 41, -12) };
+        CameraPath path = new(points, null, null, null, 8, linear: false);
+        List<CameraMoveSample> samples = path.Samples(1.0);
+        Assert.Equal(Math.Ceiling(path.Length), samples.Count - 1);
+        AssertNear(points[0], samples[0].Position);
+        AssertNear(points[^1], samples[^1].Position, 1e-6);
+        Assert.Equal(0, samples[0].Parameter, 9);
+        Assert.Equal(points.Length - 1, samples[^1].Parameter, 9);
+        for (int i = 1; i < samples.Count; i++)
+        {
+            Assert.True(samples[i].Parameter > samples[i - 1].Parameter, "the spline parameter only grows");
+            double chord = CameraVector.Distance(samples[i].Position, samples[i - 1].Position);
+            Assert.True(chord <= 1.0 + 1e-6, $"step {chord} over 1 m");
+            Assert.Equal(path.Length / (samples.Count - 1), samples[i].Along - samples[i - 1].Along, 9);
+        }
+
+        Assert.Equal(1, CameraMoveSample.Steps(0, 1));
+        Assert.Equal(3, CameraMoveSample.Steps(3, 1));
+        Assert.Equal(4, CameraMoveSample.Steps(3.01, 1));
+    }
+
+    [Fact]
+    public void ArcSamplesCoverTheWholeSwing()
+    {
+        CameraArc arc = new(new CameraVector(0, 0, 0), 50, 10, 0, 30, swing: true, linear: false);
+        List<CameraMoveSample> samples = arc.Samples(1.0);
+        Assert.Equal(-30, samples[0].Parameter, 9);
+        Assert.Equal(30, samples[^1].Parameter, 9);
+        double arcLength = 60 * Math.PI / 180 * 50;
+        Assert.Equal(Math.Ceiling(arcLength), samples.Count - 1);
+        foreach (CameraMoveSample s in samples)
+        {
+            Assert.Equal(50, CameraMath.HorizontalDistance(s.Position, arc.Focus), 6);
+            Assert.Equal(10, s.Position.Y, 9);
+        }
+
+        // Every pose the move takes lies on the sampled stretch of the circle.
+        for (double t = 0; t <= 1; t += 0.01)
+        {
+            Assert.InRange(arc.OffsetAt(t), samples[0].Parameter - 1e-9, samples[^1].Parameter + 1e-9);
+        }
+
+        CameraArc left = new(new CameraVector(0, 0, 0), 50, 10, 0, -20, swing: false, linear: false);
+        List<CameraMoveSample> l = left.Samples(1.0);
+        Assert.Equal(-20, l[0].Parameter, 9);
+        Assert.Equal(0, l[^1].Parameter, 9);
+        AssertNear(left.PositionAt(0), l[^1].Position, 1e-6);
+        AssertNear(left.PositionAt(1), l[0].Position, 1e-6);
+    }
+
+    [Fact]
+    public void NearAnyMeasuresToTheClosestSample()
+    {
+        List<CameraMoveSample> line = new() { new(0, 0, new CameraVector(0, 0, 0)), new(1, 10, new CameraVector(10, 0, 0)) };
+        Assert.True(CameraMoveSample.NearAny(new CameraVector(10, 3, 0), line, 3));
+        Assert.False(CameraMoveSample.NearAny(new CameraVector(5, 4.9, 0), line, 3));
+        Assert.False(CameraMoveSample.NearAny(new CameraVector(0, 0, 0), new List<CameraMoveSample>(), 100));
+    }
+
+    [Fact]
+    public void ClearanceMergesRunsOfOneKindAcrossShortGaps()
+    {
+        List<ClearanceSample> samples = new();
+        // 0..30 m at 1 m: clips at 3-5 and 7 (a 2 m gap: one stretch), at 12 (alone), unloaded
+        // 20-30 with a clip at 24 inside it; 24 is too far from 12 to join that clip stretch.
+        for (int i = 0; i <= 30; i++)
+        {
+            CameraMoveSample s = new(i / 10.0, i, new CameraVector(i, 0, 0));
+            if ((i >= 3 && i <= 5) || i == 7) samples.Add(new ClearanceSample(s, ClearanceKind.Clip, i == 4 ? "rock4_frac" : "terrain", i == 4 ? 0.2 : 0.6));
+            else if (i == 12 || i == 24) samples.Add(new ClearanceSample(s, ClearanceKind.Clip, "piece_wall", 0));
+            else if (i >= 20) samples.Add(new ClearanceSample(s, ClearanceKind.Unloaded));
+            else samples.Add(new ClearanceSample(s, ClearanceKind.Clear));
+        }
+
+        List<ClearanceStretch> stretches = CameraClearance.Merge(samples);
+        Assert.Equal(4, stretches.Count);
+
+        Assert.Equal(ClearanceKind.Clip, stretches[0].Kind);
+        Assert.Equal(3, stretches[0].First.Sample.Along);
+        Assert.Equal(7, stretches[0].Last.Sample.Along);
+        Assert.Equal(4, stretches[0].Samples);
+        Assert.Equal(4, stretches[0].Closest.Sample.Along);
+        Assert.Equal(new[] { "terrain", "rock4_frac" }, stretches[0].Colliders);
+
+        Assert.Equal(12, stretches[1].First.Sample.Along);
+        Assert.Equal(12, stretches[1].Last.Sample.Along);
+
+        // The unloaded run stays one stretch: the clip at 24 is the clips' and leaves only a 2 m gap.
+        Assert.Equal(ClearanceKind.Unloaded, stretches[2].Kind);
+        Assert.Equal(20, stretches[2].First.Sample.Along);
+        Assert.Equal(30, stretches[2].Last.Sample.Along);
+        Assert.Equal(10, stretches[2].Samples);
+
+        Assert.Equal(ClearanceKind.Clip, stretches[3].Kind);
+        Assert.Equal(24, stretches[3].First.Sample.Along);
+
+        string line = CameraClearance.Format(stretches[0], "u");
+        Assert.StartsWith("CLIP u=0.300..0.700 s=3.0..7.0m samples=4 from=3.00,0.00,0.00 to=7.00,0.00,0.00", line);
+        Assert.Contains("closest u=0.400 s=4.0m at=4.00,0.00,0.00 collider=rock4_frac dist=0.20 colliders=terrain,rock4_frac", line);
+        Assert.Equal("UNLOADED u=2.000..3.000 s=20.0..30.0m samples=10 from=20.00,0.00,0.00 to=30.00,0.00,0.00", CameraClearance.Format(stretches[2], "u"));
+    }
+
+    [Fact]
+    public void ClearanceSplitsRunsFurtherApartThanTheGap()
+    {
+        List<ClearanceSample> samples = new();
+        foreach (double along in new[] { 0.0, 1.0, 3.5, 4.0 })
+        {
+            samples.Add(new ClearanceSample(new CameraMoveSample(along, along, new CameraVector(along, 0, 0)), ClearanceKind.Clip, "terrain", 0.5));
+        }
+
+        List<ClearanceStretch> stretches = CameraClearance.Merge(samples);
+        Assert.Equal(2, stretches.Count);
+        Assert.Equal(1.0, stretches[0].Last.Sample.Along);
+        Assert.Equal(3.5, stretches[1].First.Sample.Along);
+        Assert.Single(CameraClearance.Merge(samples, mergeGap: 2.5));
+        Assert.Empty(CameraClearance.Merge(new List<ClearanceSample>()));
+    }
+
     private static string[] Args(string line) => line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
     private static double Normalize(double degrees)
