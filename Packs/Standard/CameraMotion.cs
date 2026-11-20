@@ -511,6 +511,7 @@ namespace valheimCLI
 
             request.Seconds = seconds;
             int withLook = 0;
+            bool aheadGiven = false;
             for (int i = 2; i < args.Count; i++)
             {
                 string token = args[i];
@@ -570,6 +571,7 @@ namespace valheimCLI
                         }
 
                         request.LookAhead = number;
+                        aheadGiven = true;
                     }
 
                     continue;
@@ -629,9 +631,9 @@ namespace valheimCLI
             }
 
             int lookModes = (withLook != 0 ? 1 : 0) + (request.Target.HasValue ? 1 : 0) + (request.Pitch.HasValue ? 1 : 0);
-            if (lookModes > 1)
+            if (lookModes > 1 || (lookModes == 1 && aheadGiven))
             {
-                error = "ERROR: choose one look: per-waypoint @look points, --look x,y,z, or --pitch along the path";
+                error = "ERROR: choose one look: per-waypoint @look points, --look x,y,z, --pitch along the path, or --ahead m along the path";
                 return false;
             }
 

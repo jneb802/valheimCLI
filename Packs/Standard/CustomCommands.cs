@@ -479,7 +479,6 @@ namespace valheimCLI
                     return;
                 }
 
-                CinematicCamera.StopForManualPose();
                 FreeFlyPose(new Vector3(camX, camY, camZ), new Vector3(lookX, lookY, lookZ), args.Context.AddString);
             }, isCheat: true);
 
@@ -2071,27 +2070,9 @@ namespace valheimCLI
                 return;
             }
 
-            direction.Normalize();
-            if (!camera.m_freeFly)
-            {
-                camera.ToggleFreeFly();
-            }
-
-            camera.SetFreeFlySmoothness(0f);
-            camera.m_freeFlyLockon = null;
-            camera.m_freeFlyTarget = null;
-            camera.m_freeFlyVel = Vector3.zero;
-            camera.m_freeFlySavedVel = Vector3.zero;
-
-            float yaw = Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg;
-            float pitch = -Mathf.Asin(Mathf.Clamp(direction.y, -1f, 1f)) * Mathf.Rad2Deg;
-            camera.m_freeFlyYaw = yaw;
-            camera.m_freeFlyPitch = pitch;
-
-            Quaternion rotation = Quaternion.Euler(pitch, yaw, 0f);
-            camera.m_freeFlyRef = rotation;
-            camera.transform.position = position;
-            camera.transform.rotation = rotation;
+            CinematicCamera.StopForManualPose();
+            CinematicCamera.TakeFreeFly(camera);
+            CinematicCamera.SetPose(camera, position, target, out float yaw, out float pitch);
             addOutput($"OK: freefly camera at {position.x:F1},{position.y:F1},{position.z:F1} yaw={yaw:F1} pitch={pitch:F1}");
         }
 

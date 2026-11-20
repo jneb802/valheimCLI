@@ -275,11 +275,14 @@ public class CameraMotionTests
         Assert.NotNull(r.Looks);
         AssertNear(new CameraVector(9, 10, 11), r.Looks![1]);
 
-        Assert.True(CameraPathRequest.TryParse(Args("cli_camera_path 10 6,7,8 --from-here --look 1,2,3 --ahead 0 --linear"), out r, out _));
+        Assert.True(CameraPathRequest.TryParse(Args("cli_camera_path 10 6,7,8 --from-here --look 1,2,3 --linear"), out r, out _));
         Assert.True(r.FromHere);
         Assert.True(r.Linear);
-        Assert.Equal(0, r.LookAhead);
+        Assert.Equal(8, r.LookAhead);
         AssertNear(new CameraVector(1, 2, 3), r.Target!.Value);
+
+        Assert.True(CameraPathRequest.TryParse(Args("cli_camera_path 10 1,2,3 6,7,8 --ahead 0"), out r, out _));
+        Assert.Equal(0, r.LookAhead);
     }
 
     [Theory]
@@ -297,6 +300,8 @@ public class CameraMotionTests
     [InlineData("cli_camera_path 10 1,2,3 4,5,6 --look")]
     [InlineData("cli_camera_path 10 1,2,3 4,5,6 --fast")]
     [InlineData("cli_camera_path 10 4,5,6@1,1,1 --from-here")]
+    [InlineData("cli_camera_path 10 1,2,3 4,5,6 --look 1,1,1 --ahead 20")]
+    [InlineData("cli_camera_path 10 1,2,3 4,5,6 --pitch 20 --ahead 20")]
     public void PathRequestRefusesBadInput(string line)
     {
         Assert.False(CameraPathRequest.TryParse(Args(line), out _, out string error));

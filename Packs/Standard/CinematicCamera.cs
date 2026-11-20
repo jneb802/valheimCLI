@@ -17,7 +17,6 @@ namespace valheimCLI
     public static class CinematicCamera
     {
         public const string HarmonyId = "valheimCLI.standard.camera";
-        private static readonly int FocusMask = LayerMask.GetMask("Default", "static_solid", "terrain", "vehicle", "piece", "viewblock");
         private static Harmony? _harmony;
         private static Move? _move;
         private static string _last = "idle";
@@ -127,7 +126,7 @@ namespace valheimCLI
             {
                 focus = From(view.position + (view.forward * (float)request.Distance.Value));
             }
-            else if (Physics.Raycast(view.position, view.forward, out RaycastHit hit, 5000f, FocusMask))
+            else if (Physics.Raycast(view.position, view.forward, out RaycastHit hit, 5000f, LayerMask.GetMask("Default", "static_solid", "terrain", "vehicle", "piece", "viewblock", "Water")))
             {
                 focus = From(hit.point);
             }
@@ -138,7 +137,7 @@ namespace valheimCLI
             }
 
             CameraArc arc = CameraArc.FromCamera(here, focus, request.Radius, request.Height, request.StartBearing, request.Degrees, request.Swing, request.Linear);
-            if (arc.Radius < 0.5)
+            if (!request.Radius.HasValue && arc.Radius < 0.5)
             {
                 output("ERROR: the camera is right above the focus (radius " + arc.Radius.ToString("F2", CultureInfo.InvariantCulture) + " m); give --radius m");
                 return;
@@ -182,6 +181,12 @@ namespace valheimCLI
         private static bool TryCamera(Action<string> output, out GameCamera camera)
         {
             camera = GameCamera.instance;
+            if (_harmony == null)
+            {
+                output("ERROR: camera moves are unavailable: the frame hook on GameCamera.UpdateFreeFly did not install (see the BepInEx log)");
+                return false;
+            }
+
             if (camera == null)
             {
                 output("ERROR: GameCamera not available");
@@ -194,13 +199,42 @@ namespace valheimCLI
         private static void Begin(GameCamera camera, Move move)
         {
             if (_move != null) _last = _move.Kind + " replaced by a new move";
+            TakeFreeFly(camera);
+            _move = move;
+            Apply(camera, move, 0);
+        }
+
+        /// <summary>Free-fly on, no smoothing, lock-on, target or drift: the state every scripted pose starts from.</summary>
+        internal static void TakeFreeFly(GameCamera camera)
+        {
             if (!camera.m_freeFly) camera.ToggleFreeFly();
             camera.SetFreeFlySmoothness(0f);
             camera.m_freeFlyLockon = null;
             camera.m_freeFlyTarget = null;
+            camera.m_freeFlyVel = Vector3.zero;
             camera.m_freeFlySavedVel = Vector3.zero;
-            _move = move;
-            Apply(camera, move, 0);
+        }
+
+        /// <summary>
+        /// Writes a free-fly pose: the position, and the yaw/pitch the free-fly update derives its
+        /// rotation from every frame (a bare LookAt would be overwritten on the next LateUpdate).
+        /// When the target coincides with the position the camera keeps its current heading.
+        /// </summary>
+        internal static void SetPose(GameCamera camera, Vector3 position, Vector3 target, out float yaw, out float pitch)
+        {
+            if (CameraMath.TryYawPitch(From(target) - From(position), out double y, out double p))
+            {
+                camera.m_freeFlyYaw = (float)y;
+                camera.m_freeFlyPitch = (float)p;
+            }
+
+            yaw = camera.m_freeFlyYaw;
+            pitch = camera.m_freeFlyPitch;
+            camera.m_freeFlyVel = Vector3.zero;
+            Quaternion rotation = Quaternion.Euler(pitch, yaw, 0f);
+            camera.m_freeFlyRef = rotation;
+            camera.transform.position = position;
+            camera.transform.rotation = rotation;
         }
 
         private static void AfterUpdateFreeFly(GameCamera __instance, float dt)
@@ -225,21 +259,7 @@ namespace valheimCLI
         private static void Apply(GameCamera camera, Move move, double t)
         {
             t = CameraMath.Clamp01(t);
-            CameraVector position = move.Position(t);
-            CameraVector look = move.Look(t);
-            if (!CameraMath.TryYawPitch(look - position, out double yaw, out double pitch))
-            {
-                yaw = camera.m_freeFlyYaw;
-                pitch = camera.m_freeFlyPitch;
-            }
-
-            camera.m_freeFlyYaw = (float)yaw;
-            camera.m_freeFlyPitch = (float)pitch;
-            camera.m_freeFlyVel = Vector3.zero;
-            Quaternion rotation = Quaternion.Euler((float)pitch, (float)yaw, 0f);
-            camera.m_freeFlyRef = rotation;
-            camera.transform.position = To(position);
-            camera.transform.rotation = rotation;
+            SetPose(camera, To(move.Position(t)), To(move.Look(t)), out _, out _);
         }
 
         private static void Finish(string how)
