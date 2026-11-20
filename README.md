@@ -124,7 +124,7 @@ every frame (after its own free-fly input, so the mouse does not fight it),
 with sine ease in/out at both ends. The command answers at once; poll
 `cli_camera_status`. When a move ends the camera stays at its final pose in
 free-fly; `cli_freefly_release` returns it to the player (and stops a running
-move, as `cli_freefly_pose` does). Turning free-fly off ends the move.
+move, as `cli_freefly_pose` and `cli_capture` do). Turning free-fly off ends the move.
 
 ```bash
 # Arc around what the camera centre looks at now (the ground it hits): frame a
