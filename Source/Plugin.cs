@@ -57,6 +57,7 @@ namespace valheimCLI
             ItemInteractionCommands.Register();
             EncounterValidationCommands.Register();
             CreatureVisualCommands.Register();
+            ParticleDiagnostics.Register();
             NavigationCommands.Register();
             EnvironmentCommands.Register();
             BossBalanceCommands.Register(gameObject);
